@@ -33,7 +33,7 @@ function mainWorldContentScriptFix(): Plugin {
           outDir: resolve(distDir, 'assets'),
           emptyOutDir: false,
           lib: {
-            entry: resolve(process.cwd(), 'src/injected/interceptor.ts'),
+            entry: resolve(process.cwd(), 'src', 'injected', 'interceptor.ts'),
             name: 'YTLangAIMainInterceptor',
             formats: ['iife'],
             fileName: () => 'interceptor-main.js'
@@ -46,12 +46,15 @@ function mainWorldContentScriptFix(): Plugin {
         }
       });
 
+      // Manifest V3 requires forward slashes for extension web resource paths
       mainEntry.js = ['assets/interceptor-main.js'];
       writeFileSync(manifestPath, JSON.stringify(builtManifest, null, 2));
 
       for (const oldFile of loaderFiles) {
         if (oldFile.includes('interceptor.ts-loader-')) {
-          rmSync(resolve(distDir, oldFile), { force: true });
+          // Normalize oldFile path segments to work reliably across Unix & Windows
+          const targetFile = resolve(distDir, ...oldFile.split(/[/\\]/));
+          rmSync(targetFile, { force: true });
         }
       }
     }

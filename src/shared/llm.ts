@@ -317,20 +317,31 @@ export async function requestAIExplanation(
     headers.Authorization = `Bearer ${apiKey}`;
   }
 
-  const body = {
-    model,
-    temperature: 0.2,
-    response_format: { type: 'json_object' },
-    messages: buildAIExplainMessages(params)
+  const sendRequest = async (withResponseFormat: boolean) => {
+    const requestPayload: Record<string, unknown> = {
+      model,
+      max_tokens: 1200,
+      temperature: 0.2,
+      messages: buildAIExplainMessages(params)
+    };
+    if (withResponseFormat) {
+      requestPayload.response_format = { type: 'json_object' };
+    }
+    return fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(requestPayload)
+    });
   };
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body)
-  });
+  let response = await sendRequest(true);
+  let responseText = await response.text();
 
-  const responseText = await response.text();
+  if (!response.ok && response.status === 400 && responseText.toLowerCase().includes('response_format')) {
+    response = await sendRequest(false);
+    responseText = await response.text();
+  }
+
   if (!response.ok) {
     const errorMessage = extractHttpErrorMessage(responseText, response.statusText);
     throw new Error(`HTTP ${response.status} (${endpoint}, model=${model}): ${errorMessage}`);

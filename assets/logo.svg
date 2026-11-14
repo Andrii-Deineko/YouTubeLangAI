@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e2433" />
+      <stop offset="50%" stop-color="#131824" />
+      <stop offset="100%" stop-color="#0b0e17" />
+    </linearGradient>
+
+    <!-- Border Subtle Gradient -->
+    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8" stop-opacity="0.4" />
+      <stop offset="40%" stop-color="#ffffff" stop-opacity="0.15" />
+      <stop offset="100%" stop-color="#fbbf24" stop-opacity="0.3" />
+    </linearGradient>
+
+    <!-- Indigo Play Button Gradient -->
+    <linearGradient id="playGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a5b4fc" />
+      <stop offset="35%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#4f46e5" />
+    </linearGradient>
+
+    <!-- Amber Gold Gradient for AI Sparkle & Translation -->
+    <linearGradient id="amberGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fde047" />
+      <stop offset="50%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+
+    <!-- Active Token Gradient -->
+    <linearGradient id="tokenGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+
+    <!-- Ambient Glows -->
+    <radialGradient id="indigoGlow" cx="45%" cy="40%" r="55%">
+      <stop offset="0%" stop-color="#6366f1" stop-opacity="0.3" />
+      <stop offset="100%" stop-color="#6366f1" stop-opacity="0" />
+    </radialGradient>
+
+    <radialGradient id="sparkleGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fbbf24" stop-opacity="0.4" />
+      <stop offset="100%" stop-color="#fbbf24" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Subtle Drop Shadows -->
+    <filter id="shadowFilter" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.5" />
+    </filter>
+
+    <filter id="sparkleGlowFilter" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="0" stdDeviation="2.5" flood-color="#f59e0b" flood-opacity="0.75" />
+    </filter>
+  </defs>
+
+  <!-- Container Rounded Square -->
+  <rect
+    x="4"
+    y="4"
+    width="120"
+    height="120"
+    rx="28"
+    fill="url(#bgGrad)"
+    stroke="url(#borderGrad)"
+    stroke-width="1.5"
+  />
+
+  <!-- Ambient Backdrop Lights -->
+  <circle cx="56" cy="52" r="42" fill="url(#indigoGlow)" />
+  <circle cx="96" cy="28" r="22" fill="url(#sparkleGlow)" />
+
+  <!-- YouTube Play Triangle (with shadow) -->
+  <path
+    d="M 49 33.5 C 46.2 31.9 43 33.9 43 37.2 L 43 66.8 C 43 70.1 46.2 72.1 49 70.5 L 77.5 55.7 C 80.3 54.1 80.3 50.9 77.5 49.3 Z"
+    fill="url(#playGrad)"
+    filter="url(#shadowFilter)"
+  />
+
+  <!-- Play Button Highlight Sheen -->
+  <path
+    d="M 49 33.5 C 46.2 31.9 43 33.9 43 37.2 L 43 51 C 52 48 66 48 77.5 49.3 Z"
+    fill="#ffffff"
+    fill-opacity="0.18"
+  />
+
+  <!-- Subtitle Lines (Bilingual HUD representation) -->
+  <g filter="url(#shadowFilter)">
+    <!-- Primary Subtitle Line: Highlighted Active Word + Sentence -->
+    <rect x="27" y="81" width="31" height="7" rx="3.5" fill="url(#tokenGrad)" />
+    <rect x="62" y="81" width="39" height="7" rx="3.5" fill="#f8fafc" fill-opacity="0.9" />
+
+    <!-- Translated Subtitle Line: Secondary Language (Warm Amber) -->
+    <rect x="38" y="93" width="52" height="6" rx="3" fill="url(#amberGrad)" fill-opacity="0.9" />
+  </g>
+
+  <!-- Primary AI Sparkle (4-point Star) -->
+  <path
+    d="M 96 17 C 96 23.5 101.5 28 107 28 C 101.5 28 96 32.5 96 39 C 96 32.5 90.5 28 85 28 C 90.5 28 96 23.5 96 17 Z"
+    fill="url(#amberGrad)"
+    filter="url(#sparkleGlowFilter)"
+  />
+
+  <!-- Secondary AI Sparkle (Small Accent) -->
+  <path
+    d="M 109 37 C 109 39.8 111.2 42 114 42 C 111.2 42 109 44.2 109 47 C 109 44.2 106.8 42 104 42 C 106.8 42 109 39.8 109 37 Z"
+    fill="#fde047"
+    fill-opacity="0.9"
+  />
+</svg>

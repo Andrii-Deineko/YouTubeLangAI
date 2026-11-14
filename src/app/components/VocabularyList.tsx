@@ -179,7 +179,11 @@ export function VocabularyList({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search word, translation, sentence, video..."
-            className="w-full rounded-xl border border-white/10 bg-slate-900/80 py-2 pl-9 pr-3 text-xs text-slate-100 placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
+            style={{
+              backgroundColor: 'var(--ytai-surface)',
+              borderColor: 'var(--ytai-border)'
+            }}
+            className="w-full rounded-xl border py-2 pl-9 pr-3 text-xs text-slate-100 placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
           />
         </div>
 
@@ -190,10 +194,15 @@ export function VocabularyList({
                 key={tab}
                 type="button"
                 onClick={() => setFilter(tab)}
+                style={
+                  filter === tab
+                    ? { backgroundColor: 'var(--ytai-accent)', color: '#ffffff' }
+                    : undefined
+                }
                 className={`rounded-lg px-2.5 py-1 text-[11px] font-medium capitalize transition ${
                   filter === tab
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-900 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                    ? 'shadow-sm'
+                    : 'bg-slate-900/80 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
                 }`}
               >
                 {tab}
@@ -207,7 +216,13 @@ export function VocabularyList({
       </div>
 
       {/* Export Toolbar */}
-      <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-white/10 bg-slate-900/60 p-2">
+      <div
+        className="flex flex-wrap items-center gap-1.5 rounded-xl border p-2 transition-colors"
+        style={{
+          backgroundColor: 'var(--ytai-surface)',
+          borderColor: 'var(--ytai-border)'
+        }}
+      >
         <button
           type="button"
           disabled={filteredCards.length === 0}
@@ -271,7 +286,13 @@ export function VocabularyList({
 
       {/* Card Items */}
       {filteredCards.length === 0 ? (
-        <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-6 text-center text-xs text-slate-400">
+        <div
+          className="rounded-2xl border p-6 text-center text-xs text-slate-400"
+          style={{
+            backgroundColor: 'var(--ytai-surface)',
+            borderColor: 'var(--ytai-border)'
+          }}
+        >
           No vocabulary cards match your filter.
         </div>
       ) : (
@@ -281,7 +302,11 @@ export function VocabularyList({
             return (
               <div
                 key={card.id}
-                className="flex gap-3 rounded-xl border border-white/10 bg-slate-900/70 p-3 transition hover:border-white/20"
+                style={{
+                  backgroundColor: 'var(--ytai-surface)',
+                  borderColor: 'var(--ytai-border)'
+                }}
+                className="flex gap-3 rounded-xl border p-3 transition hover:border-white/25"
               >
                 {card.screenshotBase64 && (
                   <img

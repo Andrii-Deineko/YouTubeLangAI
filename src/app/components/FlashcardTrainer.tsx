@@ -190,8 +190,14 @@ export function FlashcardTrainer({
 
   if (cards.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-2xl border border-white/10 bg-slate-900/60 p-8 text-center">
-        <Sparkles className="h-10 w-10 text-indigo-400" />
+      <div
+        className="flex flex-col items-center justify-center rounded-2xl border p-8 text-center"
+        style={{
+          backgroundColor: 'var(--ytai-surface)',
+          borderColor: 'var(--ytai-border)'
+        }}
+      >
+        <Sparkles className="h-10 w-10" style={{ color: 'var(--ytai-accent)' }} />
         <h2 className="mt-3 text-base font-semibold text-white">
           Your vocabulary is empty
         </h2>
@@ -206,7 +212,13 @@ export function FlashcardTrainer({
 
   if (!activeCard) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-2xl border border-emerald-500/20 bg-slate-900/60 p-8 text-center">
+      <div
+        className="flex flex-col items-center justify-center rounded-2xl border p-8 text-center"
+        style={{
+          backgroundColor: 'var(--ytai-surface)',
+          borderColor: 'var(--ytai-border)'
+        }}
+      >
         <CheckCircle2 className="h-11 w-11 text-emerald-400" />
         <h2 className="mt-3 text-lg font-semibold text-white">
           All caught up!
@@ -220,7 +232,8 @@ export function FlashcardTrainer({
         <button
           type="button"
           onClick={startPracticeAll}
-          className="mt-4 flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500"
+          style={{ backgroundColor: 'var(--ytai-accent)' }}
+          className="mt-4 flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold text-white shadow transition hover:opacity-90"
         >
           <RotateCcw className="h-3.5 w-3.5" />
           <span>Practice all cards anyway</span>
@@ -266,7 +279,13 @@ export function FlashcardTrainer({
       </div>
 
       {/* Card Surface */}
-      <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-900/80 shadow-xl">
+      <div
+        className="overflow-hidden rounded-2xl border shadow-xl transition-colors"
+        style={{
+          backgroundColor: 'var(--ytai-surface)',
+          borderColor: 'var(--ytai-border)'
+        }}
+      >
         {activeCard.screenshotBase64 && (
           <div className="relative h-36 w-full overflow-hidden bg-black">
             <img
@@ -298,6 +317,7 @@ export function FlashcardTrainer({
                 target="_blank"
                 rel="noreferrer"
                 className="flex shrink-0 items-center gap-1 text-indigo-400 hover:text-indigo-300"
+                style={{ color: 'var(--ytai-accent)' }}
               >
                 <ExternalLink className="h-3 w-3" />
                 <span>YouTube ({Math.floor(activeCard.timestampSec)}s)</span>
@@ -318,7 +338,8 @@ export function FlashcardTrainer({
             <button
               type="button"
               onClick={() => setRevealed(true)}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow transition hover:bg-indigo-500"
+              style={{ backgroundColor: 'var(--ytai-accent)' }}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow transition hover:opacity-90"
             >
               <Eye className="h-4 w-4" />
               <span>Показать ответ (Space)</span>

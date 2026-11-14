@@ -4,6 +4,15 @@ export interface LLMConfig {
   model: string;
 }
 
+export type ThemeId =
+  | 'midnight-glass'
+  | 'cinema-transparent'
+  | 'nordic-frost'
+  | 'warm-espresso'
+  | 'emerald-noir';
+
+export type SubtitleScale = 'sm' | 'md' | 'lg' | 'xl';
+
 export interface UserSettings {
   enabled: boolean;
   nativeLang: string;
@@ -12,6 +21,10 @@ export interface UserSettings {
   autoPauseAfterCue: boolean;
   autoPauseOnWordClick: boolean;
   subtitleFontSize: number;
+  subtitleScale: SubtitleScale;
+  theme: ThemeId;
+  overlayOpacity: number;
+  fallbackModel: string;
   ankiDeckName: string;
   ankiConnectUrl: string;
   llm: LLMConfig;
@@ -25,6 +38,10 @@ export const DEFAULT_SETTINGS: UserSettings = {
   autoPauseAfterCue: false,
   autoPauseOnWordClick: true,
   subtitleFontSize: 20,
+  subtitleScale: 'md',
+  theme: 'midnight-glass',
+  overlayOpacity: 0.85,
+  fallbackModel: '',
   ankiDeckName: 'YouTube Lang AI',
   ankiConnectUrl: 'http://127.0.0.1:8765',
   llm: {

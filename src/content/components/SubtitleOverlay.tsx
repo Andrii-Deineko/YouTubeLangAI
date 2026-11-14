@@ -1,5 +1,7 @@
 import { useState, type MouseEvent, type ReactElement } from 'react';
+import type { SubtitleScale } from '../../types/settings';
 import type { SubtitleCue, WordToken } from '../../types/subtitles';
+import { getSubtitleFontSizes } from '../../shared/themes';
 
 export interface WordSelectionPayload {
   target: string;
@@ -14,7 +16,9 @@ interface SubtitleOverlayProps {
   showDualSubtitles: boolean;
   activeListeningMode: boolean;
   altPressed: boolean;
-  fontSize: number;
+  fontSize?: number;
+  scale?: SubtitleScale;
+  overlayOpacity?: number;
   selectedTarget: string | null;
   onSelectTarget: (selection: WordSelectionPayload) => void;
 }
@@ -26,6 +30,8 @@ export function SubtitleOverlay({
   activeListeningMode,
   altPressed,
   fontSize,
+  scale,
+  overlayOpacity,
   selectedTarget,
   onSelectTarget
 }: SubtitleOverlayProps): ReactElement | null {
@@ -34,6 +40,7 @@ export function SubtitleOverlay({
   if (!primaryCue) return null;
 
   const isBlurred = activeListeningMode && !hovered && !altPressed;
+  const fontSizes = getSubtitleFontSizes(scale, fontSize);
 
   const handleTokenClick = (e: MouseEvent<HTMLSpanElement>, token: WordToken): void => {
     e.stopPropagation();
@@ -96,7 +103,16 @@ export function SubtitleOverlay({
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-16 z-10 flex justify-center px-4">
       <div
-        className="pointer-events-auto max-w-[86%] rounded-xl border border-white/10 bg-slate-950/80 px-4 py-2.5 text-center shadow-2xl backdrop-blur-md transition-opacity"
+        className="pointer-events-auto max-w-[86%] rounded-xl px-4 py-2.5 text-center shadow-2xl transition-all select-none"
+        style={{
+          backgroundColor: `rgba(var(--ytai-bg-rgb), var(--ytai-bg-opacity, ${overlayOpacity ?? 0.85}))`,
+          borderColor: 'var(--ytai-border)',
+          borderWidth: '1px',
+          borderStyle: 'solid',
+          backdropFilter: 'blur(var(--ytai-backdrop-blur, 12px))',
+          WebkitBackdropFilter: 'blur(var(--ytai-backdrop-blur, 12px))',
+          textShadow: 'var(--ytai-text-shadow)'
+        }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         onMouseUp={handleMouseUp}
@@ -104,20 +120,29 @@ export function SubtitleOverlay({
         onClick={(e) => e.stopPropagation()}
       >
         {activeListeningMode && isBlurred && (
-          <div className="mb-1 text-[11px] leading-tight tracking-wide text-amber-300/80 select-none">
+          <div
+            className="mb-1 text-[11px] leading-tight tracking-wide font-medium select-none transition-colors"
+            style={{ color: 'var(--ytai-accent)' }}
+          >
             Active Listening · Hover or hold Alt to reveal
           </div>
         )}
 
         <div
-          className="leading-snug font-medium text-white transition-[filter] duration-150 select-text"
+          className="leading-snug font-medium transition-[filter] duration-150 select-text"
           style={{
-            fontSize: `${fontSize}px`,
+            color: 'var(--ytai-text-primary)',
+            fontSize: `${fontSizes.primary}px`,
+            textShadow: 'var(--ytai-text-shadow)',
             filter: isBlurred ? 'blur(6px)' : 'blur(0px)'
           }}
         >
-          {primaryCue.tokens.map((token) =>
-            token.isWord ? (
+          {primaryCue.tokens.map((token) => {
+            const isSelected =
+              Boolean(selectedTarget) &&
+              selectedTarget?.toLowerCase() === token.text.toLowerCase();
+
+            return token.isWord ? (
               <span
                 key={token.id}
                 role="button"
@@ -141,11 +166,16 @@ export function SubtitleOverlay({
                     });
                   }
                 }}
+                style={
+                  isSelected
+                    ? {
+                        backgroundColor: 'rgba(var(--ytai-accent-rgb), 0.75)',
+                        color: '#ffffff'
+                      }
+                    : undefined
+                }
                 className={`inline rounded px-0.5 transition-colors cursor-pointer ${
-                  selectedTarget &&
-                  selectedTarget.toLowerCase() === token.text.toLowerCase()
-                    ? 'bg-indigo-500/70 text-white'
-                    : 'hover:bg-indigo-500/40 hover:text-indigo-100'
+                  isSelected ? '' : 'hover:bg-[rgba(var(--ytai-accent-rgb),0.35)]'
                 }`}
               >
                 {token.text}
@@ -154,15 +184,17 @@ export function SubtitleOverlay({
               <span key={token.id} className="whitespace-pre-wrap">
                 {token.text}
               </span>
-            )
-          )}
+            );
+          })}
         </div>
 
         {showDualSubtitles && translatedCue && (
           <div
-            className="mt-1 leading-snug text-slate-300 transition-[filter] duration-150 select-none"
+            className="mt-1 leading-snug transition-[filter] duration-150 select-none"
             style={{
-              fontSize: `${Math.max(13, Math.round(fontSize * 0.76))}px`,
+              color: 'var(--ytai-text-secondary)',
+              fontSize: `${fontSizes.translated}px`,
+              textShadow: 'var(--ytai-text-shadow)',
               filter: isBlurred ? 'blur(5px)' : 'blur(0px)'
             }}
           >

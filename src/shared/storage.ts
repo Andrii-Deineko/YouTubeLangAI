@@ -32,6 +32,16 @@ function mergeSettings(raw: Partial<UserSettings> | undefined): UserSettings {
   return {
     ...DEFAULT_SETTINGS,
     ...raw,
+    theme: raw?.theme ?? DEFAULT_SETTINGS.theme,
+    overlayOpacity:
+      typeof raw?.overlayOpacity === 'number'
+        ? raw.overlayOpacity
+        : DEFAULT_SETTINGS.overlayOpacity,
+    subtitleScale: raw?.subtitleScale ?? DEFAULT_SETTINGS.subtitleScale,
+    fallbackModel:
+      typeof raw?.fallbackModel === 'string'
+        ? raw.fallbackModel
+        : DEFAULT_SETTINGS.fallbackModel,
     llm: {
       ...DEFAULT_SETTINGS.llm,
       ...(raw?.llm ?? {})

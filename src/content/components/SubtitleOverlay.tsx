@@ -103,11 +103,17 @@ export function SubtitleOverlay({
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
+        {activeListeningMode && isBlurred && (
+          <div className="mb-1 text-[11px] leading-tight tracking-wide text-amber-300/80 select-none">
+            Active Listening · Hover or hold Alt to reveal
+          </div>
+        )}
+
         <div
           className="leading-snug font-medium text-white transition-[filter] duration-150 select-text"
           style={{
             fontSize: `${fontSize}px`,
-            filter: isBlurred ? 'blur(6px)' : 'none'
+            filter: isBlurred ? 'blur(6px)' : 'blur(0px)'
           }}
         >
           {primaryCue.tokens.map((token) =>
@@ -154,19 +160,13 @@ export function SubtitleOverlay({
 
         {showDualSubtitles && translatedCue && (
           <div
-            className="mt-1 text-slate-300 transition-[filter] duration-150 select-none"
+            className="mt-1 leading-snug text-slate-300 transition-[filter] duration-150 select-none"
             style={{
               fontSize: `${Math.max(13, Math.round(fontSize * 0.76))}px`,
-              filter: isBlurred ? 'blur(5px)' : 'none'
+              filter: isBlurred ? 'blur(5px)' : 'blur(0px)'
             }}
           >
             {translatedCue.text}
-          </div>
-        )}
-
-        {activeListeningMode && isBlurred && (
-          <div className="mt-1 text-[11px] tracking-wide text-amber-300/80 select-none">
-            Active Listening · Hover or hold Alt to reveal
           </div>
         )}
       </div>

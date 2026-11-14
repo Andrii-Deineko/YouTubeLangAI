@@ -3,13 +3,16 @@ import type { SubtitleCue } from '../types/subtitles';
 export interface VideoControllerCallbacks {
   onTimeUpdate: (currentTimeSec: number) => void;
   onSeeked: () => void;
-  onRepeatCue: () => void;
-  onPreviousCue: () => void;
-  onNextCue: () => void;
-  onSaveActiveWord: () => void;
+  onRepeatCue: () => boolean | void;
+  onPreviousCue: () => boolean | void;
+  onNextCue: () => boolean | void;
+  onSaveActiveWord: () => boolean | void;
   onClosePopup: () => void;
   onAltKeyChange: (pressed: boolean) => void;
   isPopupOpen: () => boolean;
+  hasCues: () => boolean;
+  isOverlayEnabled: () => boolean;
+  isAdShowing: () => boolean;
 }
 
 export class VideoController {
@@ -199,20 +202,82 @@ export class VideoController {
   private isEditableEvent(e: KeyboardEvent): boolean {
     const path = e.composedPath();
     const target = (path[0] ?? e.target) as HTMLElement | null;
-    if (!target || !(target instanceof HTMLElement)) return false;
+    if (target instanceof HTMLElement) {
+      const tagName = target.tagName;
+      if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') {
+        return true;
+      }
+      if (target.isContentEditable) {
+        return true;
+      }
+      if (target.closest('[contenteditable="true"], input, textarea, select')) {
+        return true;
+      }
+    }
 
-    const tagName = target.tagName;
-    if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') {
+    const activeEl = document.activeElement;
+    if (activeEl instanceof HTMLElement) {
+      const tagName = activeEl.tagName;
+      if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') {
+        return true;
+      }
+      if (activeEl.isContentEditable) {
+        return true;
+      }
+      if (activeEl.closest('[contenteditable="true"], input, textarea, select')) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private isAdPlaying(): boolean {
+    if (this.callbacks.isAdShowing && this.callbacks.isAdShowing()) {
       return true;
     }
-    if (target.isContentEditable) {
+    const player =
+      this.video?.closest?.('.html5-video-player') ??
+      document.querySelector<HTMLElement>('#movie_player, .html5-video-player');
+    if (
+      player &&
+      (player.classList.contains('ad-showing') ||
+        player.classList.contains('ad-interrupting'))
+    ) {
       return true;
     }
-    return Boolean(target.closest('[contenteditable="true"], input, textarea'));
+    return false;
+  }
+
+  private hasActiveSubtitles(): boolean {
+    if (this.callbacks.isOverlayEnabled && !this.callbacks.isOverlayEnabled()) {
+      return false;
+    }
+    if (this.isAdPlaying()) {
+      return false;
+    }
+    if (this.callbacks.hasCues && !this.callbacks.hasCues()) {
+      return false;
+    }
+    return true;
   }
 
   private handleKeyDown(e: KeyboardEvent): void {
+    // 1. If focus is inside input, textarea, or contentEditable -> do not intercept
     if (this.isEditableEvent(e)) return;
+
+    // 2. Allow Escape to close WordPopup even if subtitles are inactive
+    if (e.code === 'Escape' && this.callbacks.isPopupOpen()) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this.callbacks.onClosePopup();
+      return;
+    }
+
+    // 3. If overlay is disabled, video has no loaded subtitles (cues.length === 0), or an ad is showing -> return
+    if (!this.hasActiveSubtitles()) {
+      return;
+    }
 
     if (e.key === 'Alt') {
       this.callbacks.onAltKeyChange(true);
@@ -222,23 +287,32 @@ export class VideoController {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
 
     switch (e.code) {
-      case 'KeyR':
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        this.callbacks.onRepeatCue();
+      case 'KeyR': {
+        const handled = this.callbacks.onRepeatCue();
+        if (handled !== false) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
         break;
+      }
       case 'ArrowLeft':
-      case 'KeyA':
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        this.callbacks.onPreviousCue();
+      case 'KeyA': {
+        const handled = this.callbacks.onPreviousCue();
+        if (handled !== false) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
         break;
+      }
       case 'ArrowRight':
-      case 'KeyD':
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        this.callbacks.onNextCue();
+      case 'KeyD': {
+        const handled = this.callbacks.onNextCue();
+        if (handled !== false) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
         break;
+      }
       case 'Escape':
         if (this.callbacks.isPopupOpen()) {
           e.preventDefault();
@@ -246,11 +320,14 @@ export class VideoController {
           this.callbacks.onClosePopup();
         }
         break;
-      case 'KeyS':
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        this.callbacks.onSaveActiveWord();
+      case 'KeyS': {
+        const handled = this.callbacks.onSaveActiveWord();
+        if (handled !== false) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
         break;
+      }
       default:
         break;
     }

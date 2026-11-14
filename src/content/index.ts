@@ -265,8 +265,8 @@ function handleSelectTarget(selection: WordSelectionPayload): void {
   renderUI();
 }
 
-function handleRepeatCue(): void {
-  if (!videoController) return;
+function handleRepeatCue(): boolean {
+  if (!videoController) return false;
   const time = videoController.getCurrentTime();
   const cue =
     activePrimaryCue ??
@@ -275,59 +275,69 @@ function handleRepeatCue(): void {
   if (cue) {
     lastAutoPausedCueId = null;
     videoController.jumpToCue(cue);
+    return true;
   }
+  return false;
 }
 
-function handlePreviousCue(): void {
-  if (!videoController) return;
+function handlePreviousCue(): boolean {
+  if (!videoController) return false;
   const time = videoController.getCurrentTime();
   const prev = primaryEngine.getPreviousCue(time);
   if (prev) {
     lastAutoPausedCueId = null;
     videoController.jumpToCue(prev);
+    return true;
   }
+  return false;
 }
 
-function handleNextCue(): void {
-  if (!videoController) return;
+function handleNextCue(): boolean {
+  if (!videoController) return false;
   const time = videoController.getCurrentTime();
   const next = primaryEngine.getNextCue(time);
   if (next) {
     lastAutoPausedCueId = null;
     videoController.jumpToCue(next);
+    return true;
   }
+  return false;
 }
 
-async function handleQuickSaveShortcut(): Promise<void> {
+function handleQuickSaveShortcut(): boolean {
   const targetCue = selectedSelection?.cue ?? activePrimaryCue;
-  if (!targetCue) return;
+  if (!targetCue) return false;
 
   const targetWord =
     selectedSelection?.target ??
     targetCue.tokens.find((t) => t.isWord)?.text ??
     '';
-  if (!targetWord) return;
+  if (!targetWord) return false;
 
-  let translation = targetWord;
-  try {
-    const res = await sendRuntimeQuickTranslate(
-      targetWord,
-      trackMeta?.lang ?? 'auto',
-      settings.nativeLang
-    );
-    if (res.ok) {
-      translation = res.data.translation;
+  void (async () => {
+    let translation = targetWord;
+    try {
+      const res = await sendRuntimeQuickTranslate(
+        targetWord,
+        trackMeta?.lang ?? 'auto',
+        settings.nativeLang
+      );
+      if (res.ok) {
+        translation = res.data.translation;
+      }
+    } catch {
+      // Fallback to raw targetWord if offline
     }
-  } catch {
-    // Fallback to raw targetWord if offline
-  }
 
-  await handleSaveVocabulary({
-    word: targetWord,
-    translation,
-    aiExplanation: null,
-    cue: targetCue
-  });
+    await handleSaveVocabulary({
+      word: targetWord,
+      translation,
+      aiExplanation: null,
+      cue: targetCue
+    });
+  })();
+
+  return true;
 }
 
 function createVideoController(): VideoController {
@@ -369,9 +379,7 @@ function createVideoController(): VideoController {
     onRepeatCue: handleRepeatCue,
     onPreviousCue: handlePreviousCue,
     onNextCue: handleNextCue,
-    onSaveActiveWord: () => {
-      void handleQuickSaveShortcut();
-    },
+    onSaveActiveWord: handleQuickSaveShortcut,
     onClosePopup: () => closePopupAndResume(true),
     onAltKeyChange: (pressed: boolean) => {
       if (altPressed !== pressed) {
@@ -379,7 +387,10 @@ function createVideoController(): VideoController {
         renderUI();
       }
     },
-    isPopupOpen: () => selectedSelection !== null
+    isPopupOpen: () => selectedSelection !== null,
+    hasCues: () => primaryEngine.getCues().length > 0,
+    isOverlayEnabled: () => settings.enabled,
+    isAdShowing: () => isAdShowing
   });
 }
 

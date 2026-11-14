@@ -87,3 +87,35 @@
   --ytai-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
   --ytai-backdrop-blur: 10px;
 }
+
+/* ==========================================================================
+   Custom Scrollbars (Cross-platform Windows & Chrome styling)
+   ========================================================================== */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ytai-border) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--ytai-border);
+  border-radius: 9999px;
+  transition: background-color 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--ytai-text-secondary);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+

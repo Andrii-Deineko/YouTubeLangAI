@@ -6,10 +6,12 @@ import {
   Database,
   Eye,
   EyeOff,
+  Ghost,
   Loader2,
   Palette,
   PlugZap,
-  RefreshCw
+  RefreshCw,
+  RotateCcw
 } from 'lucide-react';
 import { clearAllCaches } from '../../shared/db';
 import { resolveChatCompletionsUrl } from '../../shared/llm';
@@ -492,6 +494,69 @@ export function SettingsPanel({
             <span>100% (Плотный)</span>
           </div>
         </div>
+
+        {/* Active Listening Modes */}
+        <div>
+          <div className="mb-1.5 flex items-center justify-between text-[11px] text-slate-400">
+            <span>Режим восприятия на слух (Active Listening)</span>
+            <span className="font-semibold text-slate-200">
+              {settings.activeListeningMode === 'off' && 'Обычный (Всегда видны)'}
+              {settings.activeListeningMode === 'blur' && 'Размытие (Blur)'}
+              {settings.activeListeningMode === 'hidden' && 'Скрыты до Alt (Stealth)'}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-1.5 rounded-xl border border-white/10 bg-slate-950/70 p-1">
+            {[
+              { id: 'off' as const, label: 'Обычный', desc: 'Всегда видны', icon: Eye },
+              { id: 'blur' as const, label: 'Blur', desc: 'Hover или Alt', icon: EyeOff },
+              { id: 'hidden' as const, label: 'Stealth', desc: 'Только клавиша Alt', icon: Ghost }
+            ].map((mode) => {
+              const active = settings.activeListeningMode === mode.id;
+              const Icon = mode.icon;
+              return (
+                <button
+                  key={mode.id}
+                  type="button"
+                  onClick={() => void onUpdateSettings({ activeListeningMode: mode.id })}
+                  className={`flex flex-col items-center justify-center rounded-lg py-2 px-1 text-center transition ${
+                    active
+                      ? 'bg-white/15 font-semibold text-white shadow-sm'
+                      : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                  }`}
+                  style={active ? { color: 'var(--ytai-accent)' } : undefined}
+                >
+                  <Icon className="mb-1 h-4 w-4" />
+                  <span className="text-xs font-semibold">{mode.label}</span>
+                  <span className="text-[10px] opacity-75">{mode.desc}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Subtitle Position Reset */}
+        <div className="flex items-center justify-between rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-xs">
+          <div>
+            <span className="text-slate-200 font-medium">Позиция субтитров</span>
+            <p className="text-[11px] text-slate-400">
+              {settings.subtitlePosition
+                ? `Смещена (${Math.round(settings.subtitlePosition.xPercent)}%, ${Math.round(settings.subtitlePosition.yPercent)}%)`
+                : 'По центру снизу (по умолчанию)'}
+            </p>
+          </div>
+          {settings.subtitlePosition ? (
+            <button
+              type="button"
+              onClick={() => void onUpdateSettings({ subtitlePosition: null })}
+              className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/10 px-2.5 py-1 text-xs font-medium text-slate-200 transition hover:bg-white/20 hover:text-white"
+            >
+              <RotateCcw className="h-3 w-3" />
+              <span>Сбросить</span>
+            </button>
+          ) : (
+            <span className="text-[11px] text-slate-500">Тяните плашку мышью</span>
+          )}
+        </div>
       </section>
 
       {/* Language & Player Behavior */}
@@ -532,8 +597,8 @@ export function SettingsPanel({
               label: 'Show dual (translated) subtitles'
             },
             {
-              key: 'activeListeningMode' as const,
-              label: 'Active Listening (blur subtitles by default)'
+              key: 'autoHideControls' as const,
+              label: 'Auto-hide top control bar on inactivity'
             },
             {
               key: 'autoPauseAfterCue' as const,

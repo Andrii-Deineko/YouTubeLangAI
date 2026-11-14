@@ -1,26 +1,110 @@
-import type { ReactElement } from 'react';
-import { Eye, EyeOff, Languages, PauseCircle, Power, RotateCcw } from 'lucide-react';
-import type { UserSettings } from '../../types/settings';
+import { useEffect, useState, type ReactElement } from 'react';
+import { Eye, EyeOff, Ghost, Languages, Move, PauseCircle, Power, RotateCcw } from 'lucide-react';
+import type { ActiveListeningMode, UserSettings } from '../../types/settings';
 import type { TrackMetadata } from '../../types/subtitles';
 
 interface PlayerControlsProps {
   settings: UserSettings;
   trackMeta: TrackMetadata | null;
   cueCount: number;
+  altPressed?: boolean;
+  hasActivePopup?: boolean;
   onUpdateSettings: (partial: Partial<UserSettings>) => void;
   onRepeatCue: () => void;
+  onResetPosition?: () => void;
 }
 
 export function PlayerControls({
   settings,
   trackMeta,
   cueCount,
+  altPressed,
+  hasActivePopup,
   onUpdateSettings,
-  onRepeatCue
+  onRepeatCue,
+  onResetPosition
 }: PlayerControlsProps): ReactElement {
+  const [isHovered, setIsHovered] = useState(false);
+  const [isYtAutohide, setIsYtAutohide] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+
+  useEffect(() => {
+    const playerEl =
+      document.querySelector<HTMLElement>('#movie_player') ??
+      document.querySelector<HTMLElement>('.html5-video-player');
+    const videoEl =
+      playerEl?.querySelector<HTMLVideoElement>('video') ??
+      document.querySelector<HTMLVideoElement>('video');
+
+    const updateStates = (): void => {
+      if (playerEl) {
+        setIsYtAutohide(playerEl.classList.contains('ytp-autohide'));
+      }
+      if (videoEl) {
+        setIsPaused(videoEl.paused);
+      }
+    };
+
+    updateStates();
+
+    let observer: MutationObserver | null = null;
+    if (playerEl) {
+      observer = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          if (m.type === 'attributes' && m.attributeName === 'class') {
+            setIsYtAutohide(playerEl.classList.contains('ytp-autohide'));
+            break;
+          }
+        }
+      });
+      observer.observe(playerEl, { attributes: true, attributeFilter: ['class'] });
+    }
+
+    const onPlay = (): void => setIsPaused(false);
+    const onPause = (): void => setIsPaused(true);
+
+    videoEl?.addEventListener('play', onPlay);
+    videoEl?.addEventListener('pause', onPause);
+
+    return () => {
+      observer?.disconnect();
+      videoEl?.removeEventListener('play', onPlay);
+      videoEl?.removeEventListener('pause', onPause);
+    };
+  }, []);
+
+  const shouldAutoHide = settings.autoHideControls ?? true;
+  const isVisible =
+    !shouldAutoHide ||
+    isPaused ||
+    !isYtAutohide ||
+    isHovered ||
+    Boolean(altPressed) ||
+    Boolean(hasActivePopup);
+
+  const cycleListeningMode = (): void => {
+    const current = settings.activeListeningMode || 'off';
+    const next: ActiveListeningMode =
+      current === 'off' ? 'blur' : current === 'blur' ? 'hidden' : 'off';
+    onUpdateSettings({ activeListeningMode: next });
+  };
+
+  const getListeningModeTitle = (): string => {
+    switch (settings.activeListeningMode) {
+      case 'blur':
+        return 'Active Listening: Blur (Hover or hold Alt to reveal. Click for Stealth mode)';
+      case 'hidden':
+        return 'Stealth Mode: Hidden (Hold Alt to reveal subtitles. Click to turn off)';
+      default:
+        return 'Subtitles: Visible (Click to enable Active Listening blur)';
+    }
+  };
+
   return (
     <div
-      className="pointer-events-auto absolute right-3 top-3 z-20 flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs shadow-lg select-none transition-all"
+      className={`absolute right-3 top-3 z-20 flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs shadow-lg select-none transition-opacity duration-300 ${
+        isVisible ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+      }`}
       style={{
         backgroundColor: `rgba(var(--ytai-bg-rgb), 0.88)`,
         borderColor: 'var(--ytai-border)',
@@ -30,6 +114,8 @@ export function PlayerControls({
         WebkitBackdropFilter: 'blur(var(--ytai-backdrop-blur, 12px))',
         color: 'var(--ytai-text-primary)'
       }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
@@ -77,14 +163,13 @@ export function PlayerControls({
             <Languages className="h-3.5 w-3.5" />
           </button>
 
+          {/* 3-way Active Listening / Stealth Mode Cycler */}
           <button
             type="button"
-            title="Active Listening Mode (blur subtitles, hold Alt or hover to reveal)"
-            onClick={() =>
-              onUpdateSettings({ activeListeningMode: !settings.activeListeningMode })
-            }
+            title={getListeningModeTitle()}
+            onClick={cycleListeningMode}
             style={
-              settings.activeListeningMode
+              settings.activeListeningMode !== 'off'
                 ? {
                     backgroundColor: 'var(--ytai-accent)',
                     color: '#ffffff'
@@ -95,7 +180,9 @@ export function PlayerControls({
             }
             className="rounded-full p-1.5 transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)]"
           >
-            {settings.activeListeningMode ? (
+            {settings.activeListeningMode === 'hidden' ? (
+              <Ghost className="h-3.5 w-3.5" />
+            ) : settings.activeListeningMode === 'blur' ? (
               <EyeOff className="h-3.5 w-3.5" />
             ) : (
               <Eye className="h-3.5 w-3.5" />
@@ -132,6 +219,19 @@ export function PlayerControls({
           >
             <RotateCcw className="h-3.5 w-3.5" />
           </button>
+
+          {/* Reset position button (shown only when position has been customized) */}
+          {settings.subtitlePosition && onResetPosition && (
+            <button
+              type="button"
+              title="Reset subtitle position to default (center bottom)"
+              onClick={onResetPosition}
+              style={{ color: 'var(--ytai-accent)' }}
+              className="rounded-full p-1.5 transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)] hover:text-white"
+            >
+              <Move className="h-3.5 w-3.5" />
+            </button>
+          )}
 
           {trackMeta && (
             <span

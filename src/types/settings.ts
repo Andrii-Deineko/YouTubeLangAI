@@ -13,15 +13,24 @@ export type ThemeId =
 
 export type SubtitleScale = 'sm' | 'md' | 'lg' | 'xl';
 
+export type ActiveListeningMode = 'off' | 'blur' | 'hidden';
+
+export interface SubtitlePosition {
+  xPercent: number;
+  yPercent: number;
+}
+
 export interface UserSettings {
   enabled: boolean;
   nativeLang: string;
   showDualSubtitles: boolean;
-  activeListeningMode: boolean;
+  activeListeningMode: ActiveListeningMode;
   autoPauseAfterCue: boolean;
   autoPauseOnWordClick: boolean;
+  autoHideControls: boolean;
   subtitleFontSize: number;
   subtitleScale: SubtitleScale;
+  subtitlePosition: SubtitlePosition | null;
   theme: ThemeId;
   overlayOpacity: number;
   fallbackModel: string;
@@ -34,11 +43,13 @@ export const DEFAULT_SETTINGS: UserSettings = {
   enabled: true,
   nativeLang: 'ru',
   showDualSubtitles: true,
-  activeListeningMode: false,
+  activeListeningMode: 'off',
   autoPauseAfterCue: false,
   autoPauseOnWordClick: true,
+  autoHideControls: true,
   subtitleFontSize: 20,
   subtitleScale: 'md',
+  subtitlePosition: null,
   theme: 'midnight-glass',
   overlayOpacity: 0.85,
   fallbackModel: '',

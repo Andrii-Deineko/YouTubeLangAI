@@ -66,8 +66,11 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
         settings={settings}
         trackMeta={trackMeta}
         cueCount={cueCount}
+        altPressed={altPressed}
+        hasActivePopup={Boolean(selectedTarget || popupElement)}
         onUpdateSettings={onUpdateSettings}
         onRepeatCue={onRepeatCue}
+        onResetPosition={() => onUpdateSettings({ subtitlePosition: null })}
       />
 
       {settings.enabled && !isAdShowing && (
@@ -81,6 +84,8 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
             fontSize={settings.subtitleFontSize}
             scale={settings.subtitleScale}
             overlayOpacity={settings.overlayOpacity}
+            position={settings.subtitlePosition}
+            onUpdatePosition={(pos) => onUpdateSettings({ subtitlePosition: pos })}
             selectedTarget={selectedTarget}
             onSelectTarget={onSelectTarget}
           />

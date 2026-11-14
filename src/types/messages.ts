@@ -72,6 +72,7 @@ export type RuntimeRequest =
         videoTitle: string;
         nativeLang: string;
         llmConfig: LLMConfig;
+        fallbackModel?: string;
       };
     }
   | {

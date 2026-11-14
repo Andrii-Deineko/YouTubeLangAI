@@ -12,6 +12,7 @@ import {
   requestAIExplanation,
   testLLMConnection
 } from '../shared/llm';
+import { getSettings } from '../shared/storage';
 import type { RuntimeRequest, RuntimeResponse } from '../types/messages';
 import type { AIExplanation, QuickTranslationResult } from '../types/vocabulary';
 
@@ -160,6 +161,11 @@ async function handleAIExplain(
   }
 
   const promise = llmQueue.run(async () => {
+    const fallbackModel =
+      payload.fallbackModel !== undefined
+        ? payload.fallbackModel
+        : (await getSettings()).fallbackModel;
+
     const explanation = await requestAIExplanation({
       target: payload.target,
       prevSentence: payload.prevSentence,
@@ -167,7 +173,8 @@ async function handleAIExplain(
       nextSentence: payload.nextSentence,
       videoTitle: payload.videoTitle,
       nativeLang: payload.nativeLang,
-      llmConfig: payload.llmConfig
+      llmConfig: payload.llmConfig,
+      fallbackModel
     });
     await setCachedAIExplanation(cacheKey, explanation);
     return explanation;

@@ -10,6 +10,78 @@ export interface AIExplainRequestParams {
   videoTitle: string;
   nativeLang: string;
   llmConfig: LLMConfig;
+  fallbackModel?: string;
+}
+
+export class LLMRequestError extends Error {
+  public status?: number;
+  public endpoint?: string;
+  public model?: string;
+  public retryAfter?: string | null;
+
+  constructor(
+    message: string,
+    options?: {
+      status?: number;
+      endpoint?: string;
+      model?: string;
+      retryAfter?: string | null;
+    }
+  ) {
+    super(message);
+    this.name = 'LLMRequestError';
+    this.status = options?.status;
+    this.endpoint = options?.endpoint;
+    this.model = options?.model;
+    this.retryAfter = options?.retryAfter;
+  }
+}
+
+function parseRetryAfterHeader(headerValue: string | null | undefined): number | null {
+  if (!headerValue) return null;
+  const seconds = Number.parseInt(headerValue, 10);
+  if (!Number.isNaN(seconds) && seconds > 0) {
+    return Math.min(seconds * 1000, 10000);
+  }
+  const dateMs = Date.parse(headerValue);
+  if (!Number.isNaN(dateMs)) {
+    const diff = dateMs - Date.now();
+    if (diff > 0) {
+      return Math.min(diff, 10000);
+    }
+  }
+  return null;
+}
+
+function getRetryDelay(
+  attemptIndex: number,
+  retryAfterHeader: string | null | undefined
+): number {
+  const parsedHeader = parseRetryAfterHeader(retryAfterHeader);
+  if (parsedHeader !== null) {
+    return parsedHeader;
+  }
+  const baseDelays = [1000, 2200, 4500];
+  const base = baseDelays[attemptIndex] ?? 4500;
+  const jitter = Math.floor(Math.random() * (base * 0.25));
+  return base + jitter;
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientError(err: unknown): boolean {
+  if (err instanceof LLMRequestError && err.status) {
+    return [429, 502, 503, 504].includes(err.status);
+  }
+  if (
+    err instanceof TypeError ||
+    (err instanceof Error && /failed to fetch|network|timeout/i.test(err.message))
+  ) {
+    return true;
+  }
+  return false;
 }
 
 interface ChatCompletionMessage {
@@ -299,17 +371,12 @@ export async function testLLMConnection(llmConfig: LLMConfig): Promise<LLMTestRe
   };
 }
 
-export async function requestAIExplanation(
-  params: AIExplainRequestParams
-): Promise<AIExplanation> {
-  const endpoint = resolveChatCompletionsUrl(params.llmConfig.baseUrl);
-  const apiKey = params.llmConfig.apiKey.trim();
-  const model = params.llmConfig.model.trim() || 'gpt-4o-mini';
-
-  if (!apiKey && !isLocalEndpoint(endpoint)) {
-    throw new Error('API key is missing. Configure your LLM API key in Extension Settings.');
-  }
-
+async function callChatCompletionsSingleAttempt(
+  endpoint: string,
+  apiKey: string,
+  model: string,
+  messages: ChatCompletionMessage[]
+): Promise<string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
   };
@@ -317,30 +384,141 @@ export async function requestAIExplanation(
     headers.Authorization = `Bearer ${apiKey}`;
   }
 
-  const body = {
-    model,
-    temperature: 0.2,
-    response_format: { type: 'json_object' },
-    messages: buildAIExplainMessages(params)
-  };
-
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body)
-  });
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+        messages
+      })
+    });
+  } catch (netErr: unknown) {
+    throw new LLMRequestError(
+      netErr instanceof Error ? netErr.message : 'Network error (Failed to fetch)',
+      { endpoint, model }
+    );
+  }
 
   const responseText = await response.text();
   if (!response.ok) {
     const errorMessage = extractHttpErrorMessage(responseText, response.statusText);
-    throw new Error(`HTTP ${response.status} (${endpoint}, model=${model}): ${errorMessage}`);
+    const retryAfter = response.headers.get('Retry-After');
+    throw new LLMRequestError(
+      `HTTP ${response.status} (${endpoint}, model=${model}): ${errorMessage}`,
+      { status: response.status, endpoint, model, retryAfter }
+    );
   }
 
-  const data = JSON.parse(responseText) as ChatCompletionResponse;
+  let data: ChatCompletionResponse;
+  try {
+    data = JSON.parse(responseText) as ChatCompletionResponse;
+  } catch {
+    throw new LLMRequestError(`Invalid JSON from ${endpoint} (model=${model})`, {
+      endpoint,
+      model
+    });
+  }
+
   const content = data.choices?.[0]?.message?.content;
   if (!content) {
-    throw new Error(`LLM returned an empty response (${endpoint})`);
+    throw new LLMRequestError(
+      `LLM returned an empty response (${endpoint}, model=${model})`,
+      { endpoint, model }
+    );
   }
 
-  return parseAIExplanation(content, params.target);
+  return content;
+}
+
+async function callChatCompletionsWithRetry(
+  endpoint: string,
+  apiKey: string,
+  model: string,
+  messages: ChatCompletionMessage[],
+  maxRetries = 3
+): Promise<string> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await callChatCompletionsSingleAttempt(endpoint, apiKey, model, messages);
+    } catch (err: unknown) {
+      lastError = err;
+      if (attempt < maxRetries && isTransientError(err)) {
+        const retryAfter = err instanceof LLMRequestError ? err.retryAfter : null;
+        const delay = getRetryDelay(attempt, retryAfter);
+        console.warn(
+          `[YouTube Lang AI] LLM transient error on model=${model} (attempt ${attempt + 1}/${maxRetries + 1}). Retrying in ${delay}ms...`,
+          err
+        );
+        await wait(delay);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw lastError;
+}
+
+export async function requestAIExplanation(
+  params: AIExplainRequestParams
+): Promise<AIExplanation> {
+  const endpoint = resolveChatCompletionsUrl(params.llmConfig.baseUrl);
+  const apiKey = params.llmConfig.apiKey.trim();
+  const primaryModel = params.llmConfig.model.trim() || 'gpt-4o-mini';
+  const fallbackModel = params.fallbackModel?.trim();
+
+  if (!apiKey && !isLocalEndpoint(endpoint)) {
+    throw new Error('API key is missing. Configure your LLM API key in Extension Settings.');
+  }
+
+  const messages = buildAIExplainMessages(params);
+
+  try {
+    const content = await callChatCompletionsWithRetry(
+      endpoint,
+      apiKey,
+      primaryModel,
+      messages,
+      3
+    );
+    return parseAIExplanation(content, params.target);
+  } catch (err: unknown) {
+    const isOverloadedOrRateLimited =
+      err instanceof LLMRequestError &&
+      (err.status === 503 || err.status === 429);
+
+    if (
+      isOverloadedOrRateLimited &&
+      fallbackModel &&
+      fallbackModel.toLowerCase() !== primaryModel.toLowerCase()
+    ) {
+      console.warn(
+        `[YouTube Lang AI] Primary model ${primaryModel} failed with HTTP ${err.status}. Switching to fallback model: ${fallbackModel}`
+      );
+      try {
+        const fallbackContent = await callChatCompletionsWithRetry(
+          endpoint,
+          apiKey,
+          fallbackModel,
+          messages,
+          2
+        );
+        return parseAIExplanation(fallbackContent, params.target);
+      } catch (fallbackErr: unknown) {
+        console.error(
+          `[YouTube Lang AI] Fallback model ${fallbackModel} also failed:`,
+          fallbackErr
+        );
+        throw fallbackErr;
+      }
+    }
+
+    throw err;
+  }
 }

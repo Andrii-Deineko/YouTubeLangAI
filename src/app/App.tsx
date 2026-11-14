@@ -86,7 +86,15 @@ export function App(): ReactElement {
 
   return (
     <div
-      className={`bg-slate-950 text-slate-100 ${
+      data-theme={settings.theme || 'midnight-glass'}
+      style={
+        {
+          '--ytai-bg-opacity': String(settings.overlayOpacity ?? 0.85),
+          backgroundColor: 'rgb(var(--ytai-bg-rgb))',
+          color: 'var(--ytai-text-primary)'
+        } as React.CSSProperties
+      }
+      className={`transition-colors duration-200 ${
         isFullscreen
           ? 'min-h-screen w-full px-6 py-8'
           : 'min-h-[560px] w-[460px] p-4'
@@ -96,14 +104,20 @@ export function App(): ReactElement {
         {/* Header */}
         <header className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg shadow-indigo-500/20">
+            <div
+              className="flex h-8 w-8 items-center justify-center rounded-xl shadow-lg transition-colors"
+              style={{
+                backgroundColor: 'var(--ytai-accent)',
+                boxShadow: '0 4px 14px rgba(var(--ytai-accent-rgb), 0.35)'
+              }}
+            >
               <Sparkles className="h-4 w-4 text-white" />
             </div>
             <div>
-              <h1 className="text-sm font-bold tracking-tight text-white">
+              <h1 className="text-sm font-bold tracking-tight" style={{ color: 'var(--ytai-text-primary)' }}>
                 YouTube Lang AI
               </h1>
-              <p className="text-[11px] text-slate-400">
+              <p className="text-[11px]" style={{ color: 'var(--ytai-text-secondary)' }}>
                 {cards.length} words · {dueCount} due for review
               </p>
             </div>
@@ -114,7 +128,12 @@ export function App(): ReactElement {
               type="button"
               title="Open fullscreen trainer"
               onClick={openFullscreenTrainer}
-              className="flex items-center gap-1 rounded-xl border border-white/10 bg-slate-900 px-2.5 py-1.5 text-[11px] font-medium text-slate-300 transition hover:bg-slate-800 hover:text-white"
+              style={{
+                backgroundColor: 'var(--ytai-surface)',
+                borderColor: 'var(--ytai-border)',
+                color: 'var(--ytai-text-secondary)'
+              }}
+              className="flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-[11px] font-medium transition hover:text-white"
             >
               <Maximize2 className="h-3.5 w-3.5" />
               <span>Fullscreen</span>
@@ -123,15 +142,27 @@ export function App(): ReactElement {
         </header>
 
         {/* Navigation Tabs */}
-        <nav className="mb-4 grid grid-cols-3 gap-1.5 rounded-xl border border-white/10 bg-slate-900/70 p-1">
+        <nav
+          className="mb-4 grid grid-cols-3 gap-1.5 rounded-xl border p-1"
+          style={{
+            backgroundColor: 'var(--ytai-surface)',
+            borderColor: 'var(--ytai-border)'
+          }}
+        >
           <button
             type="button"
             onClick={() => setActiveTab('trainer')}
-            className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition ${
+            style={
               activeTab === 'trainer'
-                ? 'bg-indigo-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
+                ? {
+                    backgroundColor: 'var(--ytai-accent)',
+                    color: '#ffffff'
+                  }
+                : {
+                    color: 'var(--ytai-text-secondary)'
+                  }
+            }
+            className="flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition hover:text-white shadow-sm"
           >
             <GraduationCap className="h-3.5 w-3.5" />
             <span>Trainer</span>
@@ -145,11 +176,17 @@ export function App(): ReactElement {
           <button
             type="button"
             onClick={() => setActiveTab('vocabulary')}
-            className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition ${
+            style={
               activeTab === 'vocabulary'
-                ? 'bg-indigo-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
+                ? {
+                    backgroundColor: 'var(--ytai-accent)',
+                    color: '#ffffff'
+                  }
+                : {
+                    color: 'var(--ytai-text-secondary)'
+                  }
+            }
+            className="flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition hover:text-white shadow-sm"
           >
             <BookOpen className="h-3.5 w-3.5" />
             <span>Vocabulary</span>
@@ -158,11 +195,17 @@ export function App(): ReactElement {
           <button
             type="button"
             onClick={() => setActiveTab('settings')}
-            className={`flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition ${
+            style={
               activeTab === 'settings'
-                ? 'bg-indigo-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
+                ? {
+                    backgroundColor: 'var(--ytai-accent)',
+                    color: '#ffffff'
+                  }
+                : {
+                    color: 'var(--ytai-text-secondary)'
+                  }
+            }
+            className="flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition hover:text-white shadow-sm"
           >
             <SettingsIcon className="h-3.5 w-3.5" />
             <span>Settings</span>

@@ -19,6 +19,7 @@ export interface VideoControllerCallbacks {
 export class VideoController {
   private video: HTMLVideoElement | null = null;
   private rafId: number | null = null;
+  private autoResumeTimer: number | null = null;
   private wasPlayingBeforePopup = false;
   private inspecting = false;
   private resumingProgrammatically = false;
@@ -69,6 +70,7 @@ export class VideoController {
       this.video.addEventListener(
         'play',
         () => {
+          this.clearAutoResumeTimer();
           if (this.inspecting && !this.resumingProgrammatically) {
             this.wasPlayingBeforePopup = false;
           }
@@ -79,6 +81,7 @@ export class VideoController {
       this.video.addEventListener(
         'seeked',
         () => {
+          this.clearAutoResumeTimer();
           this.callbacks.onSeeked();
         },
         { signal: videoCtrl.signal }
@@ -101,6 +104,7 @@ export class VideoController {
   }
 
   public pauseForInspection(): void {
+    this.clearAutoResumeTimer();
     if (!this.video) return;
     if (!this.inspecting) {
       this.wasPlayingBeforePopup = !this.video.paused;
@@ -134,7 +138,33 @@ export class VideoController {
     this.resumingProgrammatically = false;
   }
 
+  public clearAutoResumeTimer(): void {
+    if (this.autoResumeTimer !== null) {
+      window.clearTimeout(this.autoResumeTimer);
+      this.autoResumeTimer = null;
+    }
+  }
+
+  public scheduleAutoResume(delaySec: number): void {
+    this.clearAutoResumeTimer();
+    if (delaySec <= 0 || !this.video) return;
+
+    const scheduledTime = this.video.currentTime;
+    this.autoResumeTimer = window.setTimeout(() => {
+      this.autoResumeTimer = null;
+      if (
+        this.video &&
+        this.video.paused &&
+        !this.callbacks.isPopupOpen() &&
+        Math.abs(this.video.currentTime - scheduledTime) < 0.5
+      ) {
+        void this.video.play().catch(() => undefined);
+      }
+    }, delaySec * 1000);
+  }
+
   public seekToAndPlay(timeSec: number): void {
+    this.clearAutoResumeTimer();
     if (!this.video) return;
     this.video.currentTime = Math.max(0, timeSec);
     if (this.video.paused) {
@@ -149,6 +179,7 @@ export class VideoController {
   }
 
   public jumpToCue(cue: SubtitleCue | null): void {
+    this.clearAutoResumeTimer();
     if (!cue) return;
     this.seekToAndPlay(cue.startTime);
   }
@@ -174,6 +205,7 @@ export class VideoController {
   }
 
   public destroy(): void {
+    this.clearAutoResumeTimer();
     this.stopLoop();
     this.videoAbortController?.abort();
     this.videoAbortController = null;
@@ -289,6 +321,7 @@ export class VideoController {
 
     switch (e.code) {
       case 'KeyR': {
+        this.clearAutoResumeTimer();
         const handled = this.callbacks.onRepeatCue();
         if (handled !== false) {
           e.preventDefault();
@@ -298,6 +331,7 @@ export class VideoController {
       }
       case 'ArrowLeft':
       case 'KeyA': {
+        this.clearAutoResumeTimer();
         const handled = this.callbacks.onPreviousCue();
         if (handled !== false) {
           e.preventDefault();
@@ -307,6 +341,7 @@ export class VideoController {
       }
       case 'ArrowRight':
       case 'KeyD': {
+        this.clearAutoResumeTimer();
         const handled = this.callbacks.onNextCue();
         if (handled !== false) {
           e.preventDefault();

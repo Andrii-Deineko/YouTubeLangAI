@@ -547,6 +547,48 @@ export function SettingsPanel({
           </div>
         </div>
 
+        {/* Controls Scale Segmented Control */}
+        <div>
+          <div className="mb-1.5 flex items-center justify-between text-[11px] text-slate-400">
+            <span>Размер верхней панели (HUD Controls)</span>
+            <span className="font-semibold text-slate-200">
+              {settings.controlsScale === 'sm' && 'Компактный (S)'}
+              {(settings.controlsScale === 'md' || !settings.controlsScale) && 'Стандартный (M)'}
+              {settings.controlsScale === 'lg' && 'Крупный (L)'}
+              {settings.controlsScale === 'tv' && 'TV Режим'}
+            </span>
+          </div>
+          <div className="grid grid-cols-4 gap-1.5 rounded-xl border border-white/10 bg-slate-950/70 p-1">
+            {[
+              { id: 'sm' as const, label: 'S', desc: '13px' },
+              { id: 'md' as const, label: 'M', desc: '15px' },
+              { id: 'lg' as const, label: 'L', desc: '19px' },
+              { id: 'tv' as const, label: 'TV', desc: '24px' }
+            ].map((scale) => {
+              const active = (settings.controlsScale ?? 'md') === scale.id;
+              return (
+                <button
+                  key={scale.id}
+                  type="button"
+                  onClick={() => void onUpdateSettings({ controlsScale: scale.id })}
+                  className={`flex flex-col items-center justify-center rounded-lg py-1.5 transition ${
+                    active
+                      ? 'bg-white/15 font-semibold text-white shadow-sm'
+                      : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                  }`}
+                  style={active ? { color: 'var(--ytai-accent)' } : undefined}
+                >
+                  <div className="flex items-center gap-0.5">
+                    {scale.id === 'tv' && <Tv className="h-3 w-3" />}
+                    <span className="text-xs font-bold">{scale.label}</span>
+                  </div>
+                  <span className="text-[9px] opacity-75">{scale.desc}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Subtitle Position Reset */}
         <div className="flex items-center justify-between rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-xs">
           <div>
@@ -612,14 +654,6 @@ export function SettingsPanel({
             {
               key: 'autoHideControls' as const,
               label: 'Auto-hide top control bar on inactivity'
-            },
-            {
-              key: 'autoPauseAfterCue' as const,
-              label: 'Auto-pause after each subtitle cue'
-            },
-            {
-              key: 'autoPauseOnWordClick' as const,
-              label: 'Auto-pause video when inspecting a word'
             }
           ].map((item) => (
             <label
@@ -638,6 +672,76 @@ export function SettingsPanel({
               />
             </label>
           ))}
+
+          {/* Auto-pause after cue + Auto-resume delay selector */}
+          <div className="rounded-lg bg-slate-950/60 p-2.5 space-y-2">
+            <label className="flex cursor-pointer items-center justify-between">
+              <span className="text-slate-200">Auto-pause after each subtitle cue</span>
+              <input
+                type="checkbox"
+                checked={settings.autoPauseAfterCue}
+                onChange={(e) =>
+                  void onUpdateSettings({ autoPauseAfterCue: e.target.checked })
+                }
+                className="h-4 w-4 accent-indigo-500"
+                style={{ accentColor: 'var(--ytai-accent)' }}
+              />
+            </label>
+
+            {settings.autoPauseAfterCue && (
+              <div className="pt-1.5 border-t border-white/10">
+                <div className="mb-1.5 flex items-center justify-between text-[11px] text-slate-400">
+                  <span>Снятие автопаузы по таймеру</span>
+                  <span className="font-semibold text-slate-200">
+                    {settings.autoPauseResumeDelaySec === 0
+                      ? 'Вручную (не снимать)'
+                      : `${settings.autoPauseResumeDelaySec} сек`}
+                  </span>
+                </div>
+                <div className="grid grid-cols-5 gap-1 rounded-lg border border-white/10 bg-slate-900/80 p-1">
+                  {[
+                    { value: 0, label: 'Вручную' },
+                    { value: 1.5, label: '1.5 с' },
+                    { value: 2, label: '2 с' },
+                    { value: 3, label: '3 с' },
+                    { value: 5, label: '5 с' }
+                  ].map((opt) => {
+                    const active = (settings.autoPauseResumeDelaySec ?? 0) === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() =>
+                          void onUpdateSettings({ autoPauseResumeDelaySec: opt.value })
+                        }
+                        className={`rounded py-1 text-center text-[10px] font-medium transition ${
+                          active
+                            ? 'bg-white/15 font-bold text-white shadow-sm'
+                            : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                        }`}
+                        style={active ? { color: 'var(--ytai-accent)' } : undefined}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <label className="flex cursor-pointer items-center justify-between rounded-lg bg-slate-950/60 px-3 py-2">
+            <span className="text-slate-200">Auto-pause video when inspecting a word</span>
+            <input
+              type="checkbox"
+              checked={settings.autoPauseOnWordClick}
+              onChange={(e) =>
+                void onUpdateSettings({ autoPauseOnWordClick: e.target.checked })
+              }
+              className="h-4 w-4 accent-indigo-500"
+              style={{ accentColor: 'var(--ytai-accent)' }}
+            />
+          </label>
         </div>
       </section>
 

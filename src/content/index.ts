@@ -219,6 +219,13 @@ function renderUI(): void {
 async function handleUpdateSettings(partial: Partial<UserSettings>): Promise<void> {
   settings = await saveSettings(partial);
   if (
+    partial.autoPauseAfterCue === false ||
+    partial.autoPauseResumeDelaySec === 0 ||
+    partial.enabled === false
+  ) {
+    videoController?.clearAutoResumeTimer();
+  }
+  if (
     partial.showDualSubtitles &&
     trackMeta &&
     translatedEngine.getCues().length === 0 &&
@@ -259,6 +266,7 @@ function closePopupAndResume(allowAutoResume = true): void {
 
 function handleSelectTarget(selection: WordSelectionPayload): void {
   selectedSelection = selection;
+  videoController?.clearAutoResumeTimer();
   if (settings.autoPauseOnWordClick) {
     videoController?.pauseForInspection();
   }
@@ -267,6 +275,7 @@ function handleSelectTarget(selection: WordSelectionPayload): void {
 
 function handleRepeatCue(): boolean {
   if (!videoController) return false;
+  videoController.clearAutoResumeTimer();
   const time = videoController.getCurrentTime();
   const cue =
     activePrimaryCue ??
@@ -282,6 +291,7 @@ function handleRepeatCue(): boolean {
 
 function handlePreviousCue(): boolean {
   if (!videoController) return false;
+  videoController.clearAutoResumeTimer();
   const time = videoController.getCurrentTime();
   const prev = primaryEngine.getPreviousCue(time);
   if (prev) {
@@ -294,6 +304,7 @@ function handlePreviousCue(): boolean {
 
 function handleNextCue(): boolean {
   if (!videoController) return false;
+  videoController.clearAutoResumeTimer();
   const time = videoController.getCurrentTime();
   const next = primaryEngine.getNextCue(time);
   if (next) {
@@ -359,6 +370,9 @@ function createVideoController(): VideoController {
       ) {
         lastAutoPausedCueId = activePrimaryCue.id;
         videoController.pauseVideo();
+        if (settings.autoPauseResumeDelaySec > 0) {
+          videoController.scheduleAutoResume(settings.autoPauseResumeDelaySec);
+        }
       }
 
       if (
@@ -375,6 +389,7 @@ function createVideoController(): VideoController {
     },
     onSeeked: () => {
       lastAutoPausedCueId = null;
+      videoController?.clearAutoResumeTimer();
     },
     onRepeatCue: handleRepeatCue,
     onPreviousCue: handlePreviousCue,
@@ -497,6 +512,7 @@ function resetVideoState(): void {
   selectedSelection = null;
   lastAutoPausedCueId = null;
   translationRequestedForVideo = '';
+  videoController?.clearAutoResumeTimer();
   videoController?.resetInspectionState();
   syncNativeCaptionsVisibility();
   renderUI();

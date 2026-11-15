@@ -1,7 +1,9 @@
 import { useEffect, useState, type ReactElement } from 'react';
-import { Eye, EyeOff, Ghost, Languages, Move, PauseCircle, Power, RotateCcw } from 'lucide-react';
+import { Eye, EyeOff, Ghost, Languages, Move, PauseCircle, Power, RotateCcw, Subtitles } from 'lucide-react';
 import type { ActiveListeningMode, UserSettings } from '../../types/settings';
-import type { TrackMetadata } from '../../types/subtitles';
+import type { Json3Response, TrackMetadata } from '../../types/subtitles';
+import type { DetectedSubtitleTrack } from '../subtitleDetector';
+import { SubtitleManagerModal } from './SubtitleManagerModal';
 
 interface PlayerControlsProps {
   settings: UserSettings;
@@ -9,9 +11,12 @@ interface PlayerControlsProps {
   cueCount: number;
   altPressed?: boolean;
   hasActivePopup?: boolean;
+  detectedTracks?: DetectedSubtitleTrack[];
   onUpdateSettings: (partial: Partial<UserSettings>) => void;
   onRepeatCue: () => void;
   onResetPosition?: () => void;
+  onLoadCustomSubtitles?: (payload: { data: Json3Response; lang: string; source: string }) => void;
+  onRefreshDetectedTracks?: () => void;
 }
 
 export function PlayerControls({
@@ -20,18 +25,26 @@ export function PlayerControls({
   cueCount,
   altPressed,
   hasActivePopup,
+  detectedTracks,
   onUpdateSettings,
   onRepeatCue,
-  onResetPosition
+  onResetPosition,
+  onLoadCustomSubtitles,
+  onRefreshDetectedTracks
 }: PlayerControlsProps): ReactElement {
   const [isHovered, setIsHovered] = useState(false);
   const [isYtAutohide, setIsYtAutohide] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [isSubtitlesModalOpen, setIsSubtitlesModalOpen] = useState(false);
 
   useEffect(() => {
     const playerEl =
       document.querySelector<HTMLElement>('#movie_player') ??
-      document.querySelector<HTMLElement>('.html5-video-player');
+      document.querySelector<HTMLElement>('.html5-video-player') ??
+      document.querySelector<HTMLElement>('#player-placeholder .jw-wrapper') ??
+      document.querySelector<HTMLElement>('#player-placeholder') ??
+      document.querySelector<HTMLElement>('.jwplayer .jw-wrapper') ??
+      document.querySelector<HTMLElement>('.jwplayer');
     const videoEl =
       playerEl?.querySelector<HTMLVideoElement>('video') ??
       document.querySelector<HTMLVideoElement>('video');
@@ -79,6 +92,7 @@ export function PlayerControls({
     isPaused ||
     !isYtAutohide ||
     isHovered ||
+    isSubtitlesModalOpen ||
     Boolean(altPressed) ||
     Boolean(hasActivePopup);
 
@@ -101,6 +115,7 @@ export function PlayerControls({
   };
 
   return (
+    <>
     <div
       className={`absolute right-3 top-3 z-20 flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs shadow-lg select-none transition-opacity duration-300 ${
         isVisible ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
@@ -233,9 +248,39 @@ export function PlayerControls({
             </button>
           )}
 
+          {/* Subtitles & Tracks Modal Trigger */}
+          <button
+            type="button"
+            title="Manage Subtitles (DOM tracks, Custom URL, Upload File, Paste Text)"
+            onClick={() => {
+              if (!isSubtitlesModalOpen) {
+                onRefreshDetectedTracks?.();
+              }
+              setIsSubtitlesModalOpen(!isSubtitlesModalOpen);
+            }}
+            style={
+              isSubtitlesModalOpen
+                ? {
+                    backgroundColor: 'var(--ytai-accent)',
+                    color: '#ffffff'
+                  }
+                : {
+                    color: 'var(--ytai-text-secondary)'
+                  }
+            }
+            className="rounded-full p-1.5 transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)] hover:text-white"
+          >
+            <Subtitles className="h-3.5 w-3.5" />
+          </button>
+
           {trackMeta && (
             <span
-              className="ml-0.5 rounded-full px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide border"
+              className="ml-0.5 rounded-full px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide border cursor-pointer hover:border-[var(--ytai-accent)]"
+              onClick={() => {
+                onRefreshDetectedTracks?.();
+                setIsSubtitlesModalOpen(true);
+              }}
+              title="Click to view or switch subtitle tracks"
               style={{
                 backgroundColor: 'var(--ytai-surface)',
                 borderColor: 'var(--ytai-border)',
@@ -250,5 +295,19 @@ export function PlayerControls({
         </>
       )}
     </div>
+
+    <SubtitleManagerModal
+      isOpen={isSubtitlesModalOpen}
+      onClose={() => setIsSubtitlesModalOpen(false)}
+      detectedTracks={detectedTracks || []}
+      activeTrackLang={trackMeta?.lang}
+      activeCueCount={cueCount}
+      onLoadSubtitles={(payload) => {
+        onLoadCustomSubtitles?.(payload);
+        setIsSubtitlesModalOpen(false);
+      }}
+      onRefreshDetectedTracks={onRefreshDetectedTracks || (() => {})}
+    />
+    </>
   );
 }

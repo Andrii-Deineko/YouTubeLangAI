@@ -19,11 +19,17 @@ import {
   saveSettings,
   saveVocabularyCard
 } from '../shared/storage';
+import type { Json3Response } from '../types/subtitles';
 import { SubtitleEngine, tokenizeCueText } from './SubtitleEngine';
 import { VideoController } from './VideoController';
 import { mountShadowUI, type MountedShadowUI } from './mountShadowUI';
 import type { WordSelectionPayload } from './components/SubtitleOverlay';
 import { WordPopup } from './components/WordPopup';
+import {
+  detectTracksFromVideo,
+  extractCuesFromTextTrack,
+  type DetectedSubtitleTrack
+} from './subtitleDetector';
 
 const NATIVE_CAPTIONS_STYLE_ID = 'yt-lang-ai-hide-native-captions';
 
@@ -33,6 +39,7 @@ const translatedEngine = new SubtitleEngine();
 let settings: UserSettings = { ...DEFAULT_SETTINGS };
 let currentVideoId = '';
 let trackMeta: TrackMetadata | null = null;
+let detectedTracks: DetectedSubtitleTrack[] = [];
 let isAdShowing = false;
 let altPressed = false;
 let activePrimaryCue: SubtitleCue | null = null;
@@ -190,6 +197,54 @@ function sendRuntimeQuickTranslate(
   });
 }
 
+function refreshDetectedTracks(): void {
+  const video = videoController?.getVideo() ?? findVideoElement(currentPlayerEl);
+  detectedTracks = detectTracksFromVideo(video);
+  renderUI();
+}
+
+function handleLoadCustomSubtitles(payload: {
+  data: Json3Response;
+  lang: string;
+  source: string;
+}): void {
+  const vid = currentVideoId || getVideoIdFromUrl() || 'custom-video';
+  currentVideoId = vid;
+  primaryEngine.loadJson3(payload.data);
+  void setCachedSubtitles(vid, payload.lang, payload.data);
+  trackMeta = {
+    videoId: vid,
+    lang: payload.lang,
+    isAsr: false,
+    url: payload.source
+  };
+  activePrimaryCue = primaryEngine.findActiveCue(videoController?.getCurrentTime() ?? 0);
+  syncNativeCaptionsVisibility();
+  attachToPlayer();
+  renderUI();
+  requestTranslatedTrackIfNeeded();
+}
+
+function autoScanAndLoadIfEmpty(video: HTMLVideoElement): void {
+  if (primaryEngine.getCues().length > 0) return;
+  const tracks = detectTracksFromVideo(video);
+  detectedTracks = tracks;
+  if (tracks.length > 0 && video.textTracks) {
+    for (let i = 0; i < video.textTracks.length; i++) {
+      const tt = video.textTracks[i];
+      const data = extractCuesFromTextTrack(tt);
+      if (data && data.events && data.events.length > 0) {
+        handleLoadCustomSubtitles({
+          data,
+          lang: tt.language || 'auto',
+          source: tt.label || 'DOM textTrack'
+        });
+        return;
+      }
+    }
+  }
+}
+
 function renderUI(): void {
   if (!mountedUI) return;
 
@@ -232,11 +287,14 @@ function renderUI(): void {
     altPressed,
     selectedTarget: selectedSelection?.target ?? null,
     popupElement,
+    detectedTracks,
     onUpdateSettings: (partial) => {
       void handleUpdateSettings(partial);
     },
     onRepeatCue: () => handleRepeatCue(),
-    onSelectTarget: (selection) => handleSelectTarget(selection)
+    onSelectTarget: (selection) => handleSelectTarget(selection),
+    onLoadCustomSubtitles: (payload) => handleLoadCustomSubtitles(payload),
+    onRefreshDetectedTracks: () => refreshDetectedTracks()
   });
 }
 
@@ -498,6 +556,16 @@ function attachToPlayer(): void {
   const videoEl = findVideoElement(playerEl);
   videoController.attach(videoEl);
 
+  if (videoEl) {
+    autoScanAndLoadIfEmpty(videoEl);
+    if (videoEl.textTracks) {
+      videoEl.textTracks.onaddtrack = () => {
+        autoScanAndLoadIfEmpty(videoEl);
+        refreshDetectedTracks();
+      };
+    }
+  }
+
   if (currentPlayerEl !== playerEl || !mountedUI || !playerEl.contains(mountedUI.host)) {
     mountedUI?.unmount();
     adObserver?.disconnect();
@@ -520,11 +588,14 @@ function attachToPlayer(): void {
       translatedCue: activeTranslatedCue,
       altPressed,
       selectedTarget: selectedSelection?.target ?? null,
+      detectedTracks,
       onUpdateSettings: (partial) => {
         void handleUpdateSettings(partial);
       },
       onRepeatCue: handleRepeatCue,
-      onSelectTarget: handleSelectTarget
+      onSelectTarget: handleSelectTarget,
+      onLoadCustomSubtitles: (payload) => handleLoadCustomSubtitles(payload),
+      onRefreshDetectedTracks: () => refreshDetectedTracks()
     });
   }
 }

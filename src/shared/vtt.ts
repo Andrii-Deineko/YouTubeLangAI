@@ -1,7 +1,8 @@
 import type { Json3Event, Json3Response } from '../types/subtitles';
 
 export function parseVttTimestamp(timeStr: string): number {
-  const parts = timeStr.trim().split(':');
+  const clean = timeStr.trim().replace(',', '.');
+  const parts = clean.split(':');
   if (parts.length === 3) {
     const hours = parseFloat(parts[0]);
     const minutes = parseFloat(parts[1]);
@@ -15,8 +16,8 @@ export function parseVttTimestamp(timeStr: string): number {
   return 0;
 }
 
-export function parseWebVttToJson3(vttText: string): Json3Response {
-  const lines = vttText.replace(/\r\n/g, '\n').split('\n');
+export function parseWebVttToJson3(text: string): Json3Response {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
   const events: Json3Event[] = [];
   let i = 0;
 
@@ -39,6 +40,10 @@ export function parseWebVttToJson3(vttText: string): Json3Response {
         }
         if (textLine.includes('-->')) {
           i--;
+          break;
+        }
+        // Skip SRT index numbers if they appear on their own line right before a timestamp
+        if (i + 1 < lines.length && /^\d+$/.test(textLine) && lines[i + 1].includes('-->')) {
           break;
         }
         const cleanText = textLine.replace(/<[^>]+>/g, '').trim();

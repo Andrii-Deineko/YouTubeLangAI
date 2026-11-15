@@ -226,6 +226,14 @@ async function processMessage(message: RuntimeRequest): Promise<RuntimeResponse<
         );
         return { ok: true, data: models };
       }
+      case 'FETCH_SUBTITLES': {
+        const response = await fetch(message.payload.url);
+        if (!response.ok) {
+          return { ok: false, error: `HTTP ${response.status}: ${response.statusText}` };
+        }
+        const text = await response.text();
+        return { ok: true, data: text };
+      }
       default:
         return { ok: false, error: 'Unsupported message type' };
     }

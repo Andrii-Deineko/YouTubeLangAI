@@ -55,9 +55,24 @@ import { parseWebVttToJson3 } from '../shared/vtt';
         return { type: 'youtube', url };
       }
       const lower = url.toString().toLowerCase();
+      // Ensure we NEVER match HLS playlists (.m3u8), video/audio segments (.m4s, .ts, .mp4), or images
+      if (
+        lower.includes('.m3u8') ||
+        lower.includes('.m4s') ||
+        lower.includes('.ts') ||
+        lower.includes('.mp4') ||
+        lower.includes('.m4v') ||
+        lower.includes('.jpg') ||
+        lower.includes('.png')
+      ) {
+        return null;
+      }
+
       if (
         lower.endsWith('.vtt') ||
         lower.includes('.vtt') ||
+        lower.endsWith('.srt') ||
+        lower.includes('.srt') ||
         (lower.includes('ur.se') && lower.includes('/subtitles/'))
       ) {
         return { type: 'vtt', url };
@@ -173,7 +188,12 @@ import { parseWebVttToJson3 } from '../shared/vtt';
           const list = jw.getCaptionsList();
           if (Array.isArray(list)) {
             for (const item of list) {
-              if (item?.file && typeof item.file === 'string' && (item.file.includes('.vtt') || item.file.includes('subtitles'))) {
+              if (
+                item?.file &&
+                typeof item.file === 'string' &&
+                !item.file.includes('.m3u8') &&
+                (item.file.includes('.vtt') || item.file.includes('.srt') || item.file.includes('subtitles'))
+              ) {
                 const vttUrl = new URL(item.file, window.location.origin);
                 originalFetch(vttUrl.toString(), { credentials: 'include' })
                   .then((res) => (res.ok ? res.text() : ''))
@@ -319,26 +339,20 @@ import { parseWebVttToJson3 } from '../shared/vtt';
   };
 
   XMLHttpRequest.prototype.open = function patchedOpen(
-    method: string,
-    url: string | URL,
-    async?: boolean,
-    username?: string | null,
-    password?: string | null
+    this: XMLHttpRequest,
+    ...args: [string, string | URL, boolean?, (string | null)?, (string | null)?]
   ): void {
-    const urlStr = typeof url === 'string' ? url : url.toString();
-    xhrMetaMap.set(this, { url: urlStr });
-    OriginalXHROpen.call(
-      this,
-      method,
-      urlStr,
-      async ?? true,
-      username ?? null,
-      password ?? null
-    );
+    const rawUrl = args[1];
+    if (rawUrl) {
+      const urlStr = typeof rawUrl === 'string' ? rawUrl : (rawUrl as URL).toString();
+      xhrMetaMap.set(this, { url: urlStr });
+    }
+    return (OriginalXHROpen as unknown as Function).apply(this, args);
   };
 
   XMLHttpRequest.prototype.send = function patchedSend(
-    body?: Document | XMLHttpRequestBodyInit | null
+    this: XMLHttpRequest,
+    ...args: [Document | XMLHttpRequestBodyInit | null | undefined]
   ): void {
     const meta = xhrMetaMap.get(this);
     const subTrack = meta ? parseSubtitleUrl(meta.url) : null;
@@ -379,7 +393,7 @@ import { parseWebVttToJson3 } from '../shared/vtt';
       });
     }
 
-    OriginalXHRSend.call(this, body ?? null);
+    return (OriginalXHRSend as unknown as Function).apply(this, args);
   };
 
   window.addEventListener('message', (event: MessageEvent<unknown>) => {

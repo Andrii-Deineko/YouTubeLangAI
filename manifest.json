@@ -46,7 +46,8 @@
     "*://*.youtube.com/*",
     "*://*.urplay.se/*",
     "*://*.ur.se/*",
-    "https://translate.googleapis.com/*"
+    "https://translate.googleapis.com/*",
+    "<all_urls>"
   ],
   "optional_host_permissions": ["http://127.0.0.1/*"]
 }

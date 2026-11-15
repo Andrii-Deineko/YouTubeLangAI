@@ -59,6 +59,17 @@ function postToMain(message: IsolatedToMainMessage): void {
   window.postMessage(message, '*');
 }
 
+function requestLatestTrackFromMain(): void {
+  const vid = currentVideoId || getVideoIdFromUrl() || 'unknown';
+  console.debug('[YT-Lang-AI] Requesting latest track from MAIN world for videoId:', vid);
+  postToMain({
+    source: ISOLATED_MESSAGE_SOURCE,
+    type: 'GET_LATEST_TRACK',
+    videoId: vid,
+    payload: { videoId: vid }
+  });
+}
+
 function getVideoIdFromUrl(): string {
   return getVideoContextFromUrl().videoId;
 }
@@ -82,26 +93,36 @@ function findPlayerContainer(): HTMLElement | null {
   if (currentIsShorts) {
     return (
       document.querySelector<HTMLElement>(
-        'ytd-reel-video-renderer[is-active] .html5-video-player'
+        'ytd-reel-video-renderer[is-active] #shorts-player'
       ) ??
-      document.querySelector<HTMLElement>('ytd-reel-video-renderer[is-active]') ??
-      document.querySelector<HTMLElement>('#shorts-player') ??
-      document.querySelector<HTMLElement>('ytd-shorts .html5-video-player') ??
-      document.querySelector<HTMLElement>('.html5-video-player')
+      document.querySelector<HTMLElement>(
+        'ytd-reel-video-renderer[is-active] .html5-video-player'
+      )
     );
   }
-  return (
-    document.querySelector<HTMLElement>('#movie_player') ??
-    document.querySelector<HTMLElement>('.html5-video-player')
-  );
+  return document.querySelector<HTMLElement>('#movie_player');
 }
 
 function findVideoElement(playerEl: HTMLElement | null): HTMLVideoElement | null {
-  if (playerEl) {
-    const v = playerEl.querySelector<HTMLVideoElement>('video.html5-main-video, video');
-    if (v) return v;
+  if (currentIsShorts) {
+    if (playerEl) {
+      const v = playerEl.querySelector<HTMLVideoElement>('video');
+      if (v) return v;
+    }
+    return document.querySelector<HTMLVideoElement>(
+      'ytd-reel-video-renderer[is-active] video'
+    );
   }
-  return document.querySelector<HTMLVideoElement>('video.html5-main-video, video');
+  if (playerEl) {
+    return (
+      playerEl.querySelector<HTMLVideoElement>('video.html5-main-video') ??
+      playerEl.querySelector<HTMLVideoElement>('video')
+    );
+  }
+  return (
+    document.querySelector<HTMLVideoElement>('#movie_player video.html5-main-video') ??
+    document.querySelector<HTMLVideoElement>('#movie_player video')
+  );
 }
 
 function syncNativeCaptionsVisibility(): void {
@@ -395,6 +416,13 @@ function createVideoController(): VideoController {
         nextPrimary?.id !== activePrimaryCue?.id ||
         nextTranslated?.id !== activeTranslatedCue?.id
       ) {
+        if (nextPrimary && nextPrimary.id !== activePrimaryCue?.id) {
+          console.debug('[YT-Lang-AI] Active cue changed:', {
+            timeSec: timeSec.toFixed(2),
+            cueId: nextPrimary.id,
+            text: nextPrimary.text
+          });
+        }
         activePrimaryCue = nextPrimary;
         activeTranslatedCue = nextTranslated;
         if (nextPrimary && nextPrimary.id !== lastAutoPausedCueId) {
@@ -447,16 +475,24 @@ function checkAdState(playerEl: HTMLElement): void {
 
 function attachToPlayer(): void {
   const playerEl = findPlayerContainer();
-  if (!playerEl) return;
-
-  if (!videoController) {
-    videoController = createVideoController();
+  if (!playerEl) {
+    console.debug('[YT-Lang-AI] attachToPlayer: player container not found', {
+      isShorts: currentIsShorts,
+      videoId: currentVideoId
+    });
+    return;
   }
 
   const videoEl = findVideoElement(playerEl);
-  videoController.attach(videoEl);
+  if (!videoController) {
+    videoController = createVideoController();
+  }
+  if (videoEl) {
+    videoController.attach(videoEl);
+  }
 
-  if (currentPlayerEl !== playerEl || !mountedUI || !playerEl.contains(mountedUI.host)) {
+  const isHostDetached = !mountedUI || !playerEl.contains(mountedUI.host);
+  if (currentPlayerEl !== playerEl || isHostDetached) {
     mountedUI?.unmount();
     adObserver?.disconnect();
 
@@ -485,6 +521,17 @@ function attachToPlayer(): void {
       onRepeatCue: handleRepeatCue,
       onSelectTarget: handleSelectTarget
     });
+
+    const hostRect = mountedUI.host.getBoundingClientRect();
+    const playerRect = playerEl.getBoundingClientRect();
+    console.debug('[YT-Lang-AI] Shadow Host mounted:', {
+      hostInPlayer: playerEl.contains(mountedUI.host),
+      hostWidth: hostRect.width,
+      hostHeight: hostRect.height,
+      playerWidth: playerRect.width,
+      playerHeight: playerRect.height,
+      isShorts: currentIsShorts
+    });
   }
 }
 
@@ -512,6 +559,14 @@ function applyCapturedTrack(payload: TrackCapturedPayload): void {
     isAsr: primaryEngine.getIsAsr(),
     url: payload.url
   };
+  const cueCount = primaryEngine.getCues().length;
+  console.debug('[YT-Lang-AI] Primary track loaded into SubtitleEngine:', {
+    videoId: payload.videoId,
+    lang: payload.lang,
+    cueCount,
+    isAsr: primaryEngine.getIsAsr()
+  });
+
   activePrimaryCue = primaryEngine.findActiveCue(videoController?.getCurrentTime() ?? 0);
   syncNativeCaptionsVisibility();
   attachToPlayer();
@@ -521,6 +576,12 @@ function applyCapturedTrack(payload: TrackCapturedPayload): void {
 
 function applyCapturedTranslatedTrack(payload: TrackCapturedPayload): void {
   translatedEngine.loadJson3(payload.data, payload.kind);
+  const cueCount = translatedEngine.getCues().length;
+  console.debug('[YT-Lang-AI] Translated track loaded into SubtitleEngine:', {
+    videoId: payload.videoId,
+    lang: payload.lang,
+    cueCount
+  });
   activeTranslatedCue = translatedEngine.findActiveCue(
     videoController?.getCurrentTime() ?? 0
   );
@@ -555,6 +616,7 @@ function checkAndHandleVideoChange(): void {
     }
 
     startPlayerSession();
+    requestLatestTrackFromMain();
   } else if (isPlayerContainerChanged) {
     attachToPlayer();
   }
@@ -566,35 +628,65 @@ function startPlayerSession(): void {
   videoController = createVideoController();
   attachToPlayer();
 
-  domObserver = new MutationObserver((mutations) => {
-    for (const m of mutations) {
-      if (
-        m.type === 'attributes' &&
-        m.attributeName === 'is-active' &&
-        m.target instanceof HTMLElement &&
-        m.target.tagName.toLowerCase() === 'ytd-reel-video-renderer'
-      ) {
-        checkAndHandleVideoChange();
-        return;
-      }
-    }
+  const playerEl = findPlayerContainer();
+  const videoEl = findVideoElement(playerEl);
 
-    const playerEl = findPlayerContainer();
-    if (playerEl && (!mountedUI || !playerEl.contains(mountedUI.host))) {
-      attachToPlayer();
-    } else if (playerEl && videoController && !videoController.getVideo()) {
-      const videoEl = findVideoElement(playerEl);
-      if (videoEl) videoController.attach(videoEl);
-    }
+  console.debug('[YT-Lang-AI] Init on URL:', {
+    url: window.location.href,
+    videoId: currentVideoId,
+    isShorts: currentIsShorts,
+    hasPlayerContainer: Boolean(playerEl),
+    hasVideo: Boolean(videoEl)
   });
 
-  if (document.body) {
-    domObserver.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['is-active', 'class']
+  if (currentIsShorts) {
+    domObserver = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (
+          m.type === 'attributes' &&
+          m.attributeName === 'is-active' &&
+          m.target instanceof HTMLElement &&
+          m.target.tagName.toLowerCase() === 'ytd-reel-video-renderer'
+        ) {
+          checkAndHandleVideoChange();
+          return;
+        }
+      }
+
+      const activePlayer = findPlayerContainer();
+      if (activePlayer && (!mountedUI || !activePlayer.contains(mountedUI.host))) {
+        attachToPlayer();
+      } else if (activePlayer && videoController && !videoController.getVideo()) {
+        const v = findVideoElement(activePlayer);
+        if (v) videoController.attach(v);
+      }
     });
+
+    if (document.body) {
+      domObserver.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['is-active']
+      });
+    }
+  } else {
+    // On /watch: strictly do NOT watch for ytd-reel-video-renderer.
+    // If player or video element is not yet attached, observe childList until available.
+    if (!playerEl || !videoEl) {
+      domObserver = new MutationObserver(() => {
+        const p = findPlayerContainer();
+        const v = findVideoElement(p);
+        if (p && v) {
+          domObserver?.disconnect();
+          domObserver = null;
+          attachToPlayer();
+        }
+      });
+      if (document.body) {
+        domObserver.observe(document.body, { childList: true, subtree: true });
+      }
+    }
   }
 }
 
@@ -626,27 +718,51 @@ window.addEventListener(
 
     if (msg.type === 'TRACK_CAPTURED' && msg.payload) {
       const payload = msg.payload;
+      console.debug('[YT-Lang-AI] ISOLATED received TRACK_CAPTURED:', {
+        payloadVideoId: payload.videoId,
+        currentVideoId,
+        cuesInPayload: payload.data.events?.length ?? 0
+      });
+
       preloadedTracksMap.set(payload.videoId, payload);
       void setCachedSubtitles(payload.videoId, payload.lang, payload.data, payload.tlang);
 
-      if (payload.videoId === currentVideoId || !currentVideoId) {
-        if (!currentVideoId) {
+      const isMatchingVideo =
+        !currentVideoId ||
+        payload.videoId === 'unknown' ||
+        payload.videoId === currentVideoId;
+
+      if (isMatchingVideo) {
+        if (!currentVideoId && payload.videoId !== 'unknown') {
           currentVideoId = payload.videoId;
         }
         applyCapturedTrack(payload);
       }
     } else if (msg.type === 'TRANSLATED_TRACK_CAPTURED' && msg.payload) {
       const payload = msg.payload;
+      console.debug('[YT-Lang-AI] ISOLATED received TRANSLATED_TRACK_CAPTURED:', {
+        payloadVideoId: payload.videoId,
+        currentVideoId,
+        cuesInPayload: payload.data.events?.length ?? 0
+      });
+
       preloadedTranslatedMap.set(payload.videoId, payload);
       void setCachedSubtitles(payload.videoId, payload.lang, payload.data, payload.tlang);
 
-      if (payload.videoId === currentVideoId || !currentVideoId) {
+      const isMatchingVideo =
+        !currentVideoId ||
+        payload.videoId === 'unknown' ||
+        payload.videoId === currentVideoId;
+
+      if (isMatchingVideo) {
         applyCapturedTranslatedTrack(payload);
       }
     }
   },
   { signal: lifecycleAbortController.signal }
 );
+
+requestLatestTrackFromMain();
 
 window.addEventListener(
   'yt-navigate-finish',
@@ -691,6 +807,7 @@ async function bootstrap(): Promise<void> {
   currentVideoId = ctx.videoId;
   currentIsShorts = ctx.isShorts;
   startPlayerSession();
+  requestLatestTrackFromMain();
 }
 
 void bootstrap();

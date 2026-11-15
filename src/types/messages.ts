@@ -36,6 +36,14 @@ export type MainToIsolatedMessage =
 
 export type IsolatedToMainMessage =
   | {
+      source: typeof ISOLATED_MESSAGE_SOURCE | 'YT_LANG_AI_CONTENT';
+      type: 'GET_LATEST_TRACK';
+      payload?: {
+        videoId?: string;
+      };
+      videoId?: string;
+    }
+  | {
       source: typeof ISOLATED_MESSAGE_SOURCE;
       type: 'REQUEST_TRANSLATED_TRACK';
       payload: {

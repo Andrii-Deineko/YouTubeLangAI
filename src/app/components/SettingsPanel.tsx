@@ -172,6 +172,31 @@ export function SettingsPanel({
   const [manualModelMode, setManualModelMode] = useState(false);
   const [cacheHydrated, setCacheHydrated] = useState(false);
   const [cacheCleared, setCacheCleared] = useState(false);
+  const [customDelayInput, setCustomDelayInput] = useState<string>(
+    settings.autoPauseResumeDelaySec !== null &&
+      ![3, 5, 10].includes(settings.autoPauseResumeDelaySec)
+      ? String(settings.autoPauseResumeDelaySec)
+      : '4'
+  );
+  const [isCustomDelaySelected, setIsCustomDelaySelected] = useState<boolean>(
+    settings.autoPauseResumeDelaySec !== null &&
+      ![3, 5, 10].includes(settings.autoPauseResumeDelaySec)
+  );
+
+  useEffect(() => {
+    if (
+      settings.autoPauseResumeDelaySec !== null &&
+      ![3, 5, 10].includes(settings.autoPauseResumeDelaySec)
+    ) {
+      setCustomDelayInput(String(settings.autoPauseResumeDelaySec));
+      setIsCustomDelaySelected(true);
+    } else if (
+      settings.autoPauseResumeDelaySec === null ||
+      [3, 5, 10].includes(settings.autoPauseResumeDelaySec)
+    ) {
+      setIsCustomDelaySelected(false);
+    }
+  }, [settings.autoPauseResumeDelaySec]);
 
   const lastFetchedSignatureRef = useRef<string>('');
   const latestFetchRequestIdRef = useRef(0);
@@ -547,6 +572,46 @@ export function SettingsPanel({
           </div>
         </div>
 
+        {/* Controls Scale Segmented Control */}
+        <div>
+          <div className="mb-1.5 flex items-center justify-between text-[11px] text-slate-400">
+            <span>Размер верхней панели (Player Controls)</span>
+            <span className="font-semibold text-slate-200">
+              {settings.controlsScale === 'sm' && 'Компактный (S · 85%)'}
+              {(!settings.controlsScale || settings.controlsScale === 'md') &&
+                'Стандартный (M · 100%)'}
+              {settings.controlsScale === 'lg' && 'Крупный (L · 125%)'}
+              {settings.controlsScale === 'xl' && 'Максимальный (XL · 150%)'}
+            </span>
+          </div>
+          <div className="grid grid-cols-4 gap-1.5 rounded-xl border border-white/10 bg-slate-950/70 p-1">
+            {[
+              { id: 'sm' as const, label: 'S', desc: '85%' },
+              { id: 'md' as const, label: 'M', desc: '100%' },
+              { id: 'lg' as const, label: 'L', desc: '125%' },
+              { id: 'xl' as const, label: 'XL', desc: '150%' }
+            ].map((item) => {
+              const active = (settings.controlsScale || 'md') === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => void onUpdateSettings({ controlsScale: item.id })}
+                  className={`flex flex-col items-center justify-center rounded-lg py-1.5 transition ${
+                    active
+                      ? 'bg-white/15 font-semibold text-white shadow-sm'
+                      : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                  }`}
+                  style={active ? { color: 'var(--ytai-accent)' } : undefined}
+                >
+                  <span className="text-xs font-bold">{item.label}</span>
+                  <span className="text-[9px] opacity-75">{item.desc}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Subtitle Position Reset */}
         <div className="flex items-center justify-between rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-xs">
           <div>
@@ -614,10 +679,6 @@ export function SettingsPanel({
               label: 'Auto-hide top control bar on inactivity'
             },
             {
-              key: 'autoPauseAfterCue' as const,
-              label: 'Auto-pause after each subtitle cue'
-            },
-            {
               key: 'autoPauseOnWordClick' as const,
               label: 'Auto-pause video when inspecting a word'
             }
@@ -638,6 +699,101 @@ export function SettingsPanel({
               />
             </label>
           ))}
+
+          {/* Auto-pause after cue with resume delay timer */}
+          <div className="rounded-lg border border-white/10 bg-slate-950/60 p-2.5">
+            <label className="flex cursor-pointer items-center justify-between">
+              <div>
+                <span className="text-slate-200 font-medium">Auto-pause after each subtitle cue</span>
+                <p className="text-[10px] text-slate-400">
+                  Ставить плеер на паузу в конце каждой реплики
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={settings.autoPauseAfterCue}
+                onChange={(e) =>
+                  void onUpdateSettings({ autoPauseAfterCue: e.target.checked })
+                }
+                className="h-4 w-4 accent-indigo-500"
+                style={{ accentColor: 'var(--ytai-accent)' }}
+              />
+            </label>
+
+            {settings.autoPauseAfterCue && (
+              <div className="mt-2.5 border-t border-white/10 pt-2 text-xs">
+                <div className="mb-1.5 flex items-center justify-between text-[11px] text-slate-400">
+                  <span>Снятие паузы (таймер)</span>
+                  <span className="font-semibold text-slate-200">
+                    {settings.autoPauseResumeDelaySec
+                      ? `${settings.autoPauseResumeDelaySec} сек`
+                      : 'Вручную'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={
+                      settings.autoPauseResumeDelaySec === null
+                        ? 'null'
+                        : [3, 5, 10].includes(settings.autoPauseResumeDelaySec) &&
+                          !isCustomDelaySelected
+                          ? String(settings.autoPauseResumeDelaySec)
+                          : 'custom'
+                    }
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === 'null') {
+                        setIsCustomDelaySelected(false);
+                        void onUpdateSettings({ autoPauseResumeDelaySec: null });
+                      } else if (val === 'custom') {
+                        setIsCustomDelaySelected(true);
+                        const sec = Math.min(
+                          60,
+                          Math.max(1, Number.parseInt(customDelayInput, 10) || 4)
+                        );
+                        void onUpdateSettings({ autoPauseResumeDelaySec: sec });
+                      } else {
+                        setIsCustomDelaySelected(false);
+                        void onUpdateSettings({
+                          autoPauseResumeDelaySec: Number.parseInt(val, 10)
+                        });
+                      }
+                    }}
+                    className="flex-1 rounded-lg border border-white/10 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
+                  >
+                    <option value="null">Вручную (без автовозобновления)</option>
+                    <option value="3">3 секунды</option>
+                    <option value="5">5 секунд</option>
+                    <option value="10">10 секунд</option>
+                    <option value="custom">Своё значение...</option>
+                  </select>
+
+                  {(isCustomDelaySelected ||
+                    (settings.autoPauseResumeDelaySec !== null &&
+                      ![3, 5, 10].includes(settings.autoPauseResumeDelaySec))) && (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={1}
+                        max={60}
+                        value={customDelayInput}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setCustomDelayInput(raw);
+                          const num = Number.parseInt(raw, 10);
+                          if (!Number.isNaN(num) && num >= 1 && num <= 60) {
+                            void onUpdateSettings({ autoPauseResumeDelaySec: num });
+                          }
+                        }}
+                        className="w-16 rounded-lg border border-white/10 bg-slate-900 px-2 py-1.5 text-center text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
+                      />
+                      <span className="text-[11px] text-slate-400">сек</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </section>
 

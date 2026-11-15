@@ -22,6 +22,7 @@ export class VideoController {
   private wasPlayingBeforePopup = false;
   private inspecting = false;
   private resumingProgrammatically = false;
+  private autoResumeTimeoutId: number | null = null;
   private callbacks: VideoControllerCallbacks;
   private windowAbortController: AbortController | null = null;
   private videoAbortController: AbortController | null = null;
@@ -72,6 +73,7 @@ export class VideoController {
           if (this.inspecting && !this.resumingProgrammatically) {
             this.wasPlayingBeforePopup = false;
           }
+          this.cancelAutoResume();
         },
         { signal: videoCtrl.signal }
       );
@@ -79,12 +81,31 @@ export class VideoController {
       this.video.addEventListener(
         'seeked',
         () => {
+          this.cancelAutoResume();
           this.callbacks.onSeeked();
         },
         { signal: videoCtrl.signal }
       );
 
       this.startLoop();
+    }
+  }
+
+  public scheduleAutoResume(delaySec: number): void {
+    this.cancelAutoResume();
+    if (delaySec <= 0) return;
+    this.autoResumeTimeoutId = window.setTimeout(() => {
+      this.autoResumeTimeoutId = null;
+      if (this.video && this.video.paused && !this.inspecting) {
+        void this.video.play().catch(() => undefined);
+      }
+    }, delaySec * 1000);
+  }
+
+  public cancelAutoResume(): void {
+    if (this.autoResumeTimeoutId !== null) {
+      window.clearTimeout(this.autoResumeTimeoutId);
+      this.autoResumeTimeoutId = null;
     }
   }
 
@@ -101,6 +122,7 @@ export class VideoController {
   }
 
   public pauseForInspection(): void {
+    this.cancelAutoResume();
     if (!this.video) return;
     if (!this.inspecting) {
       this.wasPlayingBeforePopup = !this.video.paused;
@@ -129,12 +151,14 @@ export class VideoController {
   }
 
   public resetInspectionState(): void {
+    this.cancelAutoResume();
     this.inspecting = false;
     this.wasPlayingBeforePopup = false;
     this.resumingProgrammatically = false;
   }
 
   public seekToAndPlay(timeSec: number): void {
+    this.cancelAutoResume();
     if (!this.video) return;
     this.video.currentTime = Math.max(0, timeSec);
     if (this.video.paused) {
@@ -174,6 +198,7 @@ export class VideoController {
   }
 
   public destroy(): void {
+    this.cancelAutoResume();
     this.stopLoop();
     this.videoAbortController?.abort();
     this.videoAbortController = null;

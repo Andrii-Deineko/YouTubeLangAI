@@ -13,6 +13,8 @@ export type ThemeId =
 
 export type SubtitleScale = 'sm' | 'md' | 'lg' | 'xl' | 'tv';
 
+export type ControlsScale = 'sm' | 'md' | 'lg' | 'xl';
+
 export type ActiveListeningMode = 'off' | 'blur' | 'hidden';
 
 export interface SubtitlePosition {
@@ -26,8 +28,10 @@ export interface UserSettings {
   showDualSubtitles: boolean;
   activeListeningMode: ActiveListeningMode;
   autoPauseAfterCue: boolean;
+  autoPauseResumeDelaySec: number | null;
   autoPauseOnWordClick: boolean;
   autoHideControls: boolean;
+  controlsScale: ControlsScale;
   subtitleFontSize: number;
   subtitleScale: SubtitleScale;
   subtitlePosition: SubtitlePosition | null;
@@ -45,8 +49,10 @@ export const DEFAULT_SETTINGS: UserSettings = {
   showDualSubtitles: true,
   activeListeningMode: 'off',
   autoPauseAfterCue: false,
+  autoPauseResumeDelaySec: null,
   autoPauseOnWordClick: true,
   autoHideControls: true,
+  controlsScale: 'md',
   subtitleFontSize: 20,
   subtitleScale: 'md',
   subtitlePosition: null,

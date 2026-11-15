@@ -19,6 +19,7 @@
   --ytai-text-secondary: #94a3b8;
   --ytai-accent: #818cf8;
   --ytai-accent-rgb: 129, 140, 248;
+  --ytai-accent-fg: #ffffff;
   --ytai-border: rgba(255, 255, 255, 0.12);
   --ytai-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
   --ytai-backdrop-blur: 12px;
@@ -35,6 +36,7 @@
   --ytai-text-secondary: #fde047;
   --ytai-accent: #f59e0b;
   --ytai-accent-rgb: 245, 158, 11;
+  --ytai-accent-fg: #0f172a;
   --ytai-border: rgba(255, 255, 255, 0.1);
   --ytai-text-shadow: 0 2px 6px rgba(0, 0, 0, 0.95);
   --ytai-backdrop-blur: 4px;
@@ -51,6 +53,7 @@
   --ytai-text-secondary: #88c0d0;
   --ytai-accent: #5e81ac;
   --ytai-accent-rgb: 94, 129, 172;
+  --ytai-accent-fg: #ffffff;
   --ytai-border: rgba(136, 192, 208, 0.2);
   --ytai-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
   --ytai-backdrop-blur: 10px;
@@ -67,6 +70,7 @@
   --ytai-text-secondary: #d6d3d1;
   --ytai-accent: #f97316;
   --ytai-accent-rgb: 249, 115, 22;
+  --ytai-accent-fg: #ffffff;
   --ytai-border: rgba(245, 245, 244, 0.12);
   --ytai-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
   --ytai-backdrop-blur: 10px;
@@ -83,6 +87,7 @@
   --ytai-text-secondary: #6ee7b7;
   --ytai-accent: #10b981;
   --ytai-accent-rgb: 16, 185, 129;
+  --ytai-accent-fg: #0f172a;
   --ytai-border: rgba(16, 185, 129, 0.2);
   --ytai-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
   --ytai-backdrop-blur: 10px;

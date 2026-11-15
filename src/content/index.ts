@@ -217,6 +217,13 @@ function renderUI(): void {
 }
 
 async function handleUpdateSettings(partial: Partial<UserSettings>): Promise<void> {
+  if (
+    partial.autoPauseAfterCue === false ||
+    partial.autoPauseResumeDelaySec === null ||
+    partial.enabled === false
+  ) {
+    videoController?.cancelAutoResume();
+  }
   settings = await saveSettings(partial);
   if (
     partial.showDualSubtitles &&
@@ -267,6 +274,7 @@ function handleSelectTarget(selection: WordSelectionPayload): void {
 
 function handleRepeatCue(): boolean {
   if (!videoController) return false;
+  videoController.cancelAutoResume();
   const time = videoController.getCurrentTime();
   const cue =
     activePrimaryCue ??
@@ -282,6 +290,7 @@ function handleRepeatCue(): boolean {
 
 function handlePreviousCue(): boolean {
   if (!videoController) return false;
+  videoController.cancelAutoResume();
   const time = videoController.getCurrentTime();
   const prev = primaryEngine.getPreviousCue(time);
   if (prev) {
@@ -294,6 +303,7 @@ function handlePreviousCue(): boolean {
 
 function handleNextCue(): boolean {
   if (!videoController) return false;
+  videoController.cancelAutoResume();
   const time = videoController.getCurrentTime();
   const next = primaryEngine.getNextCue(time);
   if (next) {
@@ -359,6 +369,12 @@ function createVideoController(): VideoController {
       ) {
         lastAutoPausedCueId = activePrimaryCue.id;
         videoController.pauseVideo();
+        if (
+          typeof settings.autoPauseResumeDelaySec === 'number' &&
+          settings.autoPauseResumeDelaySec > 0
+        ) {
+          videoController.scheduleAutoResume(settings.autoPauseResumeDelaySec);
+        }
       }
 
       if (
@@ -497,6 +513,7 @@ function resetVideoState(): void {
   selectedSelection = null;
   lastAutoPausedCueId = null;
   translationRequestedForVideo = '';
+  videoController?.cancelAutoResume();
   videoController?.resetInspectionState();
   syncNativeCaptionsVisibility();
   renderUI();

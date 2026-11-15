@@ -1,6 +1,7 @@
 import {
   DEFAULT_SETTINGS,
   type ActiveListeningMode,
+  type ControlsScale,
   type SubtitlePosition,
   type SubtitleScale,
   type UserSettings
@@ -96,6 +97,23 @@ function deriveSubtitleScale(fontSize: number): SubtitleScale {
   return 'tv';
 }
 
+function parseControlsScale(rawVal: unknown): ControlsScale {
+  if (rawVal === 'sm' || rawVal === 'md' || rawVal === 'lg' || rawVal === 'xl') {
+    return rawVal;
+  }
+  return DEFAULT_SETTINGS.controlsScale;
+}
+
+function parseAutoPauseResumeDelaySec(rawVal: unknown): number | null {
+  if (typeof rawVal === 'number' && !Number.isNaN(rawVal)) {
+    const val = Math.round(rawVal);
+    if (val >= 1 && val <= 60) {
+      return val;
+    }
+  }
+  return null;
+}
+
 function mergeSettings(raw: Partial<UserSettings> | undefined): UserSettings {
   const rawRecord = raw as Record<string, unknown> | undefined;
   const activeListeningMode = parseActiveListeningMode(
@@ -115,6 +133,8 @@ function mergeSettings(raw: Partial<UserSettings> | undefined): UserSettings {
     subtitlePosition: parseSubtitlePosition(rawRecord?.subtitlePosition),
     subtitleFontSize,
     subtitleScale,
+    controlsScale: parseControlsScale(rawRecord?.controlsScale),
+    autoPauseResumeDelaySec: parseAutoPauseResumeDelaySec(rawRecord?.autoPauseResumeDelaySec),
     autoHideControls:
       typeof raw?.autoHideControls === 'boolean'
         ? raw.autoHideControls

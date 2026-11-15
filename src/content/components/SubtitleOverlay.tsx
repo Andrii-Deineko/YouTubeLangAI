@@ -84,7 +84,56 @@ export function SubtitleOverlay({
   const isRevealedInBlur = hovered || altPressed || Boolean(selectedTarget);
   const isBlurred = isBlurMode && !isRevealedInBlur;
 
-  const fontSizes = getSubtitleFontSizes(scale, fontSize);
+  const effectiveFontSize = fontSize ?? 20;
+  const fontSizes = getSubtitleFontSizes(effectiveFontSize, scale);
+
+  const maxPercent =
+    effectiveFontSize <= 24
+      ? 88
+      : Math.min(94, Math.round(88 + ((effectiveFontSize - 24) / (56 - 24)) * 6));
+  const maxWidth = effectiveFontSize <= 24 ? 'min(780px, 88%)' : `${maxPercent}%`;
+
+  const dynamicPadX = Math.round(Math.max(14, effectiveFontSize * 0.75));
+  const dynamicPadY = Math.round(Math.max(6, effectiveFontSize * 0.4));
+  const dynamicRadius = Math.round(Math.max(12, Math.min(26, effectiveFontSize * 0.5)));
+
+  // Recalculate bounds and clamp custom position when font size grows
+  useEffect(() => {
+    if (!position || isDraggingRef.current) return;
+    const boxEl = containerRef.current;
+    if (!boxEl) return;
+    const playerEl =
+      boxEl.closest('#movie_player') ??
+      document.querySelector('#movie_player') ??
+      boxEl.closest('.html5-video-player') ??
+      document.querySelector('.html5-video-player');
+    if (!playerEl) return;
+
+    const playerRect = playerEl.getBoundingClientRect();
+    const boxRect = boxEl.getBoundingClientRect();
+    if (playerRect.width === 0 || playerRect.height === 0 || boxRect.width === 0) return;
+
+    const currentCenterX = (position.xPercent / 100) * playerRect.width;
+    const currentCenterY = (position.yPercent / 100) * playerRect.height;
+
+    const minCenterX = boxRect.width / 2 + 8;
+    const maxCenterX = Math.max(minCenterX, playerRect.width - boxRect.width / 2 - 8);
+    const clampedX = Math.max(minCenterX, Math.min(currentCenterX, maxCenterX));
+
+    const minCenterY = boxRect.height / 2 + 8;
+    const maxCenterY = Math.max(minCenterY, playerRect.height - boxRect.height / 2 - 8);
+    const clampedY = Math.max(minCenterY, Math.min(currentCenterY, maxCenterY));
+
+    const newXPercent = (clampedX / playerRect.width) * 100;
+    const newYPercent = (clampedY / playerRect.height) * 100;
+
+    if (
+      Math.abs(newXPercent - position.xPercent) > 0.5 ||
+      Math.abs(newYPercent - position.yPercent) > 0.5
+    ) {
+      onUpdatePosition({ xPercent: newXPercent, yPercent: newYPercent });
+    }
+  }, [effectiveFontSize, position, onUpdatePosition]);
 
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
     if (e.button !== 0) return;
@@ -269,25 +318,27 @@ export function SubtitleOverlay({
         left: `${effectivePosition.xPercent}%`,
         top: `${effectivePosition.yPercent}%`,
         transform: 'translate(-50%, -50%)',
-        maxWidth: '86%'
+        maxWidth
       }
     : {
         position: 'absolute',
         left: '50%',
         bottom: '4rem',
         transform: 'translateX(-50%)',
-        maxWidth: '86%'
+        maxWidth
       };
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 overflow-visible">
       <div
         ref={containerRef}
-        className={`rounded-xl px-4 py-2 text-center shadow-2xl select-none transition-opacity duration-150 ${
+        className={`text-center shadow-2xl select-none transition-opacity duration-150 ${
           isCardVisible ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
         } ${isDragging ? 'cursor-grabbing' : ''}`}
         style={{
           ...positionStyle,
+          padding: `${dynamicPadY}px ${dynamicPadX}px`,
+          borderRadius: `${dynamicRadius}px`,
           backgroundColor: `rgba(var(--ytai-bg-rgb), var(--ytai-bg-opacity, ${overlayOpacity ?? 0.85}))`,
           borderColor: 'var(--ytai-border)',
           borderWidth: '1px',

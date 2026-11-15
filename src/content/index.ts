@@ -381,6 +381,13 @@ function createVideoController(): VideoController {
     onNextCue: handleNextCue,
     onSaveActiveWord: handleQuickSaveShortcut,
     onClosePopup: () => closePopupAndResume(true),
+    onAdjustFontSize: (delta: number) => {
+      const current = settings.subtitleFontSize ?? 20;
+      const next = Math.min(56, Math.max(14, current + delta));
+      if (next !== current) {
+        void handleUpdateSettings({ subtitleFontSize: next });
+      }
+    },
     onAltKeyChange: (pressed: boolean) => {
       if (altPressed !== pressed) {
         altPressed = pressed;

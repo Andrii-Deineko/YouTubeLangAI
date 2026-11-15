@@ -2,6 +2,7 @@ import {
   DEFAULT_SETTINGS,
   type ActiveListeningMode,
   type SubtitlePosition,
+  type SubtitleScale,
   type UserSettings
 } from '../types/settings';
 import type { VocabularyCard } from '../types/vocabulary';
@@ -64,17 +65,56 @@ function parseSubtitlePosition(rawPos: unknown): SubtitlePosition | null {
   return null;
 }
 
+function parseSubtitleFontSize(rawRecord: Record<string, unknown> | undefined): number {
+  if (typeof rawRecord?.subtitleFontSize === 'number' && !Number.isNaN(rawRecord.subtitleFontSize)) {
+    return Math.min(56, Math.max(14, rawRecord.subtitleFontSize));
+  }
+  // Migration from old string scale
+  const scale = rawRecord?.subtitleScale;
+  if (typeof scale === 'string') {
+    switch (scale) {
+      case 'sm':
+        return 16;
+      case 'md':
+        return 20;
+      case 'lg':
+        return 24;
+      case 'xl':
+        return 28;
+      case 'tv':
+        return 48;
+    }
+  }
+  return DEFAULT_SETTINGS.subtitleFontSize;
+}
+
+function deriveSubtitleScale(fontSize: number): SubtitleScale {
+  if (fontSize <= 18) return 'sm';
+  if (fontSize <= 24) return 'md';
+  if (fontSize <= 32) return 'lg';
+  if (fontSize <= 42) return 'xl';
+  return 'tv';
+}
+
 function mergeSettings(raw: Partial<UserSettings> | undefined): UserSettings {
   const rawRecord = raw as Record<string, unknown> | undefined;
   const activeListeningMode = parseActiveListeningMode(
     rawRecord?.activeListeningMode ?? rawRecord?.activeListening
   );
+  const subtitleFontSize = parseSubtitleFontSize(rawRecord);
+  const subtitleScale =
+    typeof rawRecord?.subtitleScale === 'string' &&
+    ['sm', 'md', 'lg', 'xl', 'tv'].includes(rawRecord.subtitleScale as string)
+      ? (rawRecord.subtitleScale as SubtitleScale)
+      : deriveSubtitleScale(subtitleFontSize);
 
   return {
     ...DEFAULT_SETTINGS,
     ...raw,
     activeListeningMode,
     subtitlePosition: parseSubtitlePosition(rawRecord?.subtitlePosition),
+    subtitleFontSize,
+    subtitleScale,
     autoHideControls:
       typeof raw?.autoHideControls === 'boolean'
         ? raw.autoHideControls
@@ -84,7 +124,6 @@ function mergeSettings(raw: Partial<UserSettings> | undefined): UserSettings {
       typeof raw?.overlayOpacity === 'number'
         ? raw.overlayOpacity
         : DEFAULT_SETTINGS.overlayOpacity,
-    subtitleScale: raw?.subtitleScale ?? DEFAULT_SETTINGS.subtitleScale,
     fallbackModel:
       typeof raw?.fallbackModel === 'string'
         ? raw.fallbackModel

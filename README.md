@@ -36,7 +36,9 @@ Shortcuts are captured globally on YouTube watch pages while focus is outside te
 | `D` / `→` | Jump to the next subtitle cue |
 | `S` | Quick-save the inspected or active word to vocabulary |
 | `Esc` | Close the word popup (and resume video if it was playing) |
-| Hold `Alt` | Temporarily unblur subtitles in Active Listening mode |
+| `[` | Decrease subtitle font size by 2px (14px–56px) |
+| `]` | Increase subtitle font size by 2px (14px–56px) |
+| Hold `Alt` | Temporarily reveal subtitles in Active Listening / Stealth mode |
 
 In the Flashcard Trainer popup/tab: `Space` reveals the answer, and `1`–`4` grade the card (`Again`, `Hard`, `Good`, `Easy`).
 

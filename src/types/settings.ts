@@ -11,7 +11,7 @@ export type ThemeId =
   | 'warm-espresso'
   | 'emerald-noir';
 
-export type SubtitleScale = 'sm' | 'md' | 'lg' | 'xl';
+export type SubtitleScale = 'sm' | 'md' | 'lg' | 'xl' | 'tv';
 
 export type ActiveListeningMode = 'off' | 'blur' | 'hidden';
 

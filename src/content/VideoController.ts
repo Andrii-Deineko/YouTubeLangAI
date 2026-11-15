@@ -9,6 +9,7 @@ export interface VideoControllerCallbacks {
   onSaveActiveWord: () => boolean | void;
   onClosePopup: () => void;
   onAltKeyChange: (pressed: boolean) => void;
+  onAdjustFontSize?: (delta: number) => void;
   isPopupOpen: () => boolean;
   hasCues: () => boolean;
   isOverlayEnabled: () => boolean;
@@ -325,6 +326,22 @@ export class VideoController {
         if (handled !== false) {
           e.preventDefault();
           e.stopImmediatePropagation();
+        }
+        break;
+      }
+      case 'BracketLeft': {
+        if (this.callbacks.onAdjustFontSize) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          this.callbacks.onAdjustFontSize(-2);
+        }
+        break;
+      }
+      case 'BracketRight': {
+        if (this.callbacks.onAdjustFontSize) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          this.callbacks.onAdjustFontSize(+2);
         }
         break;
       }

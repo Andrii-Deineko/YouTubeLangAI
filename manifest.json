@@ -24,7 +24,7 @@
   "content_scripts": [
     {
       "matches": ["*://*.youtube.com/*"],
-      "js": ["src/injected/interceptor.ts"],
+      "js": ["interceptor.js"],
       "world": "MAIN",
       "run_at": "document_start"
     },

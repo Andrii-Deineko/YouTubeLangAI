@@ -27,6 +27,8 @@ import { mountShadowUI, type MountedShadowUI } from './mountShadowUI';
 import type { WordSelectionPayload } from './components/SubtitleOverlay';
 import { WordPopup } from './components/WordPopup';
 
+console.log('[YT-Lang-AI] Content script loaded');
+
 const NATIVE_CAPTIONS_STYLE_ID = 'yt-lang-ai-hide-native-captions';
 
 const primaryEngine = new SubtitleEngine();
@@ -61,7 +63,7 @@ function postToMain(message: IsolatedToMainMessage): void {
 
 function requestLatestTrackFromMain(): void {
   const vid = currentVideoId || getVideoIdFromUrl() || 'unknown';
-  console.debug('[YT-Lang-AI] Requesting latest track from MAIN world for videoId:', vid);
+  console.log('[YT-Lang-AI] Requesting latest track from MAIN world for videoId:', vid);
   postToMain({
     source: ISOLATED_MESSAGE_SOURCE,
     type: 'GET_LATEST_TRACK',
@@ -560,7 +562,7 @@ function applyCapturedTrack(payload: TrackCapturedPayload): void {
     url: payload.url
   };
   const cueCount = primaryEngine.getCues().length;
-  console.debug('[YT-Lang-AI] Primary track loaded into SubtitleEngine:', {
+  console.log('[YT-Lang-AI] Primary track loaded into SubtitleEngine:', {
     videoId: payload.videoId,
     lang: payload.lang,
     cueCount,
@@ -577,7 +579,7 @@ function applyCapturedTrack(payload: TrackCapturedPayload): void {
 function applyCapturedTranslatedTrack(payload: TrackCapturedPayload): void {
   translatedEngine.loadJson3(payload.data, payload.kind);
   const cueCount = translatedEngine.getCues().length;
-  console.debug('[YT-Lang-AI] Translated track loaded into SubtitleEngine:', {
+  console.log('[YT-Lang-AI] Translated track loaded into SubtitleEngine:', {
     videoId: payload.videoId,
     lang: payload.lang,
     cueCount
@@ -631,7 +633,7 @@ function startPlayerSession(): void {
   const playerEl = findPlayerContainer();
   const videoEl = findVideoElement(playerEl);
 
-  console.debug('[YT-Lang-AI] Init on URL:', {
+  console.log('[YT-Lang-AI] Init on URL:', {
     url: window.location.href,
     videoId: currentVideoId,
     isShorts: currentIsShorts,
@@ -718,7 +720,7 @@ window.addEventListener(
 
     if (msg.type === 'TRACK_CAPTURED' && msg.payload) {
       const payload = msg.payload;
-      console.debug('[YT-Lang-AI] ISOLATED received TRACK_CAPTURED:', {
+      console.log('[YT-Lang-AI] ISOLATED received TRACK_CAPTURED:', {
         payloadVideoId: payload.videoId,
         currentVideoId,
         cuesInPayload: payload.data.events?.length ?? 0
@@ -740,7 +742,7 @@ window.addEventListener(
       }
     } else if (msg.type === 'TRANSLATED_TRACK_CAPTURED' && msg.payload) {
       const payload = msg.payload;
-      console.debug('[YT-Lang-AI] ISOLATED received TRANSLATED_TRACK_CAPTURED:', {
+      console.log('[YT-Lang-AI] ISOLATED received TRANSLATED_TRACK_CAPTURED:', {
         payloadVideoId: payload.videoId,
         currentVideoId,
         cuesInPayload: payload.data.events?.length ?? 0

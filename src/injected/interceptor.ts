@@ -1,13 +1,15 @@
 import type { Json3Response } from '../types/subtitles';
-import {
-  ISOLATED_MESSAGE_SOURCE,
-  MAIN_MESSAGE_SOURCE,
-  type IsolatedToMainMessage,
-  type MainToIsolatedMessage,
-  type TrackCapturedPayload
+import type {
+  IsolatedToMainMessage,
+  MainToIsolatedMessage,
+  TrackCapturedPayload
 } from '../types/messages';
 
+const MAIN_MESSAGE_SOURCE = 'YT_LANG_AI_MAIN';
+const ISOLATED_MESSAGE_SOURCE = 'YT_LANG_AI_ISOLATED';
+
 (() => {
+  console.log('[YT-Lang-AI] MAIN world loaded');
   const GLOBAL_GUARD = '__YT_LANG_AI_INTERCEPTOR_INSTALLED__';
   const winRecord = window as unknown as Record<string, unknown>;
   if (winRecord[GLOBAL_GUARD]) {
@@ -95,7 +97,7 @@ import {
 
   function dispatchCapturedTrack(payload: TrackCapturedPayload, isTranslated: boolean): void {
     const eventCount = payload.data.events?.length ?? 0;
-    console.debug('[YT-Lang-AI] Timedtext intercepted in MAIN world:', {
+    console.log('[YT-Lang-AI] Timedtext intercepted in MAIN world:', {
       videoId: payload.videoId,
       isTranslated,
       lang: payload.lang,
@@ -338,7 +340,7 @@ import {
         data.videoId ??
         extractVideoId();
 
-      console.debug('[YT-Lang-AI] MAIN received GET_LATEST_TRACK:', {
+      console.log('[YT-Lang-AI] MAIN received GET_LATEST_TRACK:', {
         requestedVid,
         hasCached: requestedVid && requestedVid !== 'unknown' ? capturedTracksMap.has(requestedVid) : false,
         hasLast: Boolean(lastCapturedTrack)
@@ -349,7 +351,7 @@ import {
         lastCapturedTrack;
 
       if (track) {
-        console.debug('[YT-Lang-AI] Responding to GET_LATEST_TRACK with cached track:', {
+        console.log('[YT-Lang-AI] Responding to GET_LATEST_TRACK with cached track:', {
           videoId: track.videoId,
           eventCount: track.data.events?.length ?? 0
         });

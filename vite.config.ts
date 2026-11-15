@@ -1,68 +1,75 @@
 import { resolve } from 'node:path';
-import { readFileSync, writeFileSync, rmSync } from 'node:fs';
-import { defineConfig, build as viteBuild, type Plugin } from 'vite';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { crx } from '@crxjs/vite-plugin';
+import { buildSync } from 'esbuild';
 import manifest from './manifest.json';
 
-function mainWorldContentScriptFix(): Plugin {
+function mainWorldInterceptorPlugin(): Plugin {
   return {
-    name: 'yt-lang-ai-main-world-fix',
+    name: 'yt-lang-ai-main-interceptor',
     apply: 'build',
-    async closeBundle() {
-      const distDir = resolve(process.cwd(), 'dist');
-      const manifestPath = resolve(distDir, 'manifest.json');
-      const builtManifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
-        content_scripts?: Array<{
-          js?: string[];
-          world?: string;
-        }>;
-      };
+    closeBundle() {
+      const distDir = resolve(__dirname, 'dist');
+      const outfile = resolve(distDir, 'interceptor.js');
+      const publicOutfile = resolve(__dirname, 'public/interceptor.js');
 
-      const mainEntry = builtManifest.content_scripts?.find((cs) => cs.world === 'MAIN');
-      if (!mainEntry) return;
-
-      const loaderFiles = mainEntry.js ?? [];
-
-      // Bundle src/injected/interceptor.ts as a synchronous self-contained IIFE
-      // so it executes immediately at document_start in MAIN world without chrome.runtime.getURL
-      await viteBuild({
-        configFile: false,
-        logLevel: 'silent',
-        build: {
-          outDir: resolve(distDir, 'assets'),
-          emptyOutDir: false,
-          lib: {
-            entry: resolve(process.cwd(), 'src', 'injected', 'interceptor.ts'),
-            name: 'YTLangAIMainInterceptor',
-            formats: ['iife'],
-            fileName: () => 'interceptor-main.js'
-          },
-          rollupOptions: {
-            output: {
-              inlineDynamicImports: true
-            }
-          }
-        }
+      // 1. Compile src/injected/interceptor.ts into a 100% self-contained IIFE
+      // with zero external runtime imports or exports.
+      buildSync({
+        entryPoints: [resolve(__dirname, 'src/injected/interceptor.ts')],
+        outfile,
+        bundle: true,
+        format: 'iife',
+        target: 'es2020',
+        minify: false
       });
 
-      // Manifest V3 requires forward slashes for extension web resource paths
-      mainEntry.js = ['assets/interceptor-main.js'];
-      writeFileSync(manifestPath, JSON.stringify(builtManifest, null, 2));
+      // Also copy to public/ for consistency
+      buildSync({
+        entryPoints: [resolve(__dirname, 'src/injected/interceptor.ts')],
+        outfile: publicOutfile,
+        bundle: true,
+        format: 'iife',
+        target: 'es2020',
+        minify: false
+      });
 
-      for (const oldFile of loaderFiles) {
-        if (oldFile.includes('interceptor.ts-loader-')) {
-          // Normalize oldFile path segments to work reliably across Unix & Windows
-          const targetFile = resolve(distDir, ...oldFile.split(/[/\\]/));
-          rmSync(targetFile, { force: true });
-        }
+      // 2. Ensure dist/manifest.json contains the MAIN world content script
+      const distManifestPath = resolve(distDir, 'manifest.json');
+      const distManifest = JSON.parse(readFileSync(distManifestPath, 'utf-8'));
+
+      if (!distManifest.content_scripts) {
+        distManifest.content_scripts = [];
+      }
+
+      // Check if MAIN world script is already registered
+      const hasMainWorld = distManifest.content_scripts.some(
+        (cs: { world?: string }) => cs.world === 'MAIN'
+      );
+
+      if (!hasMainWorld) {
+        distManifest.content_scripts.unshift({
+          matches: ['*://*.youtube.com/*'],
+          js: ['interceptor.js'],
+          world: 'MAIN',
+          run_at: 'document_start'
+        });
+        writeFileSync(distManifestPath, JSON.stringify(distManifest, null, 2));
       }
     }
   };
 }
 
+// Pass to crx() only the parts it should manage (excluding the MAIN world classic script)
+const crxManifest = {
+  ...manifest,
+  content_scripts: manifest.content_scripts.filter((cs: { world?: string }) => cs.world !== 'MAIN')
+};
+
 export default defineConfig({
-  plugins: [react(), crx({ manifest }), mainWorldContentScriptFix()],
+  plugins: [react(), crx({ manifest: crxManifest }), mainWorldInterceptorPlugin()],
   build: {
     outDir: 'dist',
     emptyOutDir: true,

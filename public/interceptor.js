@@ -1,10 +1,10 @@
+console.log('[YT-Lang-AI] MAIN interceptor booted', location.href);
 "use strict";
 (() => {
   // src/injected/interceptor.ts
   var MAIN_MESSAGE_SOURCE = "YT_LANG_AI_MAIN";
   var ISOLATED_MESSAGE_SOURCE = "YT_LANG_AI_ISOLATED";
   (() => {
-    console.log("[YT-Lang-AI] MAIN world loaded");
     const GLOBAL_GUARD = "__YT_LANG_AI_INTERCEPTOR_INSTALLED__";
     const winRecord = window;
     if (winRecord[GLOBAL_GUARD]) {
@@ -22,6 +22,7 @@
     const capturedTranslatedMap = /* @__PURE__ */ new Map();
     let lastCapturedTrack = null;
     let lastCapturedTranslatedTrack = null;
+    const captionTracksCache = /* @__PURE__ */ new Map();
     function postToIsolated(message) {
       window.postMessage(message, "*");
     }
@@ -46,6 +47,7 @@
       return "unknown";
     }
     function parseTimedtextUrl(rawUrl) {
+      if (!rawUrl || !rawUrl.includes("/api/timedtext")) return null;
       try {
         const url = new URL(rawUrl, window.location.origin);
         if (url.pathname.includes("/api/timedtext")) {
@@ -93,6 +95,7 @@
         postToIsolated({
           source: MAIN_MESSAGE_SOURCE,
           type: "TRANSLATED_TRACK_CAPTURED",
+          videoId: payload.videoId,
           payload
         });
       } else {
@@ -103,6 +106,7 @@
         postToIsolated({
           source: MAIN_MESSAGE_SOURCE,
           type: "TRACK_CAPTURED",
+          videoId: payload.videoId,
           payload
         });
       }
@@ -117,6 +121,57 @@
         }
       }
     }
+    function extractCaptionTracksFromObject(obj) {
+      if (!obj || typeof obj !== "object") return null;
+      const record = obj;
+      const captions = record.captions;
+      const renderer = captions?.playerCaptionsTracklistRenderer;
+      const tracks = renderer?.captionTracks;
+      if (Array.isArray(tracks) && tracks.length > 0) {
+        return tracks;
+      }
+      return null;
+    }
+    function handlePlayerResponseData(data) {
+      if (!data || typeof data !== "object") return;
+      const record = data;
+      const videoDetails = record.videoDetails;
+      const videoId = typeof videoDetails?.videoId === "string" ? videoDetails.videoId : extractVideoId();
+      const tracks = extractCaptionTracksFromObject(data);
+      if (tracks && tracks.length > 0 && videoId && videoId !== "unknown") {
+        console.log("[YT-Lang-AI] Cached captionTracks from player API for videoId:", videoId, tracks.length);
+        captionTracksCache.set(videoId, tracks);
+      }
+    }
+    function getCaptionTracksFromGlobals() {
+      const win = window;
+      const candidates = [
+        win.ytInitialPlayerResponse,
+        win.ytplayer?.config
+      ];
+      for (const candidate of candidates) {
+        let parsed = candidate;
+        if (typeof candidate === "string") {
+          try {
+            parsed = JSON.parse(candidate);
+          } catch {
+            parsed = null;
+          }
+        }
+        if (parsed && typeof parsed === "object") {
+          const record = parsed;
+          const rawResponse = record.args?.raw_player_response;
+          const target = rawResponse && typeof rawResponse === "object" ? rawResponse : record;
+          const tracks = extractCaptionTracksFromObject(target);
+          if (tracks && tracks.length > 0) {
+            const vDetails = target.videoDetails;
+            const vid = typeof vDetails?.videoId === "string" ? vDetails.videoId : void 0;
+            return { videoId: vid, tracks };
+          }
+        }
+      }
+      return null;
+    }
     function cancelFallbackTimer() {
       if (fallbackTimerId !== null) {
         window.clearTimeout(fallbackTimerId);
@@ -126,12 +181,48 @@
     function scheduleFallbackActivation() {
       cancelFallbackTimer();
       const targetVideoId = extractVideoId();
-      if (!targetVideoId || targetVideoId === "unknown") return;
-      fallbackTimerId = window.setTimeout(() => {
+      fallbackTimerId = window.setTimeout(async () => {
         fallbackTimerId = null;
         const currentVideoId = extractVideoId();
-        if (!currentVideoId || currentVideoId !== targetVideoId) return;
-        if (videoBaseTimedtextMap.has(currentVideoId)) return;
+        const effectiveVid = currentVideoId !== "unknown" ? currentVideoId : targetVideoId;
+        if (effectiveVid && effectiveVid !== "unknown" && capturedTracksMap.has(effectiveVid)) {
+          return;
+        }
+        console.log("[YT-Lang-AI] 1200ms fallback check for videoId:", effectiveVid);
+        const globalData = getCaptionTracksFromGlobals();
+        let tracks = null;
+        if (effectiveVid && captionTracksCache.has(effectiveVid)) {
+          tracks = captionTracksCache.get(effectiveVid) ?? null;
+        } else if (globalData?.tracks && globalData.tracks.length > 0) {
+          tracks = globalData.tracks;
+          if (effectiveVid && effectiveVid !== "unknown") {
+            captionTracksCache.set(effectiveVid, tracks);
+          }
+        }
+        if (tracks && tracks.length > 0) {
+          console.log("[YT-Lang-AI] Found captionTracks via fallback:", tracks.length);
+          const preferred = tracks.find((t) => t.kind !== "asr") ?? tracks[0];
+          if (preferred?.baseUrl) {
+            try {
+              const trackUrl = new URL(preferred.baseUrl, window.location.origin);
+              trackUrl.searchParams.set("fmt", "json3");
+              if (effectiveVid && effectiveVid !== "unknown" && !trackUrl.searchParams.get("v")) {
+                trackUrl.searchParams.set("v", effectiveVid);
+              }
+              if (preferred.languageCode && !trackUrl.searchParams.get("lang")) {
+                trackUrl.searchParams.set("lang", preferred.languageCode);
+              }
+              if (preferred.kind && !trackUrl.searchParams.get("kind")) {
+                trackUrl.searchParams.set("kind", preferred.kind);
+              }
+              console.log("[YT-Lang-AI] Fetching fallback json3 track from baseUrl:", trackUrl.toString());
+              await fetchJson3AndDispatch(trackUrl, false);
+              return;
+            } catch (err) {
+              console.warn("[YT-Lang-AI] Error fetching fallback track:", err);
+            }
+          }
+        }
         const activePlayer = document.querySelector("#movie_player") ?? document.querySelector("ytd-reel-video-renderer[is-active] #shorts-player") ?? document.querySelector("ytd-reel-video-renderer[is-active] .html5-video-player") ?? document.querySelector(".html5-video-player");
         if (activePlayer) {
           try {
@@ -141,10 +232,11 @@
           }
           const subtitlesBtn = activePlayer.querySelector(".ytp-subtitles-button") ?? document.querySelector(".ytp-subtitles-button");
           if (subtitlesBtn && subtitlesBtn.getAttribute("aria-pressed") !== "true") {
+            console.log("[YT-Lang-AI] Triggering native subtitles button click");
             subtitlesBtn.click();
           }
         }
-      }, 1500);
+      }, 1200);
     }
     async function fetchJson3AndDispatch(urlObj, isTranslated) {
       const fetchUrl = new URL(urlObj.toString());
@@ -192,11 +284,23 @@
     }
     function getRequestUrl(input) {
       if (typeof input === "string") return input;
-      if (input instanceof URL) return input.toString();
-      return input.url;
+      if (input instanceof URL) return input.href;
+      if (input && typeof input.url === "string") return input.url;
+      return "";
     }
     window.fetch = async function patchedFetch(input, init) {
       const rawUrl = getRequestUrl(input);
+      if (rawUrl.includes("/youtubei/v1/player")) {
+        const response2 = await originalFetch(input, init);
+        try {
+          const cloned = response2.clone();
+          void cloned.json().then((playerData) => {
+            handlePlayerResponseData(playerData);
+          }).catch(() => void 0);
+        } catch {
+        }
+        return response2;
+      }
       const timedtextUrl = parseTimedtextUrl(rawUrl);
       if (!timedtextUrl) {
         return originalFetch(input, init);
@@ -271,14 +375,18 @@
           postToIsolated({
             source: MAIN_MESSAGE_SOURCE,
             type: "TRACK_CAPTURED",
+            videoId: track.videoId,
             payload: track
           });
+        } else {
+          scheduleFallbackActivation();
         }
         const transTrack = requestedVid && requestedVid !== "unknown" && capturedTranslatedMap.get(requestedVid) || lastCapturedTranslatedTrack;
         if (transTrack) {
           postToIsolated({
             source: MAIN_MESSAGE_SOURCE,
             type: "TRANSLATED_TRACK_CAPTURED",
+            videoId: transTrack.videoId,
             payload: transTrack
           });
         }

@@ -129,6 +129,7 @@ function mergeSettings(raw: Partial<UserSettings> | undefined): UserSettings {
   return {
     ...DEFAULT_SETTINGS,
     ...raw,
+    enabled: typeof raw?.enabled === 'boolean' ? raw.enabled : DEFAULT_SETTINGS.enabled,
     activeListeningMode,
     subtitlePosition: parseSubtitlePosition(rawRecord?.subtitlePosition),
     subtitleFontSize,

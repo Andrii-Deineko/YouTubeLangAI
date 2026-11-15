@@ -19,11 +19,13 @@ export type MainToIsolatedMessage =
       source: typeof MAIN_MESSAGE_SOURCE;
       type: 'TRACK_CAPTURED';
       payload: TrackCapturedPayload;
+      videoId?: string;
     }
   | {
       source: typeof MAIN_MESSAGE_SOURCE;
       type: 'TRANSLATED_TRACK_CAPTURED';
       payload: TrackCapturedPayload;
+      videoId?: string;
     }
   | {
       source: typeof MAIN_MESSAGE_SOURCE;
@@ -32,6 +34,7 @@ export type MainToIsolatedMessage =
         error: string;
         url?: string;
       };
+      videoId?: string;
     };
 
 export type IsolatedToMainMessage =

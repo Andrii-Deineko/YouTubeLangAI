@@ -27,8 +27,6 @@ import { mountShadowUI, type MountedShadowUI } from './mountShadowUI';
 import type { WordSelectionPayload } from './components/SubtitleOverlay';
 import { WordPopup } from './components/WordPopup';
 
-console.log('[YT-Lang-AI] Content script loaded');
-
 const NATIVE_CAPTIONS_STYLE_ID = 'yt-lang-ai-hide-native-captions';
 
 const primaryEngine = new SubtitleEngine();
@@ -102,7 +100,10 @@ function findPlayerContainer(): HTMLElement | null {
       )
     );
   }
-  return document.querySelector<HTMLElement>('#movie_player');
+  return (
+    document.querySelector<HTMLElement>('#movie_player') ??
+    document.querySelector<HTMLElement>('.html5-video-player')
+  );
 }
 
 function findVideoElement(playerEl: HTMLElement | null): HTMLVideoElement | null {
@@ -136,8 +137,10 @@ function syncNativeCaptionsVisibility(): void {
     style.id = NATIVE_CAPTIONS_STYLE_ID;
     style.textContent = '.ytp-caption-window-container { display: none !important; }';
     (document.head ?? document.documentElement).appendChild(style);
+    console.log('[YT-Lang-AI] Native YouTube captions hidden via style');
   } else if (!shouldHide && existing) {
     existing.remove();
+    console.log('[YT-Lang-AI] Native YouTube captions restored');
   }
 }
 
@@ -537,7 +540,45 @@ function attachToPlayer(): void {
   }
 }
 
+let playerPollIntervalId: number | null = null;
+
+function ensurePlayerAttached(): void {
+  if (playerPollIntervalId !== null) {
+    window.clearInterval(playerPollIntervalId);
+    playerPollIntervalId = null;
+  }
+
+  const playerEl = findPlayerContainer();
+  if (playerEl) {
+    attachToPlayer();
+    return;
+  }
+
+  let attempts = 0;
+  playerPollIntervalId = window.setInterval(() => {
+    attempts++;
+    const p = findPlayerContainer();
+    if (p) {
+      if (playerPollIntervalId !== null) {
+        window.clearInterval(playerPollIntervalId);
+        playerPollIntervalId = null;
+      }
+      attachToPlayer();
+    } else if (attempts >= 50) {
+      if (playerPollIntervalId !== null) {
+        window.clearInterval(playerPollIntervalId);
+        playerPollIntervalId = null;
+      }
+      console.warn('[YT-Lang-AI] Player container not found after 10s');
+    }
+  }, 200);
+}
+
 function teardownPlayerSession(): void {
+  if (playerPollIntervalId !== null) {
+    window.clearInterval(playerPollIntervalId);
+    playerPollIntervalId = null;
+  }
   sessionAbortController?.abort();
   sessionAbortController = null;
   adObserver?.disconnect();
@@ -562,6 +603,7 @@ function applyCapturedTrack(payload: TrackCapturedPayload): void {
     url: payload.url
   };
   const cueCount = primaryEngine.getCues().length;
+  console.log('[YT-Lang-AI] Rendered cues:', cueCount);
   console.log('[YT-Lang-AI] Primary track loaded into SubtitleEngine:', {
     videoId: payload.videoId,
     lang: payload.lang,
@@ -571,7 +613,7 @@ function applyCapturedTrack(payload: TrackCapturedPayload): void {
 
   activePrimaryCue = primaryEngine.findActiveCue(videoController?.getCurrentTime() ?? 0);
   syncNativeCaptionsVisibility();
-  attachToPlayer();
+  ensurePlayerAttached();
   renderUI();
   requestTranslatedTrackIfNeeded();
 }
@@ -674,8 +716,9 @@ function startPlayerSession(): void {
     }
   } else {
     // On /watch: strictly do NOT watch for ytd-reel-video-renderer.
-    // If player or video element is not yet attached, observe childList until available.
+    // If player or video element is not yet attached, observe childList until available and poll every 200ms.
     if (!playerEl || !videoEl) {
+      ensurePlayerAttached();
       domObserver = new MutationObserver(() => {
         const p = findPlayerContainer();
         const v = findVideoElement(p);
@@ -729,10 +772,16 @@ window.addEventListener(
       preloadedTracksMap.set(payload.videoId, payload);
       void setCachedSubtitles(payload.videoId, payload.lang, payload.data, payload.tlang);
 
+      const isWatchPage =
+        !currentIsShorts &&
+        (window.location.pathname.startsWith('/watch') ||
+          Boolean(document.querySelector('#movie_player, .html5-video-player')));
+
       const isMatchingVideo =
         !currentVideoId ||
         payload.videoId === 'unknown' ||
-        payload.videoId === currentVideoId;
+        payload.videoId === currentVideoId ||
+        isWatchPage;
 
       if (isMatchingVideo) {
         if (!currentVideoId && payload.videoId !== 'unknown') {
@@ -751,10 +800,16 @@ window.addEventListener(
       preloadedTranslatedMap.set(payload.videoId, payload);
       void setCachedSubtitles(payload.videoId, payload.lang, payload.data, payload.tlang);
 
+      const isWatchPage =
+        !currentIsShorts &&
+        (window.location.pathname.startsWith('/watch') ||
+          Boolean(document.querySelector('#movie_player, .html5-video-player')));
+
       const isMatchingVideo =
         !currentVideoId ||
         payload.videoId === 'unknown' ||
-        payload.videoId === currentVideoId;
+        payload.videoId === currentVideoId ||
+        isWatchPage;
 
       if (isMatchingVideo) {
         applyCapturedTranslatedTrack(payload);

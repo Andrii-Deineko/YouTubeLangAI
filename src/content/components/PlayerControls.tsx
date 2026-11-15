@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import {
+  Check,
   ChevronDown,
   Eye,
   EyeOff,
@@ -120,8 +121,20 @@ export function PlayerControls({
   const [isYtAutohide, setIsYtAutohide] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
+  const [isAutoPauseMenuOpen, setIsAutoPauseMenuOpen] = useState(false);
   const [hoveredModeId, setHoveredModeId] = useState<ActiveListeningMode | null>(null);
+  const [customDelayInput, setCustomDelayInput] = useState<string>(
+    settings.autoPauseResumeDelaySec !== null ? String(settings.autoPauseResumeDelaySec) : '4'
+  );
+
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
+  const autoPauseMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (settings.autoPauseResumeDelaySec !== null) {
+      setCustomDelayInput(String(settings.autoPauseResumeDelaySec));
+    }
+  }, [settings.autoPauseResumeDelaySec]);
 
   useEffect(() => {
     const playerEl =
@@ -169,19 +182,27 @@ export function PlayerControls({
   }, []);
 
   useEffect(() => {
-    if (!isModeMenuOpen) return;
+    if (!isModeMenuOpen && !isAutoPauseMenuOpen) return;
 
     const handleDocumentClick = (e: MouseEvent): void => {
       const path = e.composedPath();
-      if (modeMenuRef.current && !path.includes(modeMenuRef.current)) {
+      if (isModeMenuOpen && modeMenuRef.current && !path.includes(modeMenuRef.current)) {
         setIsModeMenuOpen(false);
         setHoveredModeId(null);
+      }
+      if (
+        isAutoPauseMenuOpen &&
+        autoPauseMenuRef.current &&
+        !path.includes(autoPauseMenuRef.current)
+      ) {
+        setIsAutoPauseMenuOpen(false);
       }
     };
 
     const handleDocumentKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
         setIsModeMenuOpen(false);
+        setIsAutoPauseMenuOpen(false);
         setHoveredModeId(null);
       }
     };
@@ -192,7 +213,7 @@ export function PlayerControls({
       document.removeEventListener('mousedown', handleDocumentClick);
       document.removeEventListener('keydown', handleDocumentKeyDown);
     };
-  }, [isModeMenuOpen]);
+  }, [isModeMenuOpen, isAutoPauseMenuOpen]);
 
   const shouldAutoHide = settings.autoHideControls ?? true;
   const isVisible =
@@ -201,6 +222,7 @@ export function PlayerControls({
     !isYtAutohide ||
     isHovered ||
     isModeMenuOpen ||
+    isAutoPauseMenuOpen ||
     Boolean(altPressed) ||
     Boolean(hasActivePopup);
 
@@ -220,6 +242,38 @@ export function PlayerControls({
   const handleToggleTvPreset = (): void => {
     const next = currentFontSize >= 44 ? 20 : 48;
     onUpdateSettings({ subtitleFontSize: next });
+  };
+
+  const cycleListeningMode = (e: React.MouseEvent): void => {
+    e.stopPropagation();
+    const current = settings.activeListeningMode || 'off';
+    const next: ActiveListeningMode =
+      current === 'off' ? 'blur' : current === 'blur' ? 'hidden' : 'off';
+    onUpdateSettings({ activeListeningMode: next });
+  };
+
+  const getModeQuickTitle = (): string => {
+    switch (settings.activeListeningMode) {
+      case 'blur':
+        return 'Active Listening: Размытие (Клик — сменить режим)';
+      case 'hidden':
+        return 'Stealth-режим: Скрыто до Alt (Клик — сменить режим)';
+      default:
+        return 'Обычный режим: Субтитры видны (Клик — сменить режим)';
+    }
+  };
+
+  const handleApplyCustomDelay = (): void => {
+    const num = Number.parseInt(customDelayInput, 10);
+    if (!Number.isNaN(num)) {
+      const clamped = Math.min(60, Math.max(1, num));
+      onUpdateSettings({
+        autoPauseResumeDelaySec: clamped,
+        autoPauseAfterCue: true
+      });
+      setCustomDelayInput(String(clamped));
+      setIsAutoPauseMenuOpen(false);
+    }
   };
 
   const activeStyle: React.CSSProperties = {
@@ -282,27 +336,63 @@ export function PlayerControls({
             <Languages size={scale.iconSize} />
           </button>
 
-          {/* 3-way Subtitle Listening Mode Dropdown */}
+          {/* Split-button: Subtitle Listening Mode (Icon click = cycle, Chevron click = dropdown) */}
           <div className="relative" ref={modeMenuRef}>
-            <button
-              type="button"
-              title="Режим восприятия субтитров (кликните для выбора)"
-              onClick={() => {
-                setIsModeMenuOpen((prev) => !prev);
-                setHoveredModeId(null);
-              }}
-              style={settings.activeListeningMode !== 'off' ? activeStyle : inactiveStyle}
-              className={`flex items-center gap-0.5 rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)]`}
+            <div
+              className="flex items-center rounded-full transition"
+              style={
+                settings.activeListeningMode !== 'off'
+                  ? activeStyle
+                  : {
+                      backgroundColor: 'transparent',
+                      color: 'var(--ytai-text-secondary)'
+                    }
+              }
             >
-              {settings.activeListeningMode === 'hidden' ? (
-                <Ghost size={scale.iconSize} />
-              ) : settings.activeListeningMode === 'blur' ? (
-                <EyeOff size={scale.iconSize} />
-              ) : (
-                <Eye size={scale.iconSize} />
-              )}
-              <ChevronDown size={Math.max(10, scale.iconSize - 4)} className="opacity-70" />
-            </button>
+              <button
+                type="button"
+                title={getModeQuickTitle()}
+                onClick={cycleListeningMode}
+                className={`flex items-center justify-center rounded-l-full ${scale.iconBtnPadClass} transition hover:opacity-80`}
+              >
+                {settings.activeListeningMode === 'hidden' ? (
+                  <Ghost size={scale.iconSize} />
+                ) : settings.activeListeningMode === 'blur' ? (
+                  <EyeOff size={scale.iconSize} />
+                ) : (
+                  <Eye size={scale.iconSize} />
+                )}
+              </button>
+
+              <span
+                className="h-3 w-[1px] opacity-25"
+                style={{
+                  backgroundColor:
+                    settings.activeListeningMode !== 'off'
+                      ? 'currentColor'
+                      : 'var(--ytai-border, rgba(255,255,255,0.2))'
+                }}
+              />
+
+              <button
+                type="button"
+                title="Выбрать режим субтитров..."
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsModeMenuOpen((prev) => !prev);
+                  setIsAutoPauseMenuOpen(false);
+                  setHoveredModeId(null);
+                }}
+                className="flex items-center justify-center rounded-r-full px-1 py-1 transition hover:opacity-80"
+              >
+                <ChevronDown
+                  size={Math.max(10, scale.iconSize - 4)}
+                  className={`transition-transform duration-200 ${
+                    isModeMenuOpen ? 'rotate-180 opacity-100' : 'opacity-70'
+                  }`}
+                />
+              </button>
+            </div>
 
             {isModeMenuOpen && (
               <div
@@ -369,35 +459,159 @@ export function PlayerControls({
             )}
           </div>
 
-          {/* Auto-pause Cue with Optional Resume Delay Indicator */}
-          <button
-            type="button"
-            title={
-              settings.autoPauseAfterCue
-                ? settings.autoPauseResumeDelaySec
-                  ? `Автопауза субтитров (автовозобновление через ${settings.autoPauseResumeDelaySec}с)`
-                  : 'Автопауза в конце субтитров (возобновление вручную)'
-                : 'Включить автопаузу в конце субтитров'
-            }
-            onClick={() =>
-              onUpdateSettings({ autoPauseAfterCue: !settings.autoPauseAfterCue })
-            }
-            style={settings.autoPauseAfterCue ? activeStyle : inactiveStyle}
-            className={`flex items-center gap-1 rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)]`}
-          >
-            <PauseCircle size={scale.iconSize} />
-            {settings.autoPauseAfterCue && settings.autoPauseResumeDelaySec && (
-              <span
-                className="rounded-full px-1 py-0.2 text-[10px] font-bold tracking-tight"
-                style={{
-                  backgroundColor: 'rgba(0, 0, 0, 0.25)',
-                  color: 'inherit'
+          {/* Split-button: Auto-pause toggle (left) + Delay selector (right) */}
+          <div className="relative" ref={autoPauseMenuRef}>
+            <div
+              className="flex items-center rounded-full transition"
+              style={
+                settings.autoPauseAfterCue
+                  ? activeStyle
+                  : {
+                      backgroundColor: 'transparent',
+                      color: 'var(--ytai-text-secondary)'
+                    }
+              }
+            >
+              {/* Left zone: toggle auto-pause */}
+              <button
+                type="button"
+                title={
+                  settings.autoPauseAfterCue
+                    ? 'Автопауза субтитров включена (клик — выключить)'
+                    : 'Автопауза в конце субтитров (клик — включить)'
+                }
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onUpdateSettings({ autoPauseAfterCue: !settings.autoPauseAfterCue });
                 }}
+                className={`flex items-center justify-center rounded-l-full ${scale.iconBtnPadClass} transition hover:opacity-80`}
               >
-                {settings.autoPauseResumeDelaySec}s
-              </span>
+                <PauseCircle size={scale.iconSize} />
+              </button>
+
+              <span
+                className="h-3 w-[1px] opacity-25"
+                style={{
+                  backgroundColor: settings.autoPauseAfterCue
+                    ? 'currentColor'
+                    : 'var(--ytai-border, rgba(255,255,255,0.2))'
+                }}
+              />
+
+              {/* Right zone: Delay badge + chevron dropdown trigger */}
+              <button
+                type="button"
+                title={
+                  settings.autoPauseResumeDelaySec
+                    ? `Автовозобновление через ${settings.autoPauseResumeDelaySec}с (клик — настроить)`
+                    : 'Возобновление вручную (клик — настроить)'
+                }
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsAutoPauseMenuOpen((prev) => !prev);
+                  setIsModeMenuOpen(false);
+                }}
+                className="flex items-center gap-0.5 rounded-r-full px-1.5 py-1 transition hover:opacity-80"
+              >
+                <span className="font-mono text-[10px] font-bold leading-none tracking-tight">
+                  {settings.autoPauseResumeDelaySec ? `${settings.autoPauseResumeDelaySec}s` : '∞'}
+                </span>
+                <ChevronDown
+                  size={Math.max(10, scale.iconSize - 5)}
+                  className={`transition-transform duration-200 ${
+                    isAutoPauseMenuOpen ? 'rotate-180 opacity-100' : 'opacity-70'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Auto-pause delay dropdown menu */}
+            {isAutoPauseMenuOpen && (
+              <div
+                className="absolute right-0 top-full mt-1.5 z-30 w-52 rounded-xl border p-1.5 shadow-2xl backdrop-blur-md select-none"
+                style={{
+                  backgroundColor: 'rgba(15, 17, 23, 0.96)',
+                  borderColor: 'rgba(255, 255, 255, 0.16)',
+                  color: 'var(--ytai-text-primary)'
+                }}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  Снятие автопаузы
+                </div>
+
+                <div className="space-y-0.5">
+                  {[
+                    { label: 'Вручную (∞)', sec: null },
+                    { label: '3 секунды', sec: 3 },
+                    { label: '5 секунд', sec: 5 },
+                    { label: '10 секунд', sec: 10 }
+                  ].map((opt) => {
+                    const isSelected = settings.autoPauseResumeDelaySec === opt.sec;
+                    return (
+                      <button
+                        key={opt.label}
+                        type="button"
+                        onClick={() => {
+                          onUpdateSettings({
+                            autoPauseResumeDelaySec: opt.sec,
+                            autoPauseAfterCue: true
+                          });
+                          setIsAutoPauseMenuOpen(false);
+                        }}
+                        className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-xs transition hover:bg-white/10"
+                        style={
+                          isSelected
+                            ? { color: 'var(--ytai-accent)', fontWeight: 600 }
+                            : { color: 'var(--ytai-text-primary)' }
+                        }
+                      >
+                        <span>{opt.label}</span>
+                        {isSelected && <Check size={13} className="shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Custom value input with YouTube key interception shielding */}
+                <div className="mt-1.5 border-t border-white/10 pt-1.5">
+                  <div className="px-2 pb-1 text-[10px] text-slate-400">Своё значение (1–60 сек):</div>
+                  <div className="flex items-center gap-1.5 px-1">
+                    <input
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={customDelayInput}
+                      onChange={(e) => setCustomDelayInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.key === 'Enter') {
+                          handleApplyCustomDelay();
+                        } else if (e.key === 'Escape') {
+                          setIsAutoPauseMenuOpen(false);
+                        }
+                      }}
+                      onKeyUp={(e) => e.stopPropagation()}
+                      onKeyPress={(e) => e.stopPropagation()}
+                      placeholder="сек"
+                      className="w-16 rounded-lg border border-white/15 bg-slate-900 px-2 py-1 text-center text-xs text-white focus:border-indigo-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleApplyCustomDelay}
+                      title="Применить задержку"
+                      className="flex flex-1 items-center justify-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-white transition hover:opacity-90"
+                      style={{ backgroundColor: 'var(--ytai-accent)' }}
+                    >
+                      <Check size={13} />
+                      <span>ОК</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
-          </button>
+          </div>
 
           <button
             type="button"

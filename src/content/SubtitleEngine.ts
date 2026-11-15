@@ -137,6 +137,19 @@ export class SubtitleEngine {
     return this.cues;
   }
 
+  public addCue(cue: SubtitleCue): void {
+    const existing = this.cues.find(
+      (c) => c.id === cue.id || (Math.abs(c.startTime - cue.startTime) < 1.0 && c.text === cue.text)
+    );
+    if (!existing) {
+      this.cues.push(cue);
+      this.cues.sort((a, b) => a.startTime - b.startTime);
+      for (let i = 0; i < this.cues.length; i++) {
+        this.cues[i].index = i;
+      }
+    }
+  }
+
   public getIsAsr(): boolean {
     return this.isAsrTrack;
   }

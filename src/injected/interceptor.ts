@@ -54,10 +54,11 @@ import { parseWebVttToJson3 } from '../shared/vtt';
       if (url.pathname.includes('/api/timedtext')) {
         return { type: 'youtube', url };
       }
+      const lower = url.toString().toLowerCase();
       if (
-        url.pathname.endsWith('.vtt') ||
-        url.pathname.includes('.vtt') ||
-        (url.hostname.includes('ur.se') && url.pathname.includes('/subtitles/'))
+        lower.endsWith('.vtt') ||
+        lower.includes('.vtt') ||
+        (lower.includes('ur.se') && lower.includes('/subtitles/'))
       ) {
         return { type: 'vtt', url };
       }
@@ -172,7 +173,7 @@ import { parseWebVttToJson3 } from '../shared/vtt';
           const list = jw.getCaptionsList();
           if (Array.isArray(list)) {
             for (const item of list) {
-              if (item?.file && typeof item.file === 'string' && item.file.includes('.vtt')) {
+              if (item?.file && typeof item.file === 'string' && (item.file.includes('.vtt') || item.file.includes('subtitles'))) {
                 const vttUrl = new URL(item.file, window.location.origin);
                 originalFetch(vttUrl.toString(), { credentials: 'include' })
                   .then((res) => (res.ok ? res.text() : ''))
@@ -256,6 +257,23 @@ import { parseWebVttToJson3 } from '../shared/vtt';
     return input.url;
   }
 
+  function getXhrResponseText(xhr: XMLHttpRequest): string {
+    try {
+      if (!xhr.responseType || xhr.responseType === 'text') {
+        return xhr.responseText || '';
+      }
+      if (xhr.response instanceof ArrayBuffer) {
+        return new TextDecoder('utf-8').decode(xhr.response);
+      }
+      if (typeof xhr.response === 'string') {
+        return xhr.response;
+      }
+    } catch {
+      // Ignore reading error
+    }
+    return '';
+  }
+
   window.fetch = async function patchedFetch(
     input: RequestInfo | URL,
     init?: RequestInit
@@ -327,8 +345,11 @@ import { parseWebVttToJson3 } from '../shared/vtt';
 
     if (subTrack && subTrack.type === 'vtt') {
       this.addEventListener('load', () => {
-        if (this.status >= 200 && this.status < 300 && typeof this.responseText === 'string') {
-          handleCapturedVttText(subTrack.url, this.responseText);
+        if (this.status >= 200 && this.status < 300) {
+          const text = getXhrResponseText(this);
+          if (text) {
+            handleCapturedVttText(subTrack.url, text);
+          }
         }
       });
     } else if (subTrack && subTrack.type === 'youtube') {
@@ -419,5 +440,17 @@ import { parseWebVttToJson3 } from '../shared/vtt';
 
   if (extractVideoIdFromLocation()) {
     scheduleFallbackActivation();
+  }
+
+  // Periodic check for UR Play JW Player captions after load
+  if (typeof window !== 'undefined' && window.location.hostname.includes('urplay.se')) {
+    let attempts = 0;
+    const interval = window.setInterval(() => {
+      attempts++;
+      checkJWPlayerCaptions();
+      if (attempts >= 10 || lastCapturedVideoId) {
+        window.clearInterval(interval);
+      }
+    }, 1000);
   }
 })();

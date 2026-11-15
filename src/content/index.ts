@@ -114,7 +114,7 @@ function findVideoElement(playerEl: HTMLElement | null): HTMLVideoElement | null
 }
 
 function syncNativeCaptionsVisibility(): void {
-  const shouldHide = settings.enabled && !isAdShowing && primaryEngine.getCues().length > 0;
+  const shouldHide = settings.enabled && !isAdShowing;
   const existing = document.getElementById(NATIVE_CAPTIONS_STYLE_ID);
 
   if (shouldHide && !existing) {
@@ -122,7 +122,8 @@ function syncNativeCaptionsVisibility(): void {
     style.id = NATIVE_CAPTIONS_STYLE_ID;
     style.textContent = `
       .ytp-caption-window-container { display: none !important; }
-      .jw-captions { display: none !important; opacity: 0 !important; }
+      .jw-captions { opacity: 0 !important; pointer-events: none !important; }
+      .jw-text-track-cue { opacity: 0 !important; }
     `;
     (document.head ?? document.documentElement).appendChild(style);
   } else if (!shouldHide && existing) {
@@ -406,9 +407,16 @@ function createVideoController(): VideoController {
     onTimeUpdate: (timeSec: number) => {
       if (!settings.enabled || isAdShowing || !videoController) return;
 
-      const nextPrimary = primaryEngine.findActiveCue(timeSec);
+      let nextPrimary = primaryEngine.findActiveCue(timeSec);
+
+      // Preserve active DOM fallback cue while video is within its time window
+      if (!nextPrimary && activePrimaryCue && activePrimaryCue.id.startsWith('dom-')) {
+        if (timeSec >= activePrimaryCue.startTime && timeSec <= activePrimaryCue.endTime) {
+          nextPrimary = activePrimaryCue;
+        }
+      }
       const nextTranslated = settings.showDualSubtitles
-        ? translatedEngine.findActiveCue(timeSec)
+        ? (translatedEngine.findActiveCue(timeSec) ?? (nextPrimary ? activeTranslatedCue : null))
         : null;
 
       if (
@@ -511,6 +519,7 @@ function attachToPlayer(): void {
 }
 
 let domCaptionsObserver: MutationObserver | null = null;
+let lastCapturedDomText = '';
 
 function observeDOMCaptionsFallback(): void {
   domCaptionsObserver?.disconnect();
@@ -522,33 +531,42 @@ function observeDOMCaptionsFallback(): void {
   if (!captionsContainer) return;
 
   domCaptionsObserver = new MutationObserver(() => {
-    if (primaryEngine.getCues().length > 0) return;
+    if (primaryEngine.getCues().length > 5) return;
     const cueEl = captionsContainer.querySelector<HTMLElement>('.jw-text-track-cue');
-    const text = cueEl?.textContent?.replace(/\s+/g, ' ').trim();
+    const text = cueEl?.textContent?.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
     if (!text) {
       if (activePrimaryCue && activePrimaryCue.id.startsWith('dom-')) {
-        activePrimaryCue = null;
-        activeTranslatedCue = null;
-        renderUI();
+        const time = videoController?.getCurrentTime() ?? 0;
+        if (time > activePrimaryCue.endTime) {
+          activePrimaryCue = null;
+          activeTranslatedCue = null;
+          renderUI();
+        }
       }
       return;
     }
 
-    if (activePrimaryCue && activePrimaryCue.text === text) return;
+    if (text === lastCapturedDomText && activePrimaryCue) return;
+    lastCapturedDomText = text;
 
     const time = videoController?.getCurrentTime() ?? 0;
-    const tokens = tokenizeCueText('dom-cue', text, time, time + 4);
-    activePrimaryCue = {
+    const duration = 4.0;
+    const newCue: SubtitleCue = {
       id: `dom-${Math.floor(time * 10)}`,
-      index: 0,
+      index: primaryEngine.getCues().length,
       startTime: time,
-      endTime: time + 4,
+      endTime: time + duration,
       text,
-      tokens
+      tokens: tokenizeCueText(`dom-${Math.floor(time * 10)}`, text, time, time + duration)
     };
+
+    primaryEngine.addCue(newCue);
+    activePrimaryCue = newCue;
+
     if (settings.showDualSubtitles) {
       ensureTranslatedCue(activePrimaryCue);
     }
+    syncNativeCaptionsVisibility();
     renderUI();
   });
 
@@ -597,6 +615,7 @@ function startPlayerSession(): void {
 function resetVideoState(): void {
   primaryEngine.clear();
   translatedEngine.clear();
+  lastCapturedDomText = '';
   trackMeta = null;
   activePrimaryCue = null;
   activeTranslatedCue = null;

@@ -23,13 +23,19 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://*.youtube.com/*"],
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://*.urplay.se/*"
+      ],
       "js": ["src/injected/interceptor.ts"],
       "world": "MAIN",
       "run_at": "document_start"
     },
     {
-      "matches": ["*://*.youtube.com/*"],
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://*.urplay.se/*"
+      ],
       "js": ["src/content/index.ts"],
       "world": "ISOLATED",
       "run_at": "document_idle"
@@ -38,6 +44,8 @@
   "permissions": ["storage", "unlimitedStorage"],
   "host_permissions": [
     "*://*.youtube.com/*",
+    "*://*.urplay.se/*",
+    "*://*.ur.se/*",
     "https://translate.googleapis.com/*"
   ],
   "optional_host_permissions": ["http://127.0.0.1/*"]

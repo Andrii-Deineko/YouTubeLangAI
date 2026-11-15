@@ -19,7 +19,7 @@ import {
   saveSettings,
   saveVocabularyCard
 } from '../shared/storage';
-import { SubtitleEngine } from './SubtitleEngine';
+import { SubtitleEngine, tokenizeCueText } from './SubtitleEngine';
 import { VideoController } from './VideoController';
 import { mountShadowUI, type MountedShadowUI } from './mountShadowUI';
 import type { WordSelectionPayload } from './components/SubtitleOverlay';
@@ -59,7 +59,10 @@ function getVideoIdFromUrl(): string {
     const v = url.searchParams.get('v');
     if (v) return v;
     const match = url.pathname.match(/\/shorts\/([a-zA-Z0-9_-]+)/);
-    return match?.[1] ?? '';
+    if (match?.[1]) return match[1];
+    const urMatch = url.pathname.match(/\/(?:serie|program)\/(\d+)(?:-[\w-]+)?/);
+    if (urMatch?.[1]) return urMatch[1];
+    return '';
   } catch {
     return '';
   }
@@ -68,10 +71,19 @@ function getVideoIdFromUrl(): string {
 function getVideoTitle(): string {
   const titleEl =
     document.querySelector<HTMLElement>('h1.ytd-watch-metadata yt-formatted-string') ??
-    document.querySelector<HTMLElement>('#title h1');
+    document.querySelector<HTMLElement>('#title h1') ??
+    document.querySelector<HTMLElement>('h1[class*="title"]') ??
+    document.querySelector<HTMLElement>('.c-hero-content__title') ??
+    document.querySelector<HTMLElement>('main h1') ??
+    document.querySelector<HTMLElement>('h1');
   const domTitle = titleEl?.textContent?.trim();
   if (domTitle) return domTitle;
-  return document.title.replace(/\s*-\s*YouTube$/, '').trim() || 'YouTube Video';
+  return (
+    document.title
+      .replace(/\s*-\s*YouTube$/i, '')
+      .replace(/\s*\|\s*UR\s*Play$/i, '')
+      .trim() || 'Video'
+  );
 }
 
 function buildSavedKey(word: string, videoId: string, cueStartSec: number): string {
@@ -81,16 +93,24 @@ function buildSavedKey(word: string, videoId: string, cueStartSec: number): stri
 function findPlayerContainer(): HTMLElement | null {
   return (
     document.querySelector<HTMLElement>('#movie_player') ??
-    document.querySelector<HTMLElement>('.html5-video-player')
+    document.querySelector<HTMLElement>('.html5-video-player') ??
+    document.querySelector<HTMLElement>('#player-placeholder .jw-wrapper') ??
+    document.querySelector<HTMLElement>('#player-placeholder') ??
+    document.querySelector<HTMLElement>('.jwplayer .jw-wrapper') ??
+    document.querySelector<HTMLElement>('.jwplayer')
   );
 }
 
 function findVideoElement(playerEl: HTMLElement | null): HTMLVideoElement | null {
   if (playerEl) {
-    const v = playerEl.querySelector<HTMLVideoElement>('video.html5-main-video, video');
+    const v = playerEl.querySelector<HTMLVideoElement>(
+      'video.html5-main-video, video.jw-video, video'
+    );
     if (v) return v;
   }
-  return document.querySelector<HTMLVideoElement>('video.html5-main-video, video');
+  return document.querySelector<HTMLVideoElement>(
+    'video.html5-main-video, video.jw-video, video'
+  );
 }
 
 function syncNativeCaptionsVisibility(): void {
@@ -100,7 +120,10 @@ function syncNativeCaptionsVisibility(): void {
   if (shouldHide && !existing) {
     const style = document.createElement('style');
     style.id = NATIVE_CAPTIONS_STYLE_ID;
-    style.textContent = '.ytp-caption-window-container { display: none !important; }';
+    style.textContent = `
+      .ytp-caption-window-container { display: none !important; }
+      .jw-captions { display: none !important; opacity: 0 !important; }
+    `;
     (document.head ?? document.documentElement).appendChild(style);
   } else if (!shouldHide && existing) {
     existing.remove();
@@ -330,6 +353,54 @@ async function handleQuickSaveShortcut(): Promise<void> {
   });
 }
 
+const cueTranslationMap = new Map<string, string>();
+const inFlightCueTranslations = new Set<string>();
+
+function ensureTranslatedCue(cue: SubtitleCue | null): void {
+  if (!cue || !settings.showDualSubtitles || !settings.enabled) return;
+  if (translatedEngine.getCues().length > 0) return;
+  if (trackMeta && trackMeta.lang.toLowerCase() === settings.nativeLang.toLowerCase()) return;
+
+  const text = cue.text.trim();
+  if (!text) return;
+
+  const key = `${settings.nativeLang}:${text}`;
+  const cached = cueTranslationMap.get(key);
+  if (cached) {
+    if (!activeTranslatedCue || activeTranslatedCue.text !== cached) {
+      activeTranslatedCue = {
+        ...cue,
+        id: `trans-${cue.id}`,
+        text: cached
+      };
+      renderUI();
+    }
+    return;
+  }
+
+  if (inFlightCueTranslations.has(key)) return;
+  inFlightCueTranslations.add(key);
+
+  void sendRuntimeQuickTranslate(text, trackMeta?.lang ?? 'auto', settings.nativeLang)
+    .then((res) => {
+      if (res.ok && res.data?.translation) {
+        cueTranslationMap.set(key, res.data.translation);
+        if (activePrimaryCue && activePrimaryCue.id === cue.id) {
+          activeTranslatedCue = {
+            ...cue,
+            id: `trans-${cue.id}`,
+            text: res.data.translation
+          };
+          renderUI();
+        }
+      }
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      inFlightCueTranslations.delete(key);
+    });
+}
+
 function createVideoController(): VideoController {
   return new VideoController({
     onTimeUpdate: (timeSec: number) => {
@@ -359,6 +430,9 @@ function createVideoController(): VideoController {
         activeTranslatedCue = nextTranslated;
         if (nextPrimary && nextPrimary.id !== lastAutoPausedCueId) {
           lastAutoPausedCueId = null;
+        }
+        if (nextPrimary && !nextTranslated) {
+          ensureTranslatedCue(nextPrimary);
         }
         renderUI();
       }
@@ -436,6 +510,51 @@ function attachToPlayer(): void {
   }
 }
 
+let domCaptionsObserver: MutationObserver | null = null;
+
+function observeDOMCaptionsFallback(): void {
+  domCaptionsObserver?.disconnect();
+  domCaptionsObserver = null;
+
+  const captionsContainer = document.querySelector<HTMLElement>(
+    '#player-placeholder .jw-captions, .jw-captions'
+  );
+  if (!captionsContainer) return;
+
+  domCaptionsObserver = new MutationObserver(() => {
+    if (primaryEngine.getCues().length > 0) return;
+    const cueEl = captionsContainer.querySelector<HTMLElement>('.jw-text-track-cue');
+    const text = cueEl?.textContent?.replace(/\s+/g, ' ').trim();
+    if (!text) {
+      if (activePrimaryCue && activePrimaryCue.id.startsWith('dom-')) {
+        activePrimaryCue = null;
+        activeTranslatedCue = null;
+        renderUI();
+      }
+      return;
+    }
+
+    if (activePrimaryCue && activePrimaryCue.text === text) return;
+
+    const time = videoController?.getCurrentTime() ?? 0;
+    const tokens = tokenizeCueText('dom-cue', text, time, time + 4);
+    activePrimaryCue = {
+      id: `dom-${Math.floor(time * 10)}`,
+      index: 0,
+      startTime: time,
+      endTime: time + 4,
+      text,
+      tokens
+    };
+    if (settings.showDualSubtitles) {
+      ensureTranslatedCue(activePrimaryCue);
+    }
+    renderUI();
+  });
+
+  domCaptionsObserver.observe(captionsContainer, { childList: true, subtree: true, characterData: true });
+}
+
 function teardownPlayerSession(): void {
   sessionAbortController?.abort();
   sessionAbortController = null;
@@ -443,6 +562,8 @@ function teardownPlayerSession(): void {
   adObserver = null;
   domObserver?.disconnect();
   domObserver = null;
+  domCaptionsObserver?.disconnect();
+  domCaptionsObserver = null;
   videoController?.destroy();
   videoController = null;
   mountedUI?.unmount();
@@ -455,14 +576,17 @@ function startPlayerSession(): void {
   sessionAbortController = new AbortController();
   videoController = createVideoController();
   attachToPlayer();
+  observeDOMCaptionsFallback();
 
   domObserver = new MutationObserver(() => {
     const playerEl = findPlayerContainer();
     if (playerEl && (!mountedUI || !playerEl.contains(mountedUI.host))) {
       attachToPlayer();
+      observeDOMCaptionsFallback();
     } else if (playerEl && videoController && !videoController.getVideo()) {
       const videoEl = findVideoElement(playerEl);
       if (videoEl) videoController.attach(videoEl);
+      observeDOMCaptionsFallback();
     }
   });
   if (document.body) {
@@ -527,25 +651,27 @@ window.addEventListener(
   { signal: lifecycleAbortController.signal }
 );
 
-window.addEventListener(
-  'yt-navigate-finish',
-  () => {
-    const nextId = getVideoIdFromUrl();
-    if (nextId !== currentVideoId) {
-      currentVideoId = nextId;
-      resetVideoState();
-    }
+function handleUrlNavigation(): void {
+  const nextId = getVideoIdFromUrl();
+  if (nextId && nextId !== currentVideoId) {
+    currentVideoId = nextId;
+    resetVideoState();
     startPlayerSession();
-    if (nextId) {
-      postToMain({
-        source: ISOLATED_MESSAGE_SOURCE,
-        type: 'NAVIGATED',
-        payload: { videoId: nextId }
-      });
-    }
-  },
-  { signal: lifecycleAbortController.signal }
-);
+    postToMain({
+      source: ISOLATED_MESSAGE_SOURCE,
+      type: 'NAVIGATED',
+      payload: { videoId: nextId }
+    });
+  }
+}
+
+window.addEventListener('yt-navigate-finish', handleUrlNavigation, {
+  signal: lifecycleAbortController.signal
+});
+window.addEventListener('popstate', handleUrlNavigation, {
+  signal: lifecycleAbortController.signal
+});
+setInterval(handleUrlNavigation, 1500);
 
 async function bootstrap(): Promise<void> {
   const [loadedSettings, vocab] = await Promise.all([getSettings(), getVocabulary()]);

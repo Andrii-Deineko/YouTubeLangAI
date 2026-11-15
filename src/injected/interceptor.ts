@@ -6,6 +6,7 @@ import {
   type MainToIsolatedMessage,
   type TrackCapturedPayload
 } from '../types/messages';
+import { parseWebVttToJson3 } from '../shared/vtt';
 
 (() => {
   const GLOBAL_GUARD = '__YT_LANG_AI_INTERCEPTOR_INSTALLED__';
@@ -39,17 +40,26 @@ import {
       if (v) return v;
       const shortsMatch = url.pathname.match(/\/shorts\/([a-zA-Z0-9_-]+)/);
       if (shortsMatch?.[1]) return shortsMatch[1];
+      const urMatch = url.pathname.match(/\/(?:serie|program)\/(\d+)(?:-[\w-]+)?/);
+      if (urMatch?.[1]) return urMatch[1];
     } catch {
       // Ignore malformed URLs
     }
     return '';
   }
 
-  function parseTimedtextUrl(rawUrl: string): URL | null {
+  function parseSubtitleUrl(rawUrl: string): { type: 'youtube' | 'vtt'; url: URL } | null {
     try {
       const url = new URL(rawUrl, window.location.origin);
       if (url.pathname.includes('/api/timedtext')) {
-        return url;
+        return { type: 'youtube', url };
+      }
+      if (
+        url.pathname.endsWith('.vtt') ||
+        url.pathname.includes('.vtt') ||
+        (url.hostname.includes('ur.se') && url.pathname.includes('/subtitles/'))
+      ) {
+        return { type: 'vtt', url };
       }
       return null;
     } catch {
@@ -78,6 +88,42 @@ import {
     };
   }
 
+  function buildVttPayload(urlObj: URL, vttText: string): TrackCapturedPayload {
+    const videoId = extractVideoIdFromLocation();
+    let lang = 'sv';
+    const langMatch = urlObj.pathname.match(/\/subtitles\/([a-zA-Z_-]+)\//);
+    if (langMatch?.[1]) {
+      lang = langMatch[1];
+    } else {
+      const qLang = urlObj.searchParams.get('lang');
+      if (qLang) lang = qLang;
+    }
+    const data = parseWebVttToJson3(vttText);
+    return {
+      videoId,
+      lang,
+      url: urlObj.toString(),
+      data
+    };
+  }
+
+  function handleCapturedVttText(urlObj: URL, vttText: string): void {
+    try {
+      if (!vttText || !vttText.includes('-->')) return;
+      const payload = buildVttPayload(urlObj, vttText);
+      if (payload.data.events && payload.data.events.length > 0) {
+        lastCapturedVideoId = payload.videoId;
+        postToIsolated({
+          source: MAIN_MESSAGE_SOURCE,
+          type: 'TRACK_CAPTURED',
+          payload
+        });
+      }
+    } catch {
+      // Ignore parsing errors
+    }
+  }
+
   function recordOriginalTrackUrl(urlObj: URL): void {
     if (!urlObj.searchParams.get('tlang')) {
       lastBaseTimedtextUrl = urlObj.toString();
@@ -101,13 +147,48 @@ import {
       fallbackTimerId = null;
       const currentVideoId = extractVideoIdFromLocation();
       if (!currentVideoId || currentVideoId !== targetVideoId) return;
-      if (lastCapturedVideoId === currentVideoId && lastBaseTimedtextUrl) return;
 
+      // 1. YouTube subtitle toggle
       const subtitlesBtn = document.querySelector<HTMLButtonElement>('.ytp-subtitles-button');
       if (subtitlesBtn && subtitlesBtn.getAttribute('aria-pressed') === 'false') {
         subtitlesBtn.click();
       }
+
+      // 2. UR Play JW Player captions check
+      checkJWPlayerCaptions();
     }, 2000);
+  }
+
+  function checkJWPlayerCaptions(): void {
+    try {
+      const win = window as unknown as Record<string, unknown>;
+      const jwplayerFn = win.jwplayer as ((id?: string) => {
+        getCaptionsList?: () => Array<{ file?: string }>;
+      }) | undefined;
+
+      if (typeof jwplayerFn === 'function') {
+        const jw = jwplayerFn('player-placeholder') || jwplayerFn();
+        if (jw && typeof jw.getCaptionsList === 'function') {
+          const list = jw.getCaptionsList();
+          if (Array.isArray(list)) {
+            for (const item of list) {
+              if (item?.file && typeof item.file === 'string' && item.file.includes('.vtt')) {
+                const vttUrl = new URL(item.file, window.location.origin);
+                originalFetch(vttUrl.toString(), { credentials: 'include' })
+                  .then((res) => (res.ok ? res.text() : ''))
+                  .then((text) => {
+                    if (text) handleCapturedVttText(vttUrl, text);
+                  })
+                  .catch(() => undefined);
+                break;
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignore JW Player inspect errors
+    }
   }
 
   async function fetchJson3AndDispatch(urlObj: URL, isTranslated: boolean): Promise<void> {
@@ -165,7 +246,7 @@ import {
         payload
       });
     } catch {
-      // Non-JSON payload even though fmt=json3 was requested
+      // Non-JSON payload
     }
   }
 
@@ -180,12 +261,25 @@ import {
     init?: RequestInit
   ): Promise<Response> {
     const rawUrl = getRequestUrl(input);
-    const timedtextUrl = parseTimedtextUrl(rawUrl);
+    const subTrack = parseSubtitleUrl(rawUrl);
 
-    if (!timedtextUrl) {
+    if (!subTrack) {
       return originalFetch(input, init);
     }
 
+    if (subTrack.type === 'vtt') {
+      const response = await originalFetch(input, init);
+      if (response.ok) {
+        const cloned = response.clone();
+        void cloned
+          .text()
+          .then((text) => handleCapturedVttText(subTrack.url, text))
+          .catch(() => undefined);
+      }
+      return response;
+    }
+
+    const timedtextUrl = subTrack.url;
     cancelFallbackTimer();
     recordOriginalTrackUrl(timedtextUrl);
 
@@ -229,9 +323,16 @@ import {
     body?: Document | XMLHttpRequestBodyInit | null
   ): void {
     const meta = xhrMetaMap.get(this);
-    const timedtextUrl = meta ? parseTimedtextUrl(meta.url) : null;
+    const subTrack = meta ? parseSubtitleUrl(meta.url) : null;
 
-    if (timedtextUrl) {
+    if (subTrack && subTrack.type === 'vtt') {
+      this.addEventListener('load', () => {
+        if (this.status >= 200 && this.status < 300 && typeof this.responseText === 'string') {
+          handleCapturedVttText(subTrack.url, this.responseText);
+        }
+      });
+    } else if (subTrack && subTrack.type === 'youtube') {
+      const timedtextUrl = subTrack.url;
       cancelFallbackTimer();
       recordOriginalTrackUrl(timedtextUrl);
 

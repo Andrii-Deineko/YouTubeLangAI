@@ -24,8 +24,8 @@ import {
   }
   const xhrMetaMap = new WeakMap<XMLHttpRequest, XHRMeta>();
 
+  const videoBaseTimedtextMap = new Map<string, string>();
   let lastBaseTimedtextUrl: string | null = null;
-  let lastCapturedVideoId: string | null = null;
   let fallbackTimerId: number | null = null;
 
   function postToIsolated(message: MainToIsolatedMessage): void {
@@ -80,8 +80,12 @@ import {
 
   function recordOriginalTrackUrl(urlObj: URL): void {
     if (!urlObj.searchParams.get('tlang')) {
-      lastBaseTimedtextUrl = urlObj.toString();
-      lastCapturedVideoId = urlObj.searchParams.get('v') ?? extractVideoIdFromLocation();
+      const videoId = urlObj.searchParams.get('v') ?? extractVideoIdFromLocation();
+      const rawUrl = urlObj.toString();
+      lastBaseTimedtextUrl = rawUrl;
+      if (videoId) {
+        videoBaseTimedtextMap.set(videoId, rawUrl);
+      }
     }
   }
 
@@ -101,13 +105,33 @@ import {
       fallbackTimerId = null;
       const currentVideoId = extractVideoIdFromLocation();
       if (!currentVideoId || currentVideoId !== targetVideoId) return;
-      if (lastCapturedVideoId === currentVideoId && lastBaseTimedtextUrl) return;
+      if (videoBaseTimedtextMap.has(currentVideoId)) return;
 
-      const subtitlesBtn = document.querySelector<HTMLButtonElement>('.ytp-subtitles-button');
-      if (subtitlesBtn && subtitlesBtn.getAttribute('aria-pressed') === 'false') {
-        subtitlesBtn.click();
+      const activePlayer =
+        document.querySelector<HTMLElement>('ytd-reel-video-renderer[is-active] .html5-video-player') ??
+        document.querySelector<HTMLElement>('#shorts-player') ??
+        document.querySelector<HTMLElement>('#movie_player') ??
+        document.querySelector<HTMLElement>('.html5-video-player');
+
+      if (activePlayer) {
+        try {
+          const playerApi = activePlayer as unknown as {
+            loadModule?: (moduleName: string) => void;
+            setOption?: (module: string, option: string, value: unknown) => void;
+          };
+          playerApi.loadModule?.('captions');
+        } catch {
+          // Ignore
+        }
+
+        const subtitlesBtn =
+          activePlayer.querySelector<HTMLButtonElement>('.ytp-subtitles-button') ??
+          document.querySelector<HTMLButtonElement>('.ytp-subtitles-button');
+        if (subtitlesBtn && subtitlesBtn.getAttribute('aria-pressed') !== 'true') {
+          subtitlesBtn.click();
+        }
       }
-    }, 2000);
+    }, 1500);
   }
 
   async function fetchJson3AndDispatch(urlObj: URL, isTranslated: boolean): Promise<void> {
@@ -268,17 +292,18 @@ import {
     if (data.source !== ISOLATED_MESSAGE_SOURCE) return;
 
     if (data.type === 'NAVIGATED' && data.payload) {
-      if (data.payload.videoId !== lastCapturedVideoId) {
-        lastBaseTimedtextUrl = null;
-        lastCapturedVideoId = null;
-      }
       scheduleFallbackActivation();
       return;
     }
 
     if (data.type === 'REQUEST_TRANSLATED_TRACK' && data.payload) {
       const { nativeLang, videoId } = data.payload;
-      if (!lastBaseTimedtextUrl) {
+      const targetVid = videoId || extractVideoIdFromLocation();
+      const baseUrlStr =
+        (targetVid && videoBaseTimedtextMap.get(targetVid)) ||
+        lastBaseTimedtextUrl;
+
+      if (!baseUrlStr) {
         postToIsolated({
           source: MAIN_MESSAGE_SOURCE,
           type: 'TRACK_ERROR',
@@ -288,10 +313,7 @@ import {
       }
 
       try {
-        const baseUrl = new URL(lastBaseTimedtextUrl);
-        if (videoId && baseUrl.searchParams.get('v') && baseUrl.searchParams.get('v') !== videoId) {
-          return;
-        }
+        const baseUrl = new URL(baseUrlStr);
         baseUrl.searchParams.set('tlang', nativeLang);
         baseUrl.searchParams.set('fmt', 'json3');
         void fetchJson3AndDispatch(baseUrl, true);
@@ -308,11 +330,6 @@ import {
   });
 
   window.addEventListener('yt-navigate-finish', () => {
-    const currentVideoId = extractVideoIdFromLocation();
-    if (currentVideoId && currentVideoId !== lastCapturedVideoId) {
-      lastBaseTimedtextUrl = null;
-      lastCapturedVideoId = null;
-    }
     scheduleFallbackActivation();
   });
 

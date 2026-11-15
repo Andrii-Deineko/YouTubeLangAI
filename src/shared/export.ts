@@ -15,7 +15,14 @@ function escapeCsvCell(value: string): string {
   return normalized;
 }
 
-export function buildYouTubeTimestampUrl(videoId: string, timestampSec: number): string {
+export function buildYouTubeTimestampUrl(
+  videoId: string,
+  timestampSec: number,
+  isShorts?: boolean
+): string {
+  if (isShorts) {
+    return `https://www.youtube.com/shorts/${encodeURIComponent(videoId)}`;
+  }
   const sec = Math.max(0, Math.floor(timestampSec));
   return `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&t=${sec}s`;
 }
@@ -52,7 +59,7 @@ export function generateVocabularyCsv(cards: VocabularyCard[]): string {
       card.contextTranslation,
       card.videoTitle,
       String(Math.floor(card.timestampSec)),
-      buildYouTubeTimestampUrl(card.videoId, card.timestampSec),
+      buildYouTubeTimestampUrl(card.videoId, card.timestampSec, card.isShorts),
       getCardStateLabel(card.fsrsState.state),
       card.fsrsState.due
     ];
@@ -152,7 +159,7 @@ export async function exportCardsToAnki(
         }
       }
 
-      const ytUrl = buildYouTubeTimestampUrl(card.videoId, card.timestampSec);
+      const ytUrl = buildYouTubeTimestampUrl(card.videoId, card.timestampSec, card.isShorts);
       const frontHtml = [
         `<div style="font-size:24px;font-weight:700;">${escapeHtml(card.word)}</div>`,
         card.contextSentence
@@ -265,7 +272,7 @@ export function formatCardsForTelegram(cards: VocabularyCard[]): string {
     if (card.aiExplanation?.nuanceExplanation) {
       lines.push(`   💡 ${card.aiExplanation.nuanceExplanation}`);
     }
-    lines.push(`   ▶ ${buildYouTubeTimestampUrl(card.videoId, card.timestampSec)}`);
+    lines.push(`   ▶ ${buildYouTubeTimestampUrl(card.videoId, card.timestampSec, card.isShorts)}`);
     return lines.join('\n');
   });
 

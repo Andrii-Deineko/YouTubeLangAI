@@ -23,6 +23,7 @@ interface SubtitleOverlayProps {
   translatedCue: SubtitleCue | null;
   showDualSubtitles: boolean;
   activeListeningMode: ActiveListeningMode;
+  isShorts?: boolean;
   altPressed: boolean;
   fontSize?: number;
   scale?: SubtitleScale;
@@ -40,6 +41,7 @@ export function SubtitleOverlay({
   translatedCue,
   showDualSubtitles,
   activeListeningMode,
+  isShorts,
   altPressed,
   fontSize,
   scale,
@@ -103,7 +105,9 @@ export function SubtitleOverlay({
     const boxEl = containerRef.current;
     if (!boxEl) return;
     const playerEl =
+      boxEl.closest('ytd-reel-video-renderer[is-active] .html5-video-player') ??
       boxEl.closest('#movie_player') ??
+      document.querySelector('ytd-reel-video-renderer[is-active] .html5-video-player') ??
       document.querySelector('#movie_player') ??
       boxEl.closest('.html5-video-player') ??
       document.querySelector('.html5-video-player');
@@ -141,7 +145,9 @@ export function SubtitleOverlay({
     if (!boxEl) return;
 
     const playerEl =
+      boxEl.closest('ytd-reel-video-renderer[is-active] .html5-video-player') ??
       boxEl.closest('#movie_player') ??
+      document.querySelector('ytd-reel-video-renderer[is-active] .html5-video-player') ??
       document.querySelector('#movie_player') ??
       boxEl.closest('.html5-video-player') ??
       document.querySelector('.html5-video-player');
@@ -318,15 +324,25 @@ export function SubtitleOverlay({
         left: `${effectivePosition.xPercent}%`,
         top: `${effectivePosition.yPercent}%`,
         transform: 'translate(-50%, -50%)',
-        maxWidth
+        maxWidth: isShorts ? 'calc(100% - 24px)' : maxWidth
       }
-    : {
-        position: 'absolute',
-        left: '50%',
-        bottom: '4rem',
-        transform: 'translateX(-50%)',
-        maxWidth
-      };
+    : isShorts
+      ? {
+          position: 'absolute',
+          bottom: '135px',
+          left: '12px',
+          right: '72px',
+          width: 'fit-content',
+          maxWidth: 'calc(100% - 84px)',
+          margin: '0 auto'
+        }
+      : {
+          position: 'absolute',
+          left: '50%',
+          bottom: '4rem',
+          transform: 'translateX(-50%)',
+          maxWidth
+        };
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 overflow-visible">

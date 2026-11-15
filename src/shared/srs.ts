@@ -59,6 +59,7 @@ export interface CreateCardInput {
   screenshotBase64: string | null;
   sourceLang: string;
   nativeLang: string;
+  isShorts?: boolean;
 }
 
 export function createNewCard(input: CreateCardInput, now: Date = new Date()): VocabularyCard {
@@ -84,7 +85,8 @@ export function createNewCard(input: CreateCardInput, now: Date = new Date()): V
     sourceLang: input.sourceLang,
     nativeLang: input.nativeLang,
     createdAt: now.toISOString(),
-    fsrsState: fromFsrsCard(emptyCard)
+    fsrsState: fromFsrsCard(emptyCard),
+    isShorts: input.isShorts ?? false
   };
 }
 

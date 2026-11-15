@@ -5,7 +5,8 @@ import {
   type IsolatedToMainMessage,
   type MainToIsolatedMessage,
   type QuickTranslateResponse,
-  type RuntimeRequest
+  type RuntimeRequest,
+  type TrackCapturedPayload
 } from '../types/messages';
 import { DEFAULT_SETTINGS, type UserSettings } from '../types/settings';
 import type { SubtitleCue, TrackMetadata } from '../types/subtitles';
@@ -19,6 +20,7 @@ import {
   saveSettings,
   saveVocabularyCard
 } from '../shared/storage';
+import { getVideoContextFromUrl } from '../shared/youtube';
 import { SubtitleEngine } from './SubtitleEngine';
 import { VideoController } from './VideoController';
 import { mountShadowUI, type MountedShadowUI } from './mountShadowUI';
@@ -32,6 +34,7 @@ const translatedEngine = new SubtitleEngine();
 
 let settings: UserSettings = { ...DEFAULT_SETTINGS };
 let currentVideoId = '';
+let currentIsShorts = false;
 let trackMeta: TrackMetadata | null = null;
 let isAdShowing = false;
 let altPressed = false;
@@ -40,6 +43,9 @@ let activeTranslatedCue: SubtitleCue | null = null;
 let selectedSelection: WordSelectionPayload | null = null;
 let lastAutoPausedCueId: string | null = null;
 let savedWordKeys = new Set<string>();
+
+const preloadedTracksMap = new Map<string, TrackCapturedPayload>();
+const preloadedTranslatedMap = new Map<string, TrackCapturedPayload>();
 
 let mountedUI: MountedShadowUI | null = null;
 let currentPlayerEl: HTMLElement | null = null;
@@ -54,20 +60,14 @@ function postToMain(message: IsolatedToMainMessage): void {
 }
 
 function getVideoIdFromUrl(): string {
-  try {
-    const url = new URL(window.location.href);
-    const v = url.searchParams.get('v');
-    if (v) return v;
-    const match = url.pathname.match(/\/shorts\/([a-zA-Z0-9_-]+)/);
-    return match?.[1] ?? '';
-  } catch {
-    return '';
-  }
+  return getVideoContextFromUrl().videoId;
 }
 
 function getVideoTitle(): string {
   const titleEl =
     document.querySelector<HTMLElement>('h1.ytd-watch-metadata yt-formatted-string') ??
+    document.querySelector<HTMLElement>('ytd-reel-video-renderer[is-active] .title') ??
+    document.querySelector<HTMLElement>('ytd-reel-video-renderer[is-active] h2') ??
     document.querySelector<HTMLElement>('#title h1');
   const domTitle = titleEl?.textContent?.trim();
   if (domTitle) return domTitle;
@@ -79,6 +79,17 @@ function buildSavedKey(word: string, videoId: string, cueStartSec: number): stri
 }
 
 function findPlayerContainer(): HTMLElement | null {
+  if (currentIsShorts) {
+    return (
+      document.querySelector<HTMLElement>(
+        'ytd-reel-video-renderer[is-active] .html5-video-player'
+      ) ??
+      document.querySelector<HTMLElement>('ytd-reel-video-renderer[is-active]') ??
+      document.querySelector<HTMLElement>('#shorts-player') ??
+      document.querySelector<HTMLElement>('ytd-shorts .html5-video-player') ??
+      document.querySelector<HTMLElement>('.html5-video-player')
+    );
+  }
   return (
     document.querySelector<HTMLElement>('#movie_player') ??
     document.querySelector<HTMLElement>('.html5-video-player')
@@ -134,7 +145,8 @@ async function handleSaveVocabulary(params: {
     timestampSec: params.cue.startTime,
     screenshotBase64,
     sourceLang: trackMeta?.lang ?? 'auto',
-    nativeLang: settings.nativeLang
+    nativeLang: settings.nativeLang,
+    isShorts: currentIsShorts
   });
 
   await saveVocabularyCard(card);
@@ -183,6 +195,7 @@ function renderUI(): void {
       videoTitle: getVideoTitle(),
       sourceLang: trackMeta?.lang ?? 'auto',
       settings,
+      isShorts: currentIsShorts,
       prevSentence: context.prevSentence,
       nextSentence: context.nextSentence,
       isSaved,
@@ -201,6 +214,7 @@ function renderUI(): void {
   mountedUI.update({
     settings,
     isAdShowing,
+    isShorts: currentIsShorts,
     trackMeta,
     cueCount: primaryEngine.getCues().length,
     primaryCue: activePrimaryCue,
@@ -392,6 +406,9 @@ function createVideoController(): VideoController {
     onSeeked: () => {
       lastAutoPausedCueId = null;
     },
+    onLoopRewind: () => {
+      lastAutoPausedCueId = null;
+    },
     onRepeatCue: handleRepeatCue,
     onPreviousCue: handlePreviousCue,
     onNextCue: handleNextCue,
@@ -455,6 +472,7 @@ function attachToPlayer(): void {
     mountedUI = mountShadowUI(playerEl, {
       settings,
       isAdShowing,
+      isShorts: currentIsShorts,
       trackMeta,
       cueCount: primaryEngine.getCues().length,
       primaryCue: activePrimaryCue,
@@ -484,13 +502,83 @@ function teardownPlayerSession(): void {
   currentPlayerEl = null;
 }
 
+function applyCapturedTrack(payload: TrackCapturedPayload): void {
+  primaryEngine.loadJson3(payload.data, payload.kind);
+  trackMeta = {
+    videoId: payload.videoId,
+    lang: payload.lang,
+    tlang: payload.tlang,
+    kind: payload.kind,
+    isAsr: primaryEngine.getIsAsr(),
+    url: payload.url
+  };
+  activePrimaryCue = primaryEngine.findActiveCue(videoController?.getCurrentTime() ?? 0);
+  syncNativeCaptionsVisibility();
+  attachToPlayer();
+  renderUI();
+  requestTranslatedTrackIfNeeded();
+}
+
+function applyCapturedTranslatedTrack(payload: TrackCapturedPayload): void {
+  translatedEngine.loadJson3(payload.data, payload.kind);
+  activeTranslatedCue = translatedEngine.findActiveCue(
+    videoController?.getCurrentTime() ?? 0
+  );
+  renderUI();
+}
+
+function checkAndHandleVideoChange(): void {
+  const { videoId: nextId, isShorts: nextIsShorts } = getVideoContextFromUrl();
+  const playerEl = findPlayerContainer();
+  const isPlayerContainerChanged = playerEl !== null && playerEl !== currentPlayerEl;
+
+  if (nextId !== currentVideoId || nextIsShorts !== currentIsShorts) {
+    currentVideoId = nextId;
+    currentIsShorts = nextIsShorts;
+    resetVideoState();
+
+    if (nextId) {
+      const preloaded = preloadedTracksMap.get(nextId);
+      if (preloaded) {
+        applyCapturedTrack(preloaded);
+        const preloadedTrans = preloadedTranslatedMap.get(nextId);
+        if (preloadedTrans) {
+          applyCapturedTranslatedTrack(preloadedTrans);
+        }
+      }
+
+      postToMain({
+        source: ISOLATED_MESSAGE_SOURCE,
+        type: 'NAVIGATED',
+        payload: { videoId: nextId }
+      });
+    }
+
+    startPlayerSession();
+  } else if (isPlayerContainerChanged) {
+    attachToPlayer();
+  }
+}
+
 function startPlayerSession(): void {
   teardownPlayerSession();
   sessionAbortController = new AbortController();
   videoController = createVideoController();
   attachToPlayer();
 
-  domObserver = new MutationObserver(() => {
+  domObserver = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      if (
+        m.type === 'attributes' &&
+        m.attributeName === 'is-active' &&
+        m.target instanceof HTMLElement &&
+        m.target.tagName.toLowerCase() === 'ytd-reel-video-renderer'
+      ) {
+        checkAndHandleVideoChange();
+        return;
+      }
+    }
+
     const playerEl = findPlayerContainer();
     if (playerEl && (!mountedUI || !playerEl.contains(mountedUI.host))) {
       attachToPlayer();
@@ -499,8 +587,14 @@ function startPlayerSession(): void {
       if (videoEl) videoController.attach(videoEl);
     }
   });
+
   if (document.body) {
-    domObserver.observe(document.body, { childList: true, subtree: true });
+    domObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['is-active', 'class']
+    });
   }
 }
 
@@ -532,31 +626,23 @@ window.addEventListener(
 
     if (msg.type === 'TRACK_CAPTURED' && msg.payload) {
       const payload = msg.payload;
-      currentVideoId = payload.videoId || getVideoIdFromUrl();
-      primaryEngine.loadJson3(payload.data, payload.kind);
-      void setCachedSubtitles(currentVideoId, payload.lang, payload.data, payload.tlang);
-      trackMeta = {
-        videoId: currentVideoId,
-        lang: payload.lang,
-        tlang: payload.tlang,
-        kind: payload.kind,
-        isAsr: primaryEngine.getIsAsr(),
-        url: payload.url
-      };
-      activePrimaryCue = primaryEngine.findActiveCue(videoController?.getCurrentTime() ?? 0);
-      syncNativeCaptionsVisibility();
-      attachToPlayer();
-      renderUI();
-      requestTranslatedTrackIfNeeded();
+      preloadedTracksMap.set(payload.videoId, payload);
+      void setCachedSubtitles(payload.videoId, payload.lang, payload.data, payload.tlang);
+
+      if (payload.videoId === currentVideoId || !currentVideoId) {
+        if (!currentVideoId) {
+          currentVideoId = payload.videoId;
+        }
+        applyCapturedTrack(payload);
+      }
     } else if (msg.type === 'TRANSLATED_TRACK_CAPTURED' && msg.payload) {
       const payload = msg.payload;
-      const vid = payload.videoId || currentVideoId;
-      translatedEngine.loadJson3(payload.data, payload.kind);
-      void setCachedSubtitles(vid, payload.lang, payload.data, payload.tlang);
-      activeTranslatedCue = translatedEngine.findActiveCue(
-        videoController?.getCurrentTime() ?? 0
-      );
-      renderUI();
+      preloadedTranslatedMap.set(payload.videoId, payload);
+      void setCachedSubtitles(payload.videoId, payload.lang, payload.data, payload.tlang);
+
+      if (payload.videoId === currentVideoId || !currentVideoId) {
+        applyCapturedTranslatedTrack(payload);
+      }
     }
   },
   { signal: lifecycleAbortController.signal }
@@ -565,19 +651,15 @@ window.addEventListener(
 window.addEventListener(
   'yt-navigate-finish',
   () => {
-    const nextId = getVideoIdFromUrl();
-    if (nextId !== currentVideoId) {
-      currentVideoId = nextId;
-      resetVideoState();
-    }
-    startPlayerSession();
-    if (nextId) {
-      postToMain({
-        source: ISOLATED_MESSAGE_SOURCE,
-        type: 'NAVIGATED',
-        payload: { videoId: nextId }
-      });
-    }
+    checkAndHandleVideoChange();
+  },
+  { signal: lifecycleAbortController.signal }
+);
+
+window.addEventListener(
+  'popstate',
+  () => {
+    checkAndHandleVideoChange();
   },
   { signal: lifecycleAbortController.signal }
 );
@@ -605,7 +687,9 @@ async function bootstrap(): Promise<void> {
     renderUI();
   });
 
-  currentVideoId = getVideoIdFromUrl();
+  const ctx = getVideoContextFromUrl();
+  currentVideoId = ctx.videoId;
+  currentIsShorts = ctx.isShorts;
   startPlayerSession();
 }
 

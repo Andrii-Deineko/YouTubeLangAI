@@ -10,6 +10,7 @@ export interface VideoControllerCallbacks {
   onClosePopup: () => void;
   onAltKeyChange: (pressed: boolean) => void;
   onAdjustFontSize?: (delta: number) => void;
+  onLoopRewind?: () => void;
   isPopupOpen: () => boolean;
   hasCues: () => boolean;
   isOverlayEnabled: () => boolean;
@@ -23,6 +24,7 @@ export class VideoController {
   private inspecting = false;
   private resumingProgrammatically = false;
   private autoResumeTimeoutId: number | null = null;
+  private lastTimeSec: number | null = null;
   private callbacks: VideoControllerCallbacks;
   private windowAbortController: AbortController | null = null;
   private videoAbortController: AbortController | null = null;
@@ -61,6 +63,7 @@ export class VideoController {
     this.videoAbortController?.abort();
     this.videoAbortController = null;
     this.video = videoElement;
+    this.lastTimeSec = null;
 
     if (this.video) {
       const videoCtrl = new AbortController();
@@ -211,7 +214,12 @@ export class VideoController {
   private startLoop(): void {
     const tick = (): void => {
       if (this.video) {
-        this.callbacks.onTimeUpdate(this.video.currentTime);
+        const time = this.video.currentTime;
+        if (this.lastTimeSec !== null && this.lastTimeSec - time > 1.5) {
+          this.callbacks.onLoopRewind?.();
+        }
+        this.lastTimeSec = time;
+        this.callbacks.onTimeUpdate(time);
       }
       this.rafId = window.requestAnimationFrame(tick);
     };
@@ -223,6 +231,7 @@ export class VideoController {
       window.cancelAnimationFrame(this.rafId);
       this.rafId = null;
     }
+    this.lastTimeSec = null;
   }
 
   private isEditableEvent(e: KeyboardEvent): boolean {
@@ -264,6 +273,7 @@ export class VideoController {
     }
     const player =
       this.video?.closest?.('.html5-video-player') ??
+      document.querySelector<HTMLElement>('ytd-reel-video-renderer[is-active] .html5-video-player') ??
       document.querySelector<HTMLElement>('#movie_player, .html5-video-player');
     if (
       player &&

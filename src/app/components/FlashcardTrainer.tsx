@@ -243,7 +243,11 @@ export function FlashcardTrainer({
   }
 
   const remainingCount = practiceAllMode ? practiceQueueIds.length : dueCards.length;
-  const ytUrl = buildYouTubeTimestampUrl(activeCard.videoId, activeCard.timestampSec);
+  const ytUrl = buildYouTubeTimestampUrl(
+    activeCard.videoId,
+    activeCard.timestampSec,
+    activeCard.isShorts
+  );
 
   const buttonStyleByLabel: Record<'Again' | 'Hard' | 'Good' | 'Easy', string> = {
     Again: 'border-rose-500/30 bg-rose-500/15 text-rose-200 hover:bg-rose-500/25',

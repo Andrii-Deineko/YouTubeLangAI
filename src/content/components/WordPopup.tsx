@@ -25,6 +25,7 @@ interface WordPopupProps {
   videoTitle: string;
   sourceLang: string;
   settings: UserSettings;
+  isShorts?: boolean;
   prevSentence: string;
   nextSentence: string;
   isSaved: boolean;
@@ -82,6 +83,7 @@ export function WordPopup({
   videoTitle,
   sourceLang,
   settings,
+  isShorts,
   prevSentence,
   nextSentence,
   isSaved,
@@ -257,7 +259,7 @@ export function WordPopup({
   const pWidth = playerRect?.width ?? window.innerWidth;
   const pHeight = playerRect?.height ?? window.innerHeight;
 
-  const targetWidth = pWidth >= 480 ? 420 : 380;
+  const targetWidth = isShorts ? Math.min(380, pWidth - 24) : pWidth >= 480 ? 420 : 380;
   const popupWidth = Math.min(targetWidth, pWidth - 24);
 
   const relAnchorX = selection.anchorRect.left - pLeft;
@@ -298,7 +300,7 @@ export function WordPopup({
   return (
     <div
       ref={popupRef}
-      className="pointer-events-auto absolute z-30 flex flex-col overflow-hidden w-[380px] sm:w-[420px] max-w-[calc(100%-24px)] rounded-2xl p-3 sm:p-3.5 shadow-2xl transition-all"
+      className="pointer-events-auto absolute z-30 flex flex-col overflow-hidden max-w-[calc(100%-24px)] rounded-2xl p-3 sm:p-3.5 shadow-2xl transition-all"
       style={{
         backgroundColor: 'rgba(var(--ytai-bg-rgb), 0.96)',
         borderColor: 'var(--ytai-border)',
@@ -307,6 +309,7 @@ export function WordPopup({
         backdropFilter: 'blur(var(--ytai-backdrop-blur, 16px))',
         WebkitBackdropFilter: 'blur(var(--ytai-backdrop-blur, 16px))',
         color: 'var(--ytai-text-primary)',
+        width: `${popupWidth}px`,
         left: `${clampedLeft}px`,
         ...verticalPositionStyle
       }}

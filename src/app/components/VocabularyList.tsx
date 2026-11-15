@@ -298,7 +298,7 @@ export function VocabularyList({
       ) : (
         <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
           {filteredCards.map((card) => {
-            const ytUrl = buildYouTubeTimestampUrl(card.videoId, card.timestampSec);
+            const ytUrl = buildYouTubeTimestampUrl(card.videoId, card.timestampSec, card.isShorts);
             return (
               <div
                 key={card.id}

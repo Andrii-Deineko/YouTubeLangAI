@@ -42,6 +42,7 @@ export interface VocabularyCard {
   nativeLang: string;
   createdAt: string;
   fsrsState: FSRSState;
+  isShorts?: boolean;
 }
 
 export interface QuickTranslationResult {

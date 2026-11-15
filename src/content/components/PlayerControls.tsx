@@ -18,6 +18,7 @@ interface PlayerControlsProps {
   settings: UserSettings;
   trackMeta: TrackMetadata | null;
   cueCount: number;
+  isShorts?: boolean;
   altPressed?: boolean;
   hasActivePopup?: boolean;
   onUpdateSettings: (partial: Partial<UserSettings>) => void;
@@ -111,6 +112,7 @@ export function PlayerControls({
   settings,
   trackMeta,
   cueCount,
+  isShorts,
   altPressed,
   hasActivePopup,
   onUpdateSettings,
@@ -287,6 +289,7 @@ export function PlayerControls({
 
   return (
     <div
+      data-shorts={isShorts ? 'true' : undefined}
       className={`absolute right-3 top-3 z-20 flex items-center rounded-full shadow-lg select-none transition-opacity duration-300 ${scale.containerClass} ${
         isVisible ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
       }`}

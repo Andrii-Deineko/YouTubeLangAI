@@ -385,18 +385,26 @@ async function callChatCompletionsSingleAttempt(
     headers.Authorization = `Bearer ${apiKey}`;
   }
 
-  let response: Response;
-  try {
-    response = await fetch(endpoint, {
+  const sendRequest = async (withResponseFormat: boolean) => {
+    const requestPayload: Record<string, unknown> = {
+      model,
+      max_tokens: 1200,
+      temperature: 0.2,
+      messages
+    };
+    if (withResponseFormat) {
+      requestPayload.response_format = { type: 'json_object' };
+    }
+    return fetch(endpoint, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        model,
-        temperature: 0.2,
-        response_format: { type: 'json_object' },
-        messages
-      })
+      body: JSON.stringify(requestPayload)
     });
+  };
+
+  let response: Response;
+  try {
+    response = await sendRequest(true);
   } catch (netErr: unknown) {
     throw new LLMRequestError(
       netErr instanceof Error ? netErr.message : 'Network error (Failed to fetch)',
@@ -404,7 +412,20 @@ async function callChatCompletionsSingleAttempt(
     );
   }
 
-  const responseText = await response.text();
+  let responseText = await response.text();
+
+  if (!response.ok && response.status === 400 && responseText.toLowerCase().includes('response_format')) {
+    try {
+      response = await sendRequest(false);
+      responseText = await response.text();
+    } catch (netErr: unknown) {
+      throw new LLMRequestError(
+        netErr instanceof Error ? netErr.message : 'Network error (Failed to fetch)',
+        { endpoint, model }
+      );
+    }
+  }
+
   if (!response.ok) {
     const errorMessage = extractHttpErrorMessage(responseText, response.statusText);
     const retryAfter = response.headers.get('Retry-After');

@@ -6,6 +6,7 @@ import {
   type MainToIsolatedMessage,
   type TrackCapturedPayload
 } from '../types/messages';
+import { parseWebVttToJson3 } from '../shared/vtt';
 
 (() => {
   const GLOBAL_GUARD = '__YT_LANG_AI_INTERCEPTOR_INSTALLED__';
@@ -39,17 +40,42 @@ import {
       if (v) return v;
       const shortsMatch = url.pathname.match(/\/shorts\/([a-zA-Z0-9_-]+)/);
       if (shortsMatch?.[1]) return shortsMatch[1];
+      const urMatch = url.pathname.match(/\/(?:serie|program)\/(\d+)(?:-[\w-]+)?/);
+      if (urMatch?.[1]) return urMatch[1];
     } catch {
       // Ignore malformed URLs
     }
     return '';
   }
 
-  function parseTimedtextUrl(rawUrl: string): URL | null {
+  function parseSubtitleUrl(rawUrl: string): { type: 'youtube' | 'vtt'; url: URL } | null {
     try {
       const url = new URL(rawUrl, window.location.origin);
       if (url.pathname.includes('/api/timedtext')) {
-        return url;
+        return { type: 'youtube', url };
+      }
+      const lower = url.toString().toLowerCase();
+      // Ensure we NEVER match HLS playlists (.m3u8), video/audio segments (.m4s, .ts, .mp4), or images
+      if (
+        lower.includes('.m3u8') ||
+        lower.includes('.m4s') ||
+        lower.includes('.ts') ||
+        lower.includes('.mp4') ||
+        lower.includes('.m4v') ||
+        lower.includes('.jpg') ||
+        lower.includes('.png')
+      ) {
+        return null;
+      }
+
+      if (
+        lower.endsWith('.vtt') ||
+        lower.includes('.vtt') ||
+        lower.endsWith('.srt') ||
+        lower.includes('.srt') ||
+        (lower.includes('ur.se') && lower.includes('/subtitles/'))
+      ) {
+        return { type: 'vtt', url };
       }
       return null;
     } catch {
@@ -78,6 +104,42 @@ import {
     };
   }
 
+  function buildVttPayload(urlObj: URL, vttText: string): TrackCapturedPayload {
+    const videoId = extractVideoIdFromLocation();
+    let lang = 'sv';
+    const langMatch = urlObj.pathname.match(/\/subtitles\/([a-zA-Z_-]+)\//);
+    if (langMatch?.[1]) {
+      lang = langMatch[1];
+    } else {
+      const qLang = urlObj.searchParams.get('lang');
+      if (qLang) lang = qLang;
+    }
+    const data = parseWebVttToJson3(vttText);
+    return {
+      videoId,
+      lang,
+      url: urlObj.toString(),
+      data
+    };
+  }
+
+  function handleCapturedVttText(urlObj: URL, vttText: string): void {
+    try {
+      if (!vttText || !vttText.includes('-->')) return;
+      const payload = buildVttPayload(urlObj, vttText);
+      if (payload.data.events && payload.data.events.length > 0) {
+        lastCapturedVideoId = payload.videoId;
+        postToIsolated({
+          source: MAIN_MESSAGE_SOURCE,
+          type: 'TRACK_CAPTURED',
+          payload
+        });
+      }
+    } catch {
+      // Ignore parsing errors
+    }
+  }
+
   function recordOriginalTrackUrl(urlObj: URL): void {
     if (!urlObj.searchParams.get('tlang')) {
       lastBaseTimedtextUrl = urlObj.toString();
@@ -101,13 +163,53 @@ import {
       fallbackTimerId = null;
       const currentVideoId = extractVideoIdFromLocation();
       if (!currentVideoId || currentVideoId !== targetVideoId) return;
-      if (lastCapturedVideoId === currentVideoId && lastBaseTimedtextUrl) return;
 
+      // 1. YouTube subtitle toggle
       const subtitlesBtn = document.querySelector<HTMLButtonElement>('.ytp-subtitles-button');
       if (subtitlesBtn && subtitlesBtn.getAttribute('aria-pressed') === 'false') {
         subtitlesBtn.click();
       }
+
+      // 2. UR Play JW Player captions check
+      checkJWPlayerCaptions();
     }, 2000);
+  }
+
+  function checkJWPlayerCaptions(): void {
+    try {
+      const win = window as unknown as Record<string, unknown>;
+      const jwplayerFn = win.jwplayer as ((id?: string) => {
+        getCaptionsList?: () => Array<{ file?: string }>;
+      }) | undefined;
+
+      if (typeof jwplayerFn === 'function') {
+        const jw = jwplayerFn('player-placeholder') || jwplayerFn();
+        if (jw && typeof jw.getCaptionsList === 'function') {
+          const list = jw.getCaptionsList();
+          if (Array.isArray(list)) {
+            for (const item of list) {
+              if (
+                item?.file &&
+                typeof item.file === 'string' &&
+                !item.file.includes('.m3u8') &&
+                (item.file.includes('.vtt') || item.file.includes('.srt') || item.file.includes('subtitles'))
+              ) {
+                const vttUrl = new URL(item.file, window.location.origin);
+                originalFetch(vttUrl.toString(), { credentials: 'include' })
+                  .then((res) => (res.ok ? res.text() : ''))
+                  .then((text) => {
+                    if (text) handleCapturedVttText(vttUrl, text);
+                  })
+                  .catch(() => undefined);
+                break;
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignore JW Player inspect errors
+    }
   }
 
   async function fetchJson3AndDispatch(urlObj: URL, isTranslated: boolean): Promise<void> {
@@ -165,7 +267,7 @@ import {
         payload
       });
     } catch {
-      // Non-JSON payload even though fmt=json3 was requested
+      // Non-JSON payload
     }
   }
 
@@ -175,17 +277,47 @@ import {
     return input.url;
   }
 
+  function getXhrResponseText(xhr: XMLHttpRequest): string {
+    try {
+      if (!xhr.responseType || xhr.responseType === 'text') {
+        return xhr.responseText || '';
+      }
+      if (xhr.response instanceof ArrayBuffer) {
+        return new TextDecoder('utf-8').decode(xhr.response);
+      }
+      if (typeof xhr.response === 'string') {
+        return xhr.response;
+      }
+    } catch {
+      // Ignore reading error
+    }
+    return '';
+  }
+
   window.fetch = async function patchedFetch(
     input: RequestInfo | URL,
     init?: RequestInit
   ): Promise<Response> {
     const rawUrl = getRequestUrl(input);
-    const timedtextUrl = parseTimedtextUrl(rawUrl);
+    const subTrack = parseSubtitleUrl(rawUrl);
 
-    if (!timedtextUrl) {
+    if (!subTrack) {
       return originalFetch(input, init);
     }
 
+    if (subTrack.type === 'vtt') {
+      const response = await originalFetch(input, init);
+      if (response.ok) {
+        const cloned = response.clone();
+        void cloned
+          .text()
+          .then((text) => handleCapturedVttText(subTrack.url, text))
+          .catch(() => undefined);
+      }
+      return response;
+    }
+
+    const timedtextUrl = subTrack.url;
     cancelFallbackTimer();
     recordOriginalTrackUrl(timedtextUrl);
 
@@ -207,31 +339,35 @@ import {
   };
 
   XMLHttpRequest.prototype.open = function patchedOpen(
-    method: string,
-    url: string | URL,
-    async?: boolean,
-    username?: string | null,
-    password?: string | null
+    this: XMLHttpRequest,
+    ...args: [string, string | URL, boolean?, (string | null)?, (string | null)?]
   ): void {
-    const urlStr = typeof url === 'string' ? url : url.toString();
-    xhrMetaMap.set(this, { url: urlStr });
-    OriginalXHROpen.call(
-      this,
-      method,
-      urlStr,
-      async ?? true,
-      username ?? null,
-      password ?? null
-    );
+    const rawUrl = args[1];
+    if (rawUrl) {
+      const urlStr = typeof rawUrl === 'string' ? rawUrl : (rawUrl as URL).toString();
+      xhrMetaMap.set(this, { url: urlStr });
+    }
+    return (OriginalXHROpen as unknown as Function).apply(this, args);
   };
 
   XMLHttpRequest.prototype.send = function patchedSend(
-    body?: Document | XMLHttpRequestBodyInit | null
+    this: XMLHttpRequest,
+    ...args: [Document | XMLHttpRequestBodyInit | null | undefined]
   ): void {
     const meta = xhrMetaMap.get(this);
-    const timedtextUrl = meta ? parseTimedtextUrl(meta.url) : null;
+    const subTrack = meta ? parseSubtitleUrl(meta.url) : null;
 
-    if (timedtextUrl) {
+    if (subTrack && subTrack.type === 'vtt') {
+      this.addEventListener('load', () => {
+        if (this.status >= 200 && this.status < 300) {
+          const text = getXhrResponseText(this);
+          if (text) {
+            handleCapturedVttText(subTrack.url, text);
+          }
+        }
+      });
+    } else if (subTrack && subTrack.type === 'youtube') {
+      const timedtextUrl = subTrack.url;
       cancelFallbackTimer();
       recordOriginalTrackUrl(timedtextUrl);
 
@@ -257,7 +393,7 @@ import {
       });
     }
 
-    OriginalXHRSend.call(this, body ?? null);
+    return (OriginalXHRSend as unknown as Function).apply(this, args);
   };
 
   window.addEventListener('message', (event: MessageEvent<unknown>) => {
@@ -318,5 +454,17 @@ import {
 
   if (extractVideoIdFromLocation()) {
     scheduleFallbackActivation();
+  }
+
+  // Periodic check for UR Play JW Player captions after load
+  if (typeof window !== 'undefined' && window.location.hostname.includes('urplay.se')) {
+    let attempts = 0;
+    const interval = window.setInterval(() => {
+      attempts++;
+      checkJWPlayerCaptions();
+      if (attempts >= 10 || lastCapturedVideoId) {
+        window.clearInterval(interval);
+      }
+    }, 1000);
   }
 })();

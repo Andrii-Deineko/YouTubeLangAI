@@ -2,7 +2,8 @@ import { StrictMode, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import tailwindCss from '../app/index.css?inline';
 import type { UserSettings } from '../types/settings';
-import type { SubtitleCue, TrackMetadata } from '../types/subtitles';
+import type { Json3Response, SubtitleCue, TrackMetadata } from '../types/subtitles';
+import type { DetectedSubtitleTrack } from './subtitleDetector';
 import { PlayerControls } from './components/PlayerControls';
 import { SubtitleOverlay, type WordSelectionPayload } from './components/SubtitleOverlay';
 
@@ -16,9 +17,12 @@ export interface ShadowUIState {
   altPressed: boolean;
   selectedTarget: string | null;
   popupElement?: ReactNode;
+  detectedTracks?: DetectedSubtitleTrack[];
   onUpdateSettings: (partial: Partial<UserSettings>) => void;
   onRepeatCue: () => void;
   onSelectTarget: (selection: WordSelectionPayload) => void;
+  onLoadCustomSubtitles?: (payload: { data: Json3Response; lang: string; source: string }) => void;
+  onRefreshDetectedTracks?: () => void;
 }
 
 export interface MountedShadowUI {
@@ -47,9 +51,12 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
     altPressed,
     selectedTarget,
     popupElement,
+    detectedTracks,
     onUpdateSettings,
     onRepeatCue,
-    onSelectTarget
+    onSelectTarget,
+    onLoadCustomSubtitles,
+    onRefreshDetectedTracks
   } = state;
 
   return (
@@ -68,9 +75,12 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
         cueCount={cueCount}
         altPressed={altPressed}
         hasActivePopup={Boolean(selectedTarget || popupElement)}
+        detectedTracks={detectedTracks}
         onUpdateSettings={onUpdateSettings}
         onRepeatCue={onRepeatCue}
         onResetPosition={() => onUpdateSettings({ subtitlePosition: null })}
+        onLoadCustomSubtitles={onLoadCustomSubtitles}
+        onRefreshDetectedTracks={onRefreshDetectedTracks}
       />
 
       {settings.enabled && !isAdShowing && (

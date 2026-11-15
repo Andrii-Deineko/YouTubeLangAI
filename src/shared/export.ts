@@ -17,6 +17,12 @@ function escapeCsvCell(value: string): string {
 
 export function buildYouTubeTimestampUrl(videoId: string, timestampSec: number): string {
   const sec = Math.max(0, Math.floor(timestampSec));
+  if (videoId.startsWith('http://') || videoId.startsWith('https://')) {
+    return `${videoId}#t=${sec}`;
+  }
+  if (/^\d+/.test(videoId)) {
+    return `https://urplay.se/program/${videoId}`;
+  }
   return `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&t=${sec}s`;
 }
 

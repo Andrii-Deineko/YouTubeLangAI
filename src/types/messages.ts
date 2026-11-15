@@ -101,6 +101,12 @@ export type RuntimeRequest =
         baseUrl: string;
         apiKey: string;
       };
+    }
+  | {
+      type: 'FETCH_SUBTITLES';
+      payload: {
+        url: string;
+      };
     };
 
 export type RuntimeResponse<T> =
@@ -130,3 +136,4 @@ export type AnkiTestResponse = RuntimeResponse<AnkiTestResult>;
 export type AnkiExportResponse = RuntimeResponse<AnkiExportResult>;
 export type LLMTestResponse = RuntimeResponse<LLMTestResult>;
 export type FetchModelsResponse = RuntimeResponse<string[]>;
+export type FetchSubtitlesResponse = RuntimeResponse<string>;

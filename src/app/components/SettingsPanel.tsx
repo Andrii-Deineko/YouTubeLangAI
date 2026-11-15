@@ -11,7 +11,8 @@ import {
   Palette,
   PlugZap,
   RefreshCw,
-  RotateCcw
+  RotateCcw,
+  Tv
 } from 'lucide-react';
 import { clearAllCaches } from '../../shared/db';
 import { resolveChatCompletionsUrl } from '../../shared/llm';
@@ -371,19 +372,21 @@ export function SettingsPanel({
               >
                 <div className="min-w-0 flex-1">
                   <div
-                    className="truncate text-xs font-semibold leading-tight"
+                    className="truncate font-semibold leading-tight"
                     style={{
                       color: currentTheme.textPrimary,
-                      textShadow: currentTheme.textShadow
+                      textShadow: currentTheme.textShadow,
+                      fontSize: `${Math.min(20, Math.max(12, Math.round(settings.subtitleFontSize * 0.7)))}px`
                     }}
                   >
                     {currentTheme.previewOriginal}
                   </div>
                   <div
-                    className="mt-0.5 truncate text-[11px] leading-tight opacity-90"
+                    className="mt-0.5 truncate leading-tight opacity-90"
                     style={{
                       color: currentTheme.textSecondary,
-                      textShadow: currentTheme.textShadow
+                      textShadow: currentTheme.textShadow,
+                      fontSize: `${Math.min(15, Math.max(10, Math.round(settings.subtitleFontSize * 0.52)))}px`
                     }}
                   >
                     {currentTheme.previewTranslation}
@@ -412,13 +415,13 @@ export function SettingsPanel({
           <div className="mb-1.5 flex items-center justify-between text-[11px] text-slate-400">
             <span>Размер шрифта субтитров</span>
             <span className="font-semibold text-slate-200">
-              {settings.subtitleFontSize}px ({settings.subtitleScale.toUpperCase()})
+              {settings.subtitleFontSize}px {settings.subtitleFontSize >= 44 ? '(TV Mode)' : `(${settings.subtitleScale?.toUpperCase() ?? 'MD'})`}
             </span>
           </div>
 
-          <div className="grid grid-cols-4 gap-1.5 rounded-xl border border-white/10 bg-slate-950/70 p-1">
+          <div className="grid grid-cols-5 gap-1.5 rounded-xl border border-white/10 bg-slate-950/70 p-1">
             {SUBTITLE_SCALES.map((scale) => {
-              const active = settings.subtitleScale === scale.id;
+              const active = settings.subtitleFontSize === scale.primary;
               return (
                 <button
                   key={scale.id}
@@ -436,7 +439,10 @@ export function SettingsPanel({
                   }`}
                   style={active ? { color: 'var(--ytai-accent)' } : undefined}
                 >
-                  <span className="text-xs font-bold">{scale.label}</span>
+                  <div className="flex items-center gap-0.5">
+                    {scale.id === 'tv' && <Tv className="h-3 w-3" />}
+                    <span className="text-xs font-bold">{scale.label}</span>
+                  </div>
                   <span className="text-[9px] opacity-75">{scale.primary}px</span>
                 </button>
               );
@@ -447,7 +453,8 @@ export function SettingsPanel({
             <input
               type="range"
               min={14}
-              max={32}
+              max={56}
+              step={2}
               value={settings.subtitleFontSize}
               onChange={(e) => {
                 const val = Number.parseInt(e.target.value, 10);
@@ -462,6 +469,12 @@ export function SettingsPanel({
               className="w-full accent-indigo-500"
               style={{ accentColor: 'var(--ytai-accent)' }}
             />
+            <div className="mt-0.5 flex justify-between text-[9px] text-slate-500">
+              <span>14px</span>
+              <span>20px (Стандарт)</span>
+              <span>36px</span>
+              <span>48–56px (TV)</span>
+            </div>
           </div>
         </div>
 

@@ -115,27 +115,37 @@ export const SUBTITLE_SCALES: Array<{
   primary: number;
   translated: number;
 }> = [
-  { id: 'sm', label: 'S', name: 'Маленький (16px)', primary: 16, translated: 13 },
+  { id: 'sm', label: 'S', name: 'Маленький (16px)', primary: 16, translated: 12 },
   { id: 'md', label: 'M', name: 'Средний (20px)', primary: 20, translated: 15 },
-  { id: 'lg', label: 'L', name: 'Большой (24px)', primary: 24, translated: 17 },
-  { id: 'xl', label: 'XL', name: 'Крупный (28px)', primary: 28, translated: 20 }
+  { id: 'lg', label: 'L', name: 'Большой (28px)', primary: 28, translated: 21 },
+  { id: 'xl', label: 'XL', name: 'Крупный (36px)', primary: 36, translated: 27 },
+  { id: 'tv', label: 'TV', name: 'Телевизор (48px)', primary: 48, translated: 36 }
 ];
 
 export function getSubtitleFontSizes(
-  scale?: SubtitleScale,
-  customFontSize?: number
+  fontSizeOrScale?: number | SubtitleScale,
+  scaleOrFallback?: SubtitleScale | number
 ): { primary: number; translated: number } {
-  if (scale) {
-    const match = SUBTITLE_SCALES.find((s) => s.id === scale);
+  let primary = 20;
+
+  if (typeof fontSizeOrScale === 'number' && fontSizeOrScale > 0) {
+    primary = Math.min(56, Math.max(14, fontSizeOrScale));
+  } else if (typeof scaleOrFallback === 'number' && scaleOrFallback > 0) {
+    primary = Math.min(56, Math.max(14, scaleOrFallback));
+  } else if (typeof fontSizeOrScale === 'string') {
+    const match = SUBTITLE_SCALES.find((s) => s.id === fontSizeOrScale);
     if (match) {
-      return { primary: match.primary, translated: match.translated };
+      primary = match.primary;
+    }
+  } else if (typeof scaleOrFallback === 'string') {
+    const match = SUBTITLE_SCALES.find((s) => s.id === scaleOrFallback);
+    if (match) {
+      primary = match.primary;
     }
   }
-  if (typeof customFontSize === 'number' && customFontSize > 0) {
-    return {
-      primary: customFontSize,
-      translated: Math.max(12, Math.round(customFontSize * 0.75))
-    };
-  }
-  return { primary: 20, translated: 15 };
+
+  return {
+    primary,
+    translated: Math.max(12, Math.round(primary * 0.75))
+  };
 }

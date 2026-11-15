@@ -82,6 +82,23 @@ export function PlayerControls({
     Boolean(altPressed) ||
     Boolean(hasActivePopup);
 
+  const currentFontSize = settings.subtitleFontSize ?? 20;
+
+  const handleDecreaseFontSize = (): void => {
+    const next = Math.max(14, currentFontSize - 4);
+    onUpdateSettings({ subtitleFontSize: next });
+  };
+
+  const handleIncreaseFontSize = (): void => {
+    const next = Math.min(56, currentFontSize + 4);
+    onUpdateSettings({ subtitleFontSize: next });
+  };
+
+  const handleToggleTvPreset = (): void => {
+    const next = currentFontSize >= 44 ? 20 : 48;
+    onUpdateSettings({ subtitleFontSize: next });
+  };
+
   const cycleListeningMode = (): void => {
     const current = settings.activeListeningMode || 'off';
     const next: ActiveListeningMode =
@@ -219,6 +236,45 @@ export function PlayerControls({
           >
             <RotateCcw className="h-3.5 w-3.5" />
           </button>
+
+          {/* Quick Subtitle Font Sizing Group (A- / size / A+) */}
+          <div
+            className="flex items-center rounded-full border px-1 py-0.5"
+            style={{
+              backgroundColor: 'var(--ytai-surface)',
+              borderColor: 'var(--ytai-border)'
+            }}
+          >
+            <button
+              type="button"
+              title="Уменьшить субтитры (хоткей: [)"
+              onClick={handleDecreaseFontSize}
+              disabled={currentFontSize <= 14}
+              className="rounded-full px-1.5 py-0.5 text-[11px] font-semibold transition hover:bg-white/10 hover:text-white disabled:opacity-40"
+              style={{ color: 'var(--ytai-text-secondary)' }}
+            >
+              A-
+            </button>
+            <button
+              type="button"
+              onClick={handleToggleTvPreset}
+              className="px-1 text-[11px] font-bold tracking-tight transition hover:opacity-80"
+              style={{ color: 'var(--ytai-accent)' }}
+              title={`Размер шрифта: ${currentFontSize}px (кликните для переключения Standard / TV)`}
+            >
+              {currentFontSize}
+            </button>
+            <button
+              type="button"
+              title="Увеличить субтитры (хоткей: ])"
+              onClick={handleIncreaseFontSize}
+              disabled={currentFontSize >= 56}
+              className="rounded-full px-1.5 py-0.5 text-[11px] font-semibold transition hover:bg-white/10 hover:text-white disabled:opacity-40"
+              style={{ color: 'var(--ytai-text-secondary)' }}
+            >
+              A+
+            </button>
+          </div>
 
           {/* Reset position button (shown only when position has been customized) */}
           {settings.subtitlePosition && onResetPosition && (

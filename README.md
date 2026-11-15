@@ -1,13 +1,17 @@
-# YouTube Lang AI
+<div align="center">
+  <img src="assets/logo.svg" alt="YouTube Lang AI Logo" width="96" height="96" />
+  <h1>YouTube Lang AI</h1>
+  <p><strong>Contextual AI Subtitles, Active Listening &amp; FSRS Vocabulary Trainer for YouTube</strong></p>
 
-A clean, distraction-free Chrome Extension (Manifest V3) for learning foreign languages directly on YouTube using bilingual clickable subtitles, Active Listening mode, contextual AI breakdowns (BYOK), and FSRS spaced-repetition flashcards.
-
-[![Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/mv3/intro/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.7%20Strict-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-3.4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
-[![FSRS](https://img.shields.io/badge/SRS-ts--fsrs-8B5CF6)](https://github.com/open-spaced-repetition/ts-fsrs)
-[![License: MIT](https://img.shields.io/badge/License-MIT-10B981.svg)](./LICENSE)
+  <p>
+    <a href="https://developer.chrome.com/docs/extensions/mv3/intro/"><img src="https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white" alt="Manifest V3" /></a>
+    <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.7%20Strict-3178C6?logo=typescript&logoColor=white" alt="TypeScript" /></a>
+    <a href="https://react.dev/"><img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React" /></a>
+    <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/Tailwind%20CSS-3.4-06B6D4?logo=tailwindcss&logoColor=white" alt="Tailwind CSS" /></a>
+    <a href="https://github.com/open-spaced-repetition/ts-fsrs"><img src="https://img.shields.io/badge/SRS-ts--fsrs-8B5CF6" alt="FSRS" /></a>
+    <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-10B981.svg" alt="License: MIT" /></a>
+  </p>
+</div>
 
 ---
 

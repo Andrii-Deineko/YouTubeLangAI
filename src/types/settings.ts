@@ -4,14 +4,36 @@ export interface LLMConfig {
   model: string;
 }
 
+export type ThemeId =
+  | 'midnight-glass'
+  | 'cinema-transparent'
+  | 'nordic-frost'
+  | 'warm-espresso'
+  | 'emerald-noir';
+
+export type SubtitleScale = 'sm' | 'md' | 'lg' | 'xl';
+
+export type ActiveListeningMode = 'off' | 'blur' | 'hidden';
+
+export interface SubtitlePosition {
+  xPercent: number;
+  yPercent: number;
+}
+
 export interface UserSettings {
   enabled: boolean;
   nativeLang: string;
   showDualSubtitles: boolean;
-  activeListeningMode: boolean;
+  activeListeningMode: ActiveListeningMode;
   autoPauseAfterCue: boolean;
   autoPauseOnWordClick: boolean;
+  autoHideControls: boolean;
   subtitleFontSize: number;
+  subtitleScale: SubtitleScale;
+  subtitlePosition: SubtitlePosition | null;
+  theme: ThemeId;
+  overlayOpacity: number;
+  fallbackModel: string;
   ankiDeckName: string;
   ankiConnectUrl: string;
   llm: LLMConfig;
@@ -21,10 +43,16 @@ export const DEFAULT_SETTINGS: UserSettings = {
   enabled: true,
   nativeLang: 'ru',
   showDualSubtitles: true,
-  activeListeningMode: false,
+  activeListeningMode: 'off',
   autoPauseAfterCue: false,
   autoPauseOnWordClick: true,
+  autoHideControls: true,
   subtitleFontSize: 20,
+  subtitleScale: 'md',
+  subtitlePosition: null,
+  theme: 'midnight-glass',
+  overlayOpacity: 0.85,
+  fallbackModel: '',
   ankiDeckName: 'YouTube Lang AI',
   ankiConnectUrl: 'http://127.0.0.1:8765',
   llm: {

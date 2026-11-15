@@ -53,13 +53,24 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
   } = state;
 
   return (
-    <div className="pointer-events-none relative h-full w-full font-sans">
+    <div
+      data-theme={settings.theme || 'midnight-glass'}
+      style={
+        {
+          '--ytai-bg-opacity': String(settings.overlayOpacity ?? 0.85)
+        } as React.CSSProperties
+      }
+      className="pointer-events-none relative h-full w-full font-sans"
+    >
       <PlayerControls
         settings={settings}
         trackMeta={trackMeta}
         cueCount={cueCount}
+        altPressed={altPressed}
+        hasActivePopup={Boolean(selectedTarget || popupElement)}
         onUpdateSettings={onUpdateSettings}
         onRepeatCue={onRepeatCue}
+        onResetPosition={() => onUpdateSettings({ subtitlePosition: null })}
       />
 
       {settings.enabled && !isAdShowing && (
@@ -71,6 +82,10 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
             activeListeningMode={settings.activeListeningMode}
             altPressed={altPressed}
             fontSize={settings.subtitleFontSize}
+            scale={settings.subtitleScale}
+            overlayOpacity={settings.overlayOpacity}
+            position={settings.subtitlePosition}
+            onUpdatePosition={(pos) => onUpdateSettings({ subtitlePosition: pos })}
             selectedTarget={selectedTarget}
             onSelectTarget={onSelectTarget}
           />
@@ -94,6 +109,11 @@ export function mountShadowUI(
   host.id = 'yt-lang-ai-root';
   host.style.cssText =
     'position: absolute; inset: 0; pointer-events: none; z-index: 60; overflow: visible;';
+  host.setAttribute('data-theme', initialState.settings.theme || 'midnight-glass');
+  host.style.setProperty(
+    '--ytai-bg-opacity',
+    String(initialState.settings.overlayOpacity ?? 0.85)
+  );
 
   const shadowRoot = host.attachShadow({ mode: 'open' });
 
@@ -119,6 +139,11 @@ export function mountShadowUI(
     host,
     shadowRoot,
     update(nextState: ShadowUIState): void {
+      host.setAttribute('data-theme', nextState.settings.theme || 'midnight-glass');
+      host.style.setProperty(
+        '--ytai-bg-opacity',
+        String(nextState.settings.overlayOpacity ?? 0.85)
+      );
       root.render(
         <StrictMode>
           <ShadowHUD state={nextState} />

@@ -6,13 +6,17 @@ import {
   Database,
   Eye,
   EyeOff,
+  Ghost,
   Loader2,
+  Palette,
   PlugZap,
-  RefreshCw
+  RefreshCw,
+  RotateCcw
 } from 'lucide-react';
 import { clearAllCaches } from '../../shared/db';
 import { resolveChatCompletionsUrl } from '../../shared/llm';
 import { getCachedModels, saveCachedModels } from '../../shared/storage';
+import { SUBTITLE_SCALES, THEMES } from '../../shared/themes';
 import type {
   AnkiTestResponse,
   FetchModelsResponse,
@@ -20,6 +24,7 @@ import type {
   RuntimeRequest
 } from '../../types/messages';
 import type { LLMConfig, UserSettings } from '../../types/settings';
+import { ThemeDropdown } from './ThemeDropdown';
 
 interface SettingsPanelProps {
   settings: UserSettings;
@@ -46,22 +51,26 @@ const LLM_PRESETS = [
   {
     label: 'OpenAI',
     baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-4o-mini'
+    model: 'gpt-4o-mini',
+    fallbackModel: 'gpt-4o'
   },
   {
     label: 'Gemini',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    model: 'gemini-3.8-flash'
+    model: 'gemini-3.8-flash',
+    fallbackModel: 'gemini-3.8-flash-lite'
   },
   {
     label: 'OpenRouter',
     baseUrl: 'https://openrouter.ai/api/v1',
-    model: 'openai/gpt-4o-mini'
+    model: 'openai/gpt-4o-mini',
+    fallbackModel: 'google/gemini-2.5-flash'
   },
   {
     label: 'Ollama',
     baseUrl: 'http://127.0.0.1:11434/v1',
-    model: 'llama3.1'
+    model: 'llama3.1',
+    fallbackModel: ''
   }
 ];
 
@@ -324,8 +333,240 @@ export function SettingsPanel({
 
   return (
     <div className="max-h-[450px] space-y-4 overflow-y-auto pr-1 text-xs">
+      {/* Appearance & Subtitles (Оформление и субтитры) */}
+      <section
+        className="space-y-3.5 rounded-2xl border p-3.5 transition-colors"
+        style={{
+          backgroundColor: 'var(--ytai-surface)',
+          borderColor: 'var(--ytai-border)'
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <Palette className="h-4 w-4" style={{ color: 'var(--ytai-accent)' }} />
+          <h3 className="font-semibold text-white">Appearance & Subtitles</h3>
+        </div>
+
+        {/* Compact Theme Dropdown & Live Preview Strip */}
+        <div>
+          <label className="mb-1.5 block text-[11px] text-slate-400">
+            Цветовая тема
+          </label>
+          <ThemeDropdown
+            currentThemeId={settings.theme || 'midnight-glass'}
+            onSelectTheme={(themeId) => void onUpdateSettings({ theme: themeId })}
+          />
+
+          {/* Compact Live Preview Strip */}
+          {(() => {
+            const currentTheme = THEMES[settings.theme] || THEMES['midnight-glass'];
+            return (
+              <div
+                className="mt-2.5 flex items-center justify-between rounded-xl border px-3 py-2 shadow-sm transition-all"
+                style={{
+                  backgroundColor: `rgba(${currentTheme.bgRgb}, ${settings.overlayOpacity ?? 0.85})`,
+                  borderColor: currentTheme.border,
+                  backdropFilter: `blur(${currentTheme.backdropBlur})`,
+                  WebkitBackdropFilter: `blur(${currentTheme.backdropBlur})`
+                }}
+              >
+                <div className="min-w-0 flex-1">
+                  <div
+                    className="truncate text-xs font-semibold leading-tight"
+                    style={{
+                      color: currentTheme.textPrimary,
+                      textShadow: currentTheme.textShadow
+                    }}
+                  >
+                    {currentTheme.previewOriginal}
+                  </div>
+                  <div
+                    className="mt-0.5 truncate text-[11px] leading-tight opacity-90"
+                    style={{
+                      color: currentTheme.textSecondary,
+                      textShadow: currentTheme.textShadow
+                    }}
+                  >
+                    {currentTheme.previewTranslation}
+                  </div>
+                </div>
+
+                <div className="flex shrink-0 items-center gap-1.5 pl-3">
+                  <span
+                    className="h-2.5 w-2.5 rounded-full"
+                    style={{ backgroundColor: currentTheme.accent }}
+                  />
+                  <span
+                    className="text-[10px] font-medium"
+                    style={{ color: currentTheme.accent }}
+                  >
+                    {currentTheme.name}
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* Subtitle Scale Segmented Control */}
+        <div>
+          <div className="mb-1.5 flex items-center justify-between text-[11px] text-slate-400">
+            <span>Размер шрифта субтитров</span>
+            <span className="font-semibold text-slate-200">
+              {settings.subtitleFontSize}px ({settings.subtitleScale.toUpperCase()})
+            </span>
+          </div>
+
+          <div className="grid grid-cols-4 gap-1.5 rounded-xl border border-white/10 bg-slate-950/70 p-1">
+            {SUBTITLE_SCALES.map((scale) => {
+              const active = settings.subtitleScale === scale.id;
+              return (
+                <button
+                  key={scale.id}
+                  type="button"
+                  onClick={() =>
+                    void onUpdateSettings({
+                      subtitleScale: scale.id,
+                      subtitleFontSize: scale.primary
+                    })
+                  }
+                  className={`flex flex-col items-center justify-center rounded-lg py-1.5 transition ${
+                    active
+                      ? 'bg-white/15 font-semibold text-white shadow-sm'
+                      : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                  }`}
+                  style={active ? { color: 'var(--ytai-accent)' } : undefined}
+                >
+                  <span className="text-xs font-bold">{scale.label}</span>
+                  <span className="text-[9px] opacity-75">{scale.primary}px</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-2.5">
+            <input
+              type="range"
+              min={14}
+              max={32}
+              value={settings.subtitleFontSize}
+              onChange={(e) => {
+                const val = Number.parseInt(e.target.value, 10);
+                const closest = SUBTITLE_SCALES.slice().sort(
+                  (a, b) => Math.abs(a.primary - val) - Math.abs(b.primary - val)
+                )[0];
+                void onUpdateSettings({
+                  subtitleFontSize: val,
+                  subtitleScale: closest ? closest.id : settings.subtitleScale
+                });
+              }}
+              className="w-full accent-indigo-500"
+              style={{ accentColor: 'var(--ytai-accent)' }}
+            />
+          </div>
+        </div>
+
+        {/* Overlay Opacity Slider */}
+        <div>
+          <div className="mb-1.5 flex items-center justify-between text-[11px] text-slate-400">
+            <span>Прозрачность подложки субтитров</span>
+            <span className="font-semibold text-slate-200">
+              {Math.round(settings.overlayOpacity * 100)}%
+            </span>
+          </div>
+          <input
+            type="range"
+            min={0.4}
+            max={1.0}
+            step={0.05}
+            value={settings.overlayOpacity}
+            onChange={(e) =>
+              void onUpdateSettings({
+                overlayOpacity: Number.parseFloat(e.target.value)
+              })
+            }
+            className="w-full accent-indigo-500"
+            style={{ accentColor: 'var(--ytai-accent)' }}
+          />
+          <div className="mt-1 flex justify-between text-[9px] text-slate-500">
+            <span>40% (Прозрачный)</span>
+            <span>70%</span>
+            <span>85% (Стандарт)</span>
+            <span>100% (Плотный)</span>
+          </div>
+        </div>
+
+        {/* Active Listening Modes */}
+        <div>
+          <div className="mb-1.5 flex items-center justify-between text-[11px] text-slate-400">
+            <span>Режим восприятия на слух (Active Listening)</span>
+            <span className="font-semibold text-slate-200">
+              {settings.activeListeningMode === 'off' && 'Обычный (Всегда видны)'}
+              {settings.activeListeningMode === 'blur' && 'Размытие (Blur)'}
+              {settings.activeListeningMode === 'hidden' && 'Скрыты до Alt (Stealth)'}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-1.5 rounded-xl border border-white/10 bg-slate-950/70 p-1">
+            {[
+              { id: 'off' as const, label: 'Обычный', desc: 'Всегда видны', icon: Eye },
+              { id: 'blur' as const, label: 'Blur', desc: 'Hover или Alt', icon: EyeOff },
+              { id: 'hidden' as const, label: 'Stealth', desc: 'Только клавиша Alt', icon: Ghost }
+            ].map((mode) => {
+              const active = settings.activeListeningMode === mode.id;
+              const Icon = mode.icon;
+              return (
+                <button
+                  key={mode.id}
+                  type="button"
+                  onClick={() => void onUpdateSettings({ activeListeningMode: mode.id })}
+                  className={`flex flex-col items-center justify-center rounded-lg py-2 px-1 text-center transition ${
+                    active
+                      ? 'bg-white/15 font-semibold text-white shadow-sm'
+                      : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                  }`}
+                  style={active ? { color: 'var(--ytai-accent)' } : undefined}
+                >
+                  <Icon className="mb-1 h-4 w-4" />
+                  <span className="text-xs font-semibold">{mode.label}</span>
+                  <span className="text-[10px] opacity-75">{mode.desc}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Subtitle Position Reset */}
+        <div className="flex items-center justify-between rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-xs">
+          <div>
+            <span className="text-slate-200 font-medium">Позиция субтитров</span>
+            <p className="text-[11px] text-slate-400">
+              {settings.subtitlePosition
+                ? `Смещена (${Math.round(settings.subtitlePosition.xPercent)}%, ${Math.round(settings.subtitlePosition.yPercent)}%)`
+                : 'По центру снизу (по умолчанию)'}
+            </p>
+          </div>
+          {settings.subtitlePosition ? (
+            <button
+              type="button"
+              onClick={() => void onUpdateSettings({ subtitlePosition: null })}
+              className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/10 px-2.5 py-1 text-xs font-medium text-slate-200 transition hover:bg-white/20 hover:text-white"
+            >
+              <RotateCcw className="h-3 w-3" />
+              <span>Сбросить</span>
+            </button>
+          ) : (
+            <span className="text-[11px] text-slate-500">Тяните плашку мышью</span>
+          )}
+        </div>
+      </section>
+
       {/* Language & Player Behavior */}
-      <section className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/60 p-3.5">
+      <section
+        className="space-y-3 rounded-2xl border p-3.5 transition-colors"
+        style={{
+          backgroundColor: 'var(--ytai-surface)',
+          borderColor: 'var(--ytai-border)'
+        }}
+      >
         <h3 className="font-semibold text-white">Languages & Player</h3>
 
         <div>
@@ -356,8 +597,8 @@ export function SettingsPanel({
               label: 'Show dual (translated) subtitles'
             },
             {
-              key: 'activeListeningMode' as const,
-              label: 'Active Listening (blur subtitles by default)'
+              key: 'autoHideControls' as const,
+              label: 'Auto-hide top control bar on inactivity'
             },
             {
               key: 'autoPauseAfterCue' as const,
@@ -380,33 +621,21 @@ export function SettingsPanel({
                   void onUpdateSettings({ [item.key]: e.target.checked })
                 }
                 className="h-4 w-4 accent-indigo-500"
+                style={{ accentColor: 'var(--ytai-accent)' }}
               />
             </label>
           ))}
         </div>
-
-        <div>
-          <div className="mb-1 flex justify-between text-[11px] text-slate-400">
-            <span>Subtitle Font Size</span>
-            <span className="text-slate-200">{settings.subtitleFontSize}px</span>
-          </div>
-          <input
-            type="range"
-            min={14}
-            max={32}
-            value={settings.subtitleFontSize}
-            onChange={(e) =>
-              void onUpdateSettings({
-                subtitleFontSize: Number.parseInt(e.target.value, 10)
-              })
-            }
-            className="w-full accent-indigo-500"
-          />
-        </div>
       </section>
 
       {/* LLM BYOK Configuration */}
-      <section className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/60 p-3.5">
+      <section
+        className="space-y-3 rounded-2xl border p-3.5 transition-colors"
+        style={{
+          backgroundColor: 'var(--ytai-surface)',
+          borderColor: 'var(--ytai-border)'
+        }}
+      >
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-white">AI Provider (BYOK)</h3>
           <div className="flex gap-1">
@@ -420,10 +649,11 @@ export function SettingsPanel({
                       ...settings.llm,
                       baseUrl: preset.baseUrl,
                       model: preset.model
-                    }
+                    },
+                    fallbackModel: preset.fallbackModel ?? settings.fallbackModel
                   })
                 }
-                className="rounded-md bg-slate-800 px-2 py-0.5 text-[10px] font-medium text-slate-300 hover:bg-indigo-600 hover:text-white"
+                className="rounded-md bg-slate-800 px-2 py-0.5 text-[10px] font-medium text-slate-300 hover:bg-white/20 hover:text-white"
               >
                 {preset.label}
               </button>
@@ -495,6 +725,7 @@ export function SettingsPanel({
                 type="button"
                 onClick={() => setManualModelMode((v) => !v)}
                 className="text-[10px] font-medium text-indigo-400 hover:text-indigo-300"
+                style={{ color: 'var(--ytai-accent)' }}
               >
                 {manualModelMode ? 'Выбрать из списка' : 'Ввести вручную'}
               </button>
@@ -556,7 +787,8 @@ export function SettingsPanel({
               className="shrink-0 rounded-xl border border-white/10 bg-slate-950 p-2 text-slate-300 transition hover:bg-slate-800 hover:text-white disabled:opacity-50"
             >
               <RefreshCw
-                className={`h-3.5 w-3.5 ${modelsLoading ? 'animate-spin text-indigo-400' : ''}`}
+                className={`h-3.5 w-3.5 ${modelsLoading ? 'animate-spin' : ''}`}
+                style={modelsLoading ? { color: 'var(--ytai-accent)' } : undefined}
               />
             </button>
           </div>
@@ -598,6 +830,71 @@ export function SettingsPanel({
           )}
         </div>
 
+        {/* Fallback Model (при 503 / 429) */}
+        <div>
+          <div className="mb-1 flex items-center justify-between">
+            <label className="text-[11px] text-slate-400">
+              Резервная модель (при 503 / 429)
+            </label>
+            {settings.fallbackModel && (
+              <button
+                type="button"
+                onClick={() => void onUpdateSettings({ fallbackModel: '' })}
+                className="text-[10px] text-slate-400 hover:text-slate-200"
+              >
+                Не использовать
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            {!manualModelMode && availableModels.length > 0 ? (
+              <select
+                value={settings.fallbackModel || ''}
+                onChange={(e) =>
+                  void onUpdateSettings({ fallbackModel: e.target.value })
+                }
+                className="min-w-0 flex-1 rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
+              >
+                <option value="">(Не использовать)</option>
+                {settings.fallbackModel &&
+                  !availableModels.includes(settings.fallbackModel.trim()) &&
+                  settings.fallbackModel.trim() !== '' && (
+                    <option value={settings.fallbackModel}>
+                      {settings.fallbackModel} (текущая)
+                    </option>
+                  )}
+                {availableModels.map((modelId) => (
+                  <option key={`fallback-${modelId}`} value={modelId}>
+                    {modelId}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  list="yt-lang-ai-fallback-models"
+                  value={settings.fallbackModel || ''}
+                  onChange={(e) =>
+                    void onUpdateSettings({ fallbackModel: e.target.value })
+                  }
+                  placeholder="Опционально (напр. gemini-3.8-flash-lite / gpt-4o)"
+                  className="min-w-0 flex-1 rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
+                />
+                <datalist id="yt-lang-ai-fallback-models">
+                  {availableModels.map((modelId) => (
+                    <option key={`dl-fallback-${modelId}`} value={modelId} />
+                  ))}
+                </datalist>
+              </>
+            )}
+          </div>
+          <p className="mt-1 text-[10px] text-slate-400">
+            Если основная модель перегружена (503/429), запрос автоматически перенаправится на эту модель.
+          </p>
+        </div>
+
         <div className="text-[10px] text-slate-400 break-all">
           Resolved endpoint:{' '}
           <span className="font-mono text-slate-300">
@@ -609,7 +906,8 @@ export function SettingsPanel({
           type="button"
           disabled={testingLLM}
           onClick={() => void handleTestLLM()}
-          className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50"
+          style={{ backgroundColor: 'var(--ytai-accent)' }}
+          className="flex items-center gap-1.5 rounded-xl px-3 py-2 font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
         >
           {testingLLM ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -638,7 +936,13 @@ export function SettingsPanel({
       </section>
 
       {/* AnkiConnect & Cache */}
-      <section className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/60 p-3.5">
+      <section
+        className="space-y-3 rounded-2xl border p-3.5 transition-colors"
+        style={{
+          backgroundColor: 'var(--ytai-surface)',
+          borderColor: 'var(--ytai-border)'
+        }}
+      >
         <h3 className="font-semibold text-white">AnkiConnect & Cache</h3>
 
         <div className="grid grid-cols-2 gap-2">
@@ -673,7 +977,8 @@ export function SettingsPanel({
             type="button"
             disabled={testingAnki}
             onClick={() => void handleTestAnki()}
-            className="flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50"
+            style={{ backgroundColor: 'var(--ytai-accent)' }}
+            className="flex items-center gap-1.5 rounded-xl px-3 py-2 font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
           >
             {testingAnki ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

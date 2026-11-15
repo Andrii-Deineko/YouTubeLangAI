@@ -1,5 +1,33 @@
-# Auto detect text files and perform LF normalization
+# Auto detect text files and normalize line endings to LF on commit
 * text=auto eol=lf
+
+# Force LF line endings for all text and code files
+*.{ts,tsx,js,json,css,html,md} text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.svg text eol=lf
+.clinerules text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# Windows scripts must keep CRLF
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
+
+# Treat binary files as binary (prevent CRLF conversion)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary

@@ -1,4 +1,9 @@
-import { DEFAULT_SETTINGS, type UserSettings } from '../types/settings';
+import {
+  DEFAULT_SETTINGS,
+  type ActiveListeningMode,
+  type SubtitlePosition,
+  type UserSettings
+} from '../types/settings';
 import type { VocabularyCard } from '../types/vocabulary';
 
 const SETTINGS_KEY = 'yt_lang_ai_settings';
@@ -28,10 +33,62 @@ export async function saveCachedModels(state: CachedModelsState): Promise<void> 
   await chrome.storage.local.set({ [MODELS_CACHE_KEY]: state });
 }
 
+function parseActiveListeningMode(rawVal: unknown): ActiveListeningMode {
+  if (rawVal === 'blur' || rawVal === 'hidden' || rawVal === 'off') {
+    return rawVal;
+  }
+  if (rawVal === true) {
+    return 'blur';
+  }
+  if (rawVal === false) {
+    return 'off';
+  }
+  return DEFAULT_SETTINGS.activeListeningMode;
+}
+
+function parseSubtitlePosition(rawPos: unknown): SubtitlePosition | null {
+  if (!rawPos || typeof rawPos !== 'object') return null;
+  const pos = rawPos as { xPercent?: unknown; yPercent?: unknown };
+  if (
+    typeof pos.xPercent === 'number' &&
+    typeof pos.yPercent === 'number' &&
+    !Number.isNaN(pos.xPercent) &&
+    !Number.isNaN(pos.yPercent) &&
+    pos.xPercent >= 0 &&
+    pos.xPercent <= 100 &&
+    pos.yPercent >= 0 &&
+    pos.yPercent <= 100
+  ) {
+    return { xPercent: pos.xPercent, yPercent: pos.yPercent };
+  }
+  return null;
+}
+
 function mergeSettings(raw: Partial<UserSettings> | undefined): UserSettings {
+  const rawRecord = raw as Record<string, unknown> | undefined;
+  const activeListeningMode = parseActiveListeningMode(
+    rawRecord?.activeListeningMode ?? rawRecord?.activeListening
+  );
+
   return {
     ...DEFAULT_SETTINGS,
     ...raw,
+    activeListeningMode,
+    subtitlePosition: parseSubtitlePosition(rawRecord?.subtitlePosition),
+    autoHideControls:
+      typeof raw?.autoHideControls === 'boolean'
+        ? raw.autoHideControls
+        : DEFAULT_SETTINGS.autoHideControls,
+    theme: raw?.theme ?? DEFAULT_SETTINGS.theme,
+    overlayOpacity:
+      typeof raw?.overlayOpacity === 'number'
+        ? raw.overlayOpacity
+        : DEFAULT_SETTINGS.overlayOpacity,
+    subtitleScale: raw?.subtitleScale ?? DEFAULT_SETTINGS.subtitleScale,
+    fallbackModel:
+      typeof raw?.fallbackModel === 'string'
+        ? raw.fallbackModel
+        : DEFAULT_SETTINGS.fallbackModel,
     llm: {
       ...DEFAULT_SETTINGS.llm,
       ...(raw?.llm ?? {})

@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState, type ReactElement } from 'rea
 import {
   Bookmark,
   BookmarkCheck,
+  ChevronDown,
   Loader2,
+  RotateCcw,
   Sparkles,
   Volume2,
   X
@@ -94,6 +96,7 @@ export function WordPopup({
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiResult, setAiResult] = useState<AIExplanation | null>(null);
   const [saving, setSaving] = useState(false);
+  const [showExamples, setShowExamples] = useState(false);
 
   const activeRequestKeyRef = useRef('');
   const popupRef = useRef<HTMLDivElement | null>(null);
@@ -145,6 +148,7 @@ export function WordPopup({
     setAiLoading(false);
     setAiError(null);
     setAiResult(null);
+    setShowExamples(false);
 
     void sendRuntimeMessage<QuickTranslateResponse>({
       type: 'QUICK_TRANSLATE',
@@ -190,7 +194,8 @@ export function WordPopup({
           nextSentence,
           videoTitle,
           nativeLang: settings.nativeLang,
-          llmConfig: settings.llm
+          llmConfig: settings.llm,
+          fallbackModel: settings.fallbackModel
         }
       });
       if (activeRequestKeyRef.current !== requestKey) return;
@@ -215,6 +220,7 @@ export function WordPopup({
     selection.cue.id,
     selection.cue.text,
     selection.target,
+    settings.fallbackModel,
     settings.llm,
     settings.nativeLang,
     videoId,
@@ -246,51 +252,97 @@ export function WordPopup({
   };
 
   // Compute safe position relative to #movie_player
-  const popupWidth = 360;
   const pLeft = playerRect?.left ?? 0;
   const pTop = playerRect?.top ?? 0;
   const pWidth = playerRect?.width ?? window.innerWidth;
   const pHeight = playerRect?.height ?? window.innerHeight;
 
-  const relCenterX = selection.anchorRect.left - pLeft;
+  const targetWidth = pWidth >= 480 ? 420 : 380;
+  const popupWidth = Math.min(targetWidth, pWidth - 24);
+
+  const relAnchorX = selection.anchorRect.left - pLeft;
   const clampedLeft = Math.max(
     12,
-    Math.min(relCenterX - popupWidth / 2, pWidth - popupWidth - 12)
+    Math.min(relAnchorX - popupWidth / 2, pWidth - popupWidth - 12)
   );
-  const relTop = selection.anchorRect.top - pTop;
-  const bottomOffset = Math.max(80, pHeight - relTop + 12);
+
+  // Rigid max height: min(340px, 55% of player height)
+  const maxAllowedHeight = Math.min(340, Math.floor(pHeight * 0.55));
+  const effectiveMaxHeight = Math.max(160, Math.min(maxAllowedHeight, pHeight - 24));
+
+  const relAnchorTop = selection.anchorRect.top - pTop;
+  const relAnchorBottom = selection.anchorRect.bottom - pTop;
+
+  const spaceAbove = relAnchorTop - 12;
+  const spaceBelow = pHeight - 12 - relAnchorBottom;
+
+  // Flip below subtitles if space above is too tight (< 180px) and there's more space below
+  const placeBelow = spaceAbove < 180 && spaceBelow > spaceAbove;
+
+  let verticalPositionStyle: React.CSSProperties;
+  if (placeBelow) {
+    const availableH = Math.max(140, Math.min(effectiveMaxHeight, spaceBelow));
+    verticalPositionStyle = {
+      top: `${Math.max(12, relAnchorBottom + 8)}px`,
+      maxHeight: `${availableH}px`
+    };
+  } else {
+    const availableH = Math.max(140, Math.min(effectiveMaxHeight, spaceAbove));
+    const bottomOffset = Math.max(12, pHeight - relAnchorTop + 8);
+    verticalPositionStyle = {
+      bottom: `${bottomOffset}px`,
+      maxHeight: `${availableH}px`
+    };
+  }
 
   return (
     <div
       ref={popupRef}
-      className="pointer-events-auto absolute z-30 w-[360px] max-w-[calc(100%-24px)] rounded-2xl border border-white/15 bg-slate-950/95 p-4 text-slate-100 shadow-2xl backdrop-blur-xl"
+      className="pointer-events-auto absolute z-30 flex flex-col overflow-hidden w-[380px] sm:w-[420px] max-w-[calc(100%-24px)] rounded-2xl p-3 sm:p-3.5 shadow-2xl transition-all"
       style={{
+        backgroundColor: 'rgba(var(--ytai-bg-rgb), 0.96)',
+        borderColor: 'var(--ytai-border)',
+        borderWidth: '1px',
+        borderStyle: 'solid',
+        backdropFilter: 'blur(var(--ytai-backdrop-blur, 16px))',
+        WebkitBackdropFilter: 'blur(var(--ytai-backdrop-blur, 16px))',
+        color: 'var(--ytai-text-primary)',
         left: `${clampedLeft}px`,
-        bottom: `${Math.min(bottomOffset, Math.max(80, pHeight - 380))}px`,
-        maxHeight: `${Math.max(240, pHeight - 96)}px`,
-        overflowY: 'auto'
+        ...verticalPositionStyle
       }}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {/* Header */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h3 className="truncate text-lg font-bold text-white">
-              {selection.target}
-            </h3>
-            <button
-              type="button"
-              title="Pronounce"
-              onClick={() => speakText(selection.target, quickResult?.detectedLang || sourceLang)}
-              className="rounded-lg p-1 text-indigo-300 transition hover:bg-indigo-500/20 hover:text-indigo-200"
-            >
-              <Volume2 className="h-4 w-4" />
-            </button>
-          </div>
+      {/* 1. Pinned Header (shrink-0) */}
+      <div
+        className="shrink-0 flex items-center justify-between gap-2 border-b pb-2"
+        style={{ borderColor: 'var(--ytai-border)' }}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <h3
+            className="truncate text-base sm:text-lg font-bold"
+            style={{ color: 'var(--ytai-text-primary)' }}
+          >
+            {selection.target}
+          </h3>
+          <button
+            type="button"
+            title="Pronounce"
+            onClick={() => speakText(selection.target, quickResult?.detectedLang || sourceLang)}
+            style={{ color: 'var(--ytai-accent)' }}
+            className="rounded-lg p-1 transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)] shrink-0"
+          >
+            <Volume2 className="h-4 w-4" />
+          </button>
           {(aiResult?.partOfSpeech || quickResult?.partOfSpeech) && (
-            <span className="mt-0.5 inline-block rounded bg-white/10 px-1.5 py-0.5 text-[11px] font-medium text-slate-300">
+            <span
+              className="truncate rounded border px-1.5 py-0.5 text-[10px] font-medium shrink-0"
+              style={{
+                backgroundColor: 'var(--ytai-surface)',
+                borderColor: 'var(--ytai-border)',
+                color: 'var(--ytai-text-secondary)'
+              }}
+            >
               {aiResult?.partOfSpeech || quickResult?.partOfSpeech}
             </span>
           )}
@@ -300,49 +352,75 @@ export function WordPopup({
           type="button"
           title="Close (Esc)"
           onClick={() => onClose(true)}
-          className="rounded-lg p-1 text-slate-400 transition hover:bg-white/10 hover:text-white"
+          style={{ color: 'var(--ytai-text-secondary)' }}
+          className="rounded-lg p-1 transition hover:bg-[rgba(var(--ytai-accent-rgb),0.15)] hover:text-white shrink-0"
         >
           <X className="h-4 w-4" />
         </button>
       </div>
 
-        {/* Level 1: Quick Translation */}
-        <div className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
+      {/* 2. Scrollable Middle Body (flex-1 min-h-0 overflow-y-auto) */}
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-2 py-2 pr-0.5">
+        {/* Quick Translation & Compact Synonyms */}
+        <div
+          className="rounded-xl border p-2.5 text-xs"
+          style={{
+            backgroundColor: 'var(--ytai-surface)',
+            borderColor: 'var(--ytai-border)'
+          }}
+        >
           {quickLoading ? (
-            <div className="flex items-center gap-2 text-xs text-slate-400">
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-400" />
+            <div className="flex items-center gap-2" style={{ color: 'var(--ytai-text-secondary)' }}>
+              <Loader2 className="h-3.5 w-3.5 animate-spin" style={{ color: 'var(--ytai-accent)' }} />
               <span>Translating...</span>
             </div>
           ) : quickError ? (
             <div className="text-xs text-rose-400">{quickError}</div>
           ) : quickResult ? (
             <div>
-              <div className="text-base font-semibold text-emerald-400">
+              <div className="text-sm font-semibold" style={{ color: 'var(--ytai-accent)' }}>
                 {quickResult.translation}
               </div>
               {quickResult.alternatives.length > 0 && (
-                <div className="mt-1.5 flex flex-wrap gap-1">
-                  {quickResult.alternatives.map((alt) => (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                  {quickResult.alternatives.slice(0, 4).map((alt) => (
                     <span
                       key={alt}
-                      className="rounded-md bg-slate-800/90 px-2 py-0.5 text-xs text-slate-300"
+                      className="rounded-md border px-1.5 py-0.5 text-[11px]"
+                      style={{
+                        backgroundColor: 'rgba(var(--ytai-bg-rgb), 0.75)',
+                        borderColor: 'var(--ytai-border)',
+                        color: 'var(--ytai-text-secondary)'
+                      }}
                     >
                       {alt}
                     </span>
                   ))}
+                  {quickResult.alternatives.length > 4 && (
+                    <span
+                      className="text-[10px] opacity-75"
+                      style={{ color: 'var(--ytai-text-secondary)' }}
+                    >
+                      +{quickResult.alternatives.length - 4}
+                    </span>
+                  )}
                 </div>
               )}
             </div>
           ) : null}
         </div>
 
-        {/* Level 2: Contextual AI Explanation */}
-        <div className="mt-3">
+        {/* AI Breakdown Button & Container */}
+        <div>
           {!aiResult && !aiLoading && (
             <button
               type="button"
               onClick={() => void handleRequestAI()}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-3 py-2 text-xs font-semibold text-white shadow transition hover:from-indigo-500 hover:to-violet-500"
+              style={{
+                backgroundColor: 'var(--ytai-accent)',
+                color: '#ffffff'
+              }}
+              className="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow transition hover:opacity-90"
             >
               <Sparkles className="h-3.5 w-3.5" />
               <span>AI Контекстный разбор</span>
@@ -350,25 +428,64 @@ export function WordPopup({
           )}
 
           {aiLoading && (
-            <div className="flex items-center justify-center gap-2 rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-3 py-2.5 text-xs text-indigo-200">
+            <div
+              className="flex items-center justify-center gap-2 rounded-xl border p-2.5 text-xs"
+              style={{
+                backgroundColor: 'rgba(var(--ytai-accent-rgb), 0.1)',
+                borderColor: 'rgba(var(--ytai-accent-rgb), 0.3)',
+                color: 'var(--ytai-accent)'
+              }}
+            >
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               <span>Analyzing scene context with AI...</span>
             </div>
           )}
 
           {aiError && (
-            <div className="mt-2 break-words rounded-xl border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-300">
-              {aiError}
+            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-200">
+              <div className="break-words">
+                {aiError.includes('503') ? (
+                  <span>
+                    <strong>Сервер модели временно перегружен (503).</strong> Попробуйте ещё раз через несколько секунд.
+                  </span>
+                ) : aiError.includes('429') ? (
+                  <span>
+                    <strong>Превышен лимит запросов (429).</strong> Подождите немного и повторите попытку.
+                  </span>
+                ) : (
+                  aiError
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleRequestAI()}
+                className="mt-2 flex items-center gap-1.5 rounded-lg bg-rose-500/25 px-2.5 py-1 text-[11px] font-semibold text-rose-100 transition hover:bg-rose-500/40"
+              >
+                <RotateCcw className="h-3 w-3" />
+                <span>Повторить</span>
+              </button>
             </div>
           )}
 
           {aiResult && (
-            <div className="space-y-2.5 rounded-xl border border-indigo-500/25 bg-indigo-950/30 p-3 text-xs">
+            <div
+              className="space-y-2 rounded-xl border p-2.5 text-xs"
+              style={{
+                backgroundColor: 'var(--ytai-surface)',
+                borderColor: 'var(--ytai-border)'
+              }}
+            >
               <div className="flex items-center justify-between">
-                <span className="font-semibold text-indigo-300">
+                <span className="font-semibold text-xs" style={{ color: 'var(--ytai-accent)' }}>
                   AI Разбор · {aiResult.lemma}
                 </span>
-                <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 text-[10px] text-indigo-200">
+                <span
+                  className="rounded px-1.5 py-0.5 text-[10px]"
+                  style={{
+                    backgroundColor: 'rgba(var(--ytai-accent-rgb), 0.2)',
+                    color: 'var(--ytai-accent)'
+                  }}
+                >
                   {aiResult.partOfSpeech}
                 </span>
               </div>
@@ -378,79 +495,125 @@ export function WordPopup({
               </div>
 
               {aiResult.literalTranslation && (
-                <div className="text-slate-400">
-                  <span className="font-medium text-slate-300">Дословно: </span>
+                <div style={{ color: 'var(--ytai-text-secondary)' }}>
+                  <span className="font-medium text-white">Дословно: </span>
                   {aiResult.literalTranslation}
                 </div>
               )}
 
               {aiResult.grammarNote && (
-                <div className="text-slate-300">
-                  <span className="font-medium text-indigo-300">Грамматика: </span>
+                <div style={{ color: 'var(--ytai-text-secondary)' }}>
+                  <span className="font-medium" style={{ color: 'var(--ytai-accent)' }}>
+                    Грамматика:{' '}
+                  </span>
                   {aiResult.grammarNote}
                 </div>
               )}
 
               {aiResult.nuanceExplanation && (
-                <div className="text-slate-300">
-                  <span className="font-medium text-indigo-300">Нюанс: </span>
+                <div style={{ color: 'var(--ytai-text-secondary)' }}>
+                  <span className="font-medium" style={{ color: 'var(--ytai-accent)' }}>
+                    Нюанс:{' '}
+                  </span>
                   {aiResult.nuanceExplanation}
                 </div>
               )}
 
+              {/* Collapsible Examples Accordion */}
               {aiResult.examples.length > 0 && (
-                <div className="space-y-1.5 border-t border-white/10 pt-2">
-                  <div className="font-medium text-slate-400">Примеры:</div>
-                  {aiResult.examples.map((ex, idx) => (
-                    <div key={idx} className="rounded-lg bg-black/25 p-2">
-                      <div className="flex items-start justify-between gap-1.5 text-slate-100">
-                        <span>{ex.source}</span>
-                        <button
-                          type="button"
-                          onClick={() => speakText(ex.source, quickResult?.detectedLang || sourceLang)}
-                          className="shrink-0 text-indigo-300 hover:text-indigo-200"
+                <div
+                  className="border-t pt-1.5"
+                  style={{ borderColor: 'var(--ytai-border)' }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setShowExamples((prev) => !prev)}
+                    className="flex w-full items-center justify-between py-1 text-left font-medium transition hover:opacity-80"
+                    style={{ color: 'var(--ytai-text-secondary)' }}
+                  >
+                    <span>Примеры ({aiResult.examples.length})</span>
+                    <ChevronDown
+                      className={`h-3.5 w-3.5 transition-transform duration-200 ${
+                        showExamples ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
+
+                  {showExamples && (
+                    <div className="mt-1.5 space-y-1.5">
+                      {aiResult.examples.map((ex, idx) => (
+                        <div
+                          key={idx}
+                          className="rounded-lg border p-2"
+                          style={{
+                            backgroundColor: 'rgba(var(--ytai-bg-rgb), 0.65)',
+                            borderColor: 'var(--ytai-border)'
+                          }}
                         >
-                          <Volume2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                      <div className="mt-0.5 text-slate-400">{ex.translation}</div>
+                          <div className="flex items-start justify-between gap-1.5 text-white">
+                            <span>{ex.source}</span>
+                            <button
+                              type="button"
+                              onClick={() => speakText(ex.source, quickResult?.detectedLang || sourceLang)}
+                              style={{ color: 'var(--ytai-accent)' }}
+                              className="shrink-0 transition hover:opacity-80"
+                            >
+                              <Volume2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <div className="mt-0.5 text-[11px]" style={{ color: 'var(--ytai-text-secondary)' }}>
+                            {ex.translation}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
             </div>
           )}
         </div>
-
-        {/* Save to Vocabulary Footer */}
-        <div className="mt-3 flex items-center justify-between gap-2 border-t border-white/10 pt-3">
-          <span className="text-[11px] text-slate-400">
-            Hotkeys: S save · R repeat · Esc close
-          </span>
-
-          <button
-            type="button"
-            disabled={saving || quickLoading}
-            onClick={() => void handleSave()}
-            className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
-              isSaved
-                ? 'bg-emerald-600/90 text-white hover:bg-emerald-500'
-                : 'bg-white text-slate-950 hover:bg-slate-200 disabled:opacity-50'
-            }`}
-          >
-            {isSaved ? (
-              <>
-                <BookmarkCheck className="h-3.5 w-3.5" />
-                <span>Сохранено</span>
-              </>
-            ) : (
-              <>
-                <Bookmark className="h-3.5 w-3.5" />
-                <span>В словарь</span>
-              </>
-            )}
-          </button>
-        </div>
       </div>
+
+      {/* 3. Pinned Footer (shrink-0) */}
+      <div
+        className="shrink-0 flex items-center justify-between gap-2 border-t pt-2"
+        style={{ borderColor: 'var(--ytai-border)' }}
+      >
+        <span className="text-[10px] truncate" style={{ color: 'var(--ytai-text-secondary)' }}>
+          S сохранить · R повтор · Esc
+        </span>
+
+        <button
+          type="button"
+          disabled={saving || quickLoading}
+          onClick={() => void handleSave()}
+          style={
+            isSaved
+              ? {
+                  backgroundColor: 'var(--ytai-accent)',
+                  color: '#ffffff'
+                }
+              : {
+                  backgroundColor: 'var(--ytai-text-primary)',
+                  color: 'rgb(var(--ytai-bg-rgb))'
+                }
+          }
+          className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition hover:opacity-90 disabled:opacity-50 shrink-0 shadow-sm"
+        >
+          {isSaved ? (
+            <>
+              <BookmarkCheck className="h-3.5 w-3.5" />
+              <span>Сохранено</span>
+            </>
+          ) : (
+            <>
+              <Bookmark className="h-3.5 w-3.5" />
+              <span>В словарь</span>
+            </>
+          )}
+        </button>
+      </div>
+    </div>
   );
 }

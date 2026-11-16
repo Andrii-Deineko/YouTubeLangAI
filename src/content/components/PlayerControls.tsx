@@ -18,6 +18,7 @@ interface PlayerControlsProps {
   settings: UserSettings;
   trackMeta: TrackMetadata | null;
   cueCount: number;
+  isRateLimited?: boolean;
   isShorts?: boolean;
   altPressed?: boolean;
   hasActivePopup?: boolean;
@@ -112,6 +113,7 @@ export function PlayerControls({
   settings,
   trackMeta,
   cueCount,
+  isRateLimited,
   isShorts,
   altPressed,
   hasActivePopup,
@@ -690,6 +692,20 @@ export function PlayerControls({
               {trackMeta.lang}
               {trackMeta.isAsr ? ' · ASR' : ''}
               {cueCount > 0 ? ` · ${cueCount}` : ''}
+            </span>
+          )}
+
+          {isRateLimited && (
+            <span
+              title="YouTube временно ограничил загрузку субтитров (429). Подождите несколько минут или смените IP"
+              className={`ml-0.5 inline-flex items-center gap-1 rounded-full ${scale.badgeClass} font-semibold tracking-wide border cursor-help select-none`}
+              style={{
+                backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                borderColor: 'rgba(245, 158, 11, 0.5)',
+                color: '#fbbf24'
+              }}
+            >
+              429 · Limit
             </span>
           )}
         </>

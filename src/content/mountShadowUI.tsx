@@ -9,6 +9,7 @@ import { SubtitleOverlay, type WordSelectionPayload } from './components/Subtitl
 export interface ShadowUIState {
   settings: UserSettings;
   isAdShowing: boolean;
+  isRateLimited?: boolean;
   isShorts?: boolean;
   trackMeta: TrackMetadata | null;
   cueCount: number;
@@ -41,6 +42,7 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
   const {
     settings,
     isAdShowing,
+    isRateLimited,
     isShorts,
     trackMeta,
     cueCount,
@@ -68,6 +70,7 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
         settings={settings}
         trackMeta={trackMeta}
         cueCount={cueCount}
+        isRateLimited={isRateLimited}
         isShorts={isShorts}
         altPressed={altPressed}
         hasActivePopup={Boolean(selectedTarget || popupElement)}

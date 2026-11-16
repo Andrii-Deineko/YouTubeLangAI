@@ -38,15 +38,71 @@ interface CaptionTrackItem {
   let lastBaseTimedtextUrl: string | null = null;
   let fallbackTimerId: number | null = null;
 
+  const RATE_LIMIT_STORAGE_KEY = 'ytai_timedtext_blocked_until';
+  const RATE_LIMIT_COOLDOWN_MS = 120_000; // 2 minutes
+
   const capturedTracksMap = new Map<string, TrackCapturedPayload>();
   const capturedTranslatedMap = new Map<string, TrackCapturedPayload>();
   let lastCapturedTrack: TrackCapturedPayload | null = null;
   let lastCapturedTranslatedTrack: TrackCapturedPayload | null = null;
 
   const captionTracksCache = new Map<string, CaptionTrackItem[]>();
+  const videosWithCachedTrack = new Set<string>();
+  const requestedTranslations = new Set<string>();
 
   function postToIsolated(message: MainToIsolatedMessage): void {
     window.postMessage(message, '*');
+  }
+
+  function getRateLimitBlockedUntil(): number {
+    try {
+      const val = window.localStorage.getItem(RATE_LIMIT_STORAGE_KEY);
+      if (val) {
+        const num = Number(val);
+        if (!Number.isNaN(num) && num > Date.now()) {
+          return num;
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return 0;
+  }
+
+  function isCircuitBreakerActive(): boolean {
+    return getRateLimitBlockedUntil() > Date.now();
+  }
+
+  function notifyRateLimited(blockedUntil?: number): void {
+    const until = blockedUntil ?? getRateLimitBlockedUntil();
+    const remainingMs = Math.max(0, until - Date.now());
+    if (remainingMs > 0) {
+      console.warn('[YT-Lang-AI] Circuit breaker active! Cooldown remaining:', Math.round(remainingMs / 1000), 'sec');
+      postToIsolated({
+        source: MAIN_MESSAGE_SOURCE,
+        type: 'CAPTION_RATE_LIMITED',
+        payload: {
+          remainingMs,
+          blockedUntil: until
+        }
+      });
+    }
+  }
+
+  function triggerRateLimitCircuitBreaker(): void {
+    const blockedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+    try {
+      window.localStorage.setItem(RATE_LIMIT_STORAGE_KEY, String(blockedUntil));
+    } catch {
+      // Ignore
+    }
+    cancelFallbackTimer();
+    notifyRateLimited(blockedUntil);
+  }
+
+  // Initial check on boot
+  if (isCircuitBreakerActive()) {
+    notifyRateLimited();
   }
 
   function extractVideoIdFromLocation(): string {
@@ -297,38 +353,14 @@ interface CaptionTrackItem {
     if (tracks && tracks.length > 0 && videoId && videoId !== 'unknown') {
       console.log('[YT-Lang-AI] Cached captionTracks from player API for videoId:', videoId, tracks.length);
       captionTracksCache.set(videoId, tracks);
-    }
-  }
-
-  function getCaptionTracksFromGlobals(): { videoId?: string; tracks: CaptionTrackItem[] } | null {
-    const win = window as unknown as Record<string, unknown>;
-    const candidates = [
-      win.ytInitialPlayerResponse,
-      (win.ytplayer as Record<string, unknown> | undefined)?.config as Record<string, unknown> | undefined
-    ];
-
-    for (const candidate of candidates) {
-      let parsed = candidate;
-      if (typeof candidate === 'string') {
-        try {
-          parsed = JSON.parse(candidate);
-        } catch {
-          parsed = null;
-        }
-      }
-      if (parsed && typeof parsed === 'object') {
-        const record = parsed as Record<string, unknown>;
-        const rawResponse = (record.args as Record<string, unknown> | undefined)?.raw_player_response;
-        const target = rawResponse && typeof rawResponse === 'object' ? rawResponse : record;
-        const tracks = extractCaptionTracksFromObject(target);
-        if (tracks && tracks.length > 0) {
-          const vDetails = (target as Record<string, unknown>).videoDetails as Record<string, unknown> | undefined;
-          const vid = typeof vDetails?.videoId === 'string' ? vDetails.videoId : undefined;
-          return { videoId: vid, tracks };
+      if (!videoBaseTimedtextMap.has(videoId)) {
+        const preferred = tracks.find((t) => t.kind !== 'asr') ?? tracks[0];
+        if (preferred?.baseUrl) {
+          videoBaseTimedtextMap.set(videoId, preferred.baseUrl);
+          lastBaseTimedtextUrl = preferred.baseUrl;
         }
       }
     }
-    return null;
   }
 
   function cancelFallbackTimer(): void {
@@ -340,75 +372,39 @@ interface CaptionTrackItem {
 
   function scheduleFallbackActivation(): void {
     cancelFallbackTimer();
+    if (isCircuitBreakerActive()) {
+      notifyRateLimited();
+      return;
+    }
+
     const targetVideoId = extractVideoId();
-
-    fallbackTimerId = window.setTimeout(async () => {
+    fallbackTimerId = window.setTimeout(() => {
       fallbackTimerId = null;
-      const currentVideoId = extractVideoId();
-      const effectiveVid = currentVideoId !== 'unknown' ? currentVideoId : targetVideoId;
-
-      // If already captured and dispatched for this video, nothing to do
-      if (effectiveVid && effectiveVid !== 'unknown' && capturedTracksMap.has(effectiveVid)) {
+      if (isCircuitBreakerActive()) {
+        notifyRateLimited();
         return;
       }
 
-      console.log('[YT-Lang-AI] 1200ms fallback check for videoId:', effectiveVid);
+      const currentVideoId = extractVideoId();
+      const effectiveVid = currentVideoId !== 'unknown' ? currentVideoId : targetVideoId;
 
-      // 1. Check if we have captionTracks from player API or globals
-      const globalData = getCaptionTracksFromGlobals();
-      let tracks: CaptionTrackItem[] | null = null;
-      if (effectiveVid && captionTracksCache.has(effectiveVid)) {
-        tracks = captionTracksCache.get(effectiveVid) ?? null;
-      } else if (globalData?.tracks && globalData.tracks.length > 0) {
-        tracks = globalData.tracks;
-        if (effectiveVid && effectiveVid !== 'unknown') {
-          captionTracksCache.set(effectiveVid, tracks);
+      // If already captured or cached in ISOLATED for this video, nothing to do
+      if (effectiveVid && effectiveVid !== 'unknown') {
+        if (capturedTracksMap.has(effectiveVid) || videosWithCachedTrack.has(effectiveVid)) {
+          return;
         }
       }
 
-      if (tracks && tracks.length > 0) {
-        console.log('[YT-Lang-AI] Found captionTracks via fallback:', tracks.length);
-        // Prefer non-ASR track, otherwise first available
-        const preferred = tracks.find((t) => t.kind !== 'asr') ?? tracks[0];
-        if (preferred?.baseUrl) {
-          try {
-            // Tier 1a: Try fmt=json3
-            const trackUrl = new URL(preferred.baseUrl, window.location.origin);
-            trackUrl.searchParams.set('fmt', 'json3');
-            if (effectiveVid && effectiveVid !== 'unknown' && !trackUrl.searchParams.get('v')) {
-              trackUrl.searchParams.set('v', effectiveVid);
-            }
-            if (preferred.languageCode && !trackUrl.searchParams.get('lang')) {
-              trackUrl.searchParams.set('lang', preferred.languageCode);
-            }
-            if (preferred.kind && !trackUrl.searchParams.get('kind')) {
-              trackUrl.searchParams.set('kind', preferred.kind);
-            }
+      console.log('[YT-Lang-AI] Fallback CC check for videoId:', effectiveVid);
 
-            console.log('[YT-Lang-AI] Fetching fallback track from baseUrl (fmt=json3):', trackUrl.toString());
-            const ok = await fetchAndDispatchTrack(trackUrl, false);
-            if (ok) return;
-
-            // Tier 1b: Try raw baseUrl (preserving whatever format/signature YouTube generated)
-            console.log('[YT-Lang-AI] Fallback with fmt=json3 failed, trying raw baseUrl:', preferred.baseUrl);
-            const rawUrl = new URL(preferred.baseUrl, window.location.origin);
-            const rawOk = await fetchAndDispatchTrack(rawUrl, false);
-            if (rawOk) return;
-          } catch (err) {
-            console.warn('[YT-Lang-AI] Error fetching fallback track:', err);
-          }
-        }
-      }
-
-      // 2. Secondary fallback: activate native subtitles button or captions module
-      console.log('[YT-Lang-AI] Activating native player captions fallback');
+      // Trigger native subtitles button or captions module so YouTube performs authenticated request
       const activePlayer =
         document.querySelector<HTMLElement>('#movie_player') ??
         document.querySelector<HTMLElement>('ytd-reel-video-renderer[is-active] #shorts-player') ??
         document.querySelector<HTMLElement>('ytd-reel-video-renderer[is-active] .html5-video-player') ??
         document.querySelector<HTMLElement>('.html5-video-player');
 
-      if (activePlayer) {
+      if (activePlayer && !isCircuitBreakerActive()) {
         try {
           const playerApi = activePlayer as unknown as {
             loadModule?: (moduleName: string) => void;
@@ -431,10 +427,22 @@ interface CaptionTrackItem {
   }
 
   async function fetchAndDispatchTrack(urlObj: URL, isTranslated: boolean): Promise<boolean> {
+    if (isCircuitBreakerActive()) {
+      notifyRateLimited();
+      return false;
+    }
+
     try {
       const response = await originalFetch(urlObj.toString(), {
         credentials: 'include'
       });
+
+      if (response.status === 429) {
+        console.warn('[YT-Lang-AI] HTTP 429 detected during fetchAndDispatchTrack!');
+        triggerRateLimitCircuitBreaker();
+        return false;
+      }
+
       if (!response.ok) {
         return false;
       }
@@ -504,8 +512,13 @@ interface CaptionTrackItem {
     cancelFallbackTimer();
     recordOriginalTrackUrl(timedtextUrl);
 
-    const isTranslated = Boolean(timedtextUrl.searchParams.get('tlang'));
     const response = await originalFetch(input, init);
+
+    if (response.status === 429) {
+      console.warn('[YT-Lang-AI] HTTP 429 detected on timedtext fetch!');
+      triggerRateLimitCircuitBreaker();
+      return response;
+    }
 
     if (response.ok) {
       try {
@@ -513,12 +526,7 @@ interface CaptionTrackItem {
         void cloned
           .text()
           .then((text) => {
-            const dispatched = handleCapturedText(timedtextUrl, text);
-            if (!dispatched && timedtextUrl.searchParams.get('fmt') !== 'json3') {
-              const json3Url = new URL(timedtextUrl.toString());
-              json3Url.searchParams.set('fmt', 'json3');
-              void fetchAndDispatchTrack(json3Url, isTranslated);
-            }
+            handleCapturedText(timedtextUrl, text);
           })
           .catch(() => undefined);
       } catch {
@@ -559,22 +567,19 @@ interface CaptionTrackItem {
       recordOriginalTrackUrl(timedtextUrl);
 
       this.addEventListener('load', () => {
+        if (this.status === 429) {
+          console.warn('[YT-Lang-AI] HTTP 429 detected on timedtext XHR!');
+          triggerRateLimitCircuitBreaker();
+          return;
+        }
+
         if (this.status < 200 || this.status >= 300) return;
 
         const isTranslated = Boolean(timedtextUrl.searchParams.get('tlang'));
-        let dispatched = false;
-
         if (typeof this.responseText === 'string' && this.responseText.length > 0) {
-          dispatched = handleCapturedText(timedtextUrl, this.responseText);
+          handleCapturedText(timedtextUrl, this.responseText);
         } else if (this.response && typeof this.response === 'object' && isJson3Data(this.response)) {
           dispatchCapturedTrack(buildPayload(timedtextUrl, this.response), isTranslated);
-          dispatched = true;
-        }
-
-        if (!dispatched && timedtextUrl.searchParams.get('fmt') !== 'json3') {
-          const json3Url = new URL(timedtextUrl.toString());
-          json3Url.searchParams.set('fmt', 'json3');
-          void fetchAndDispatchTrack(json3Url, isTranslated);
         }
       });
     }
@@ -592,6 +597,12 @@ interface CaptionTrackItem {
       (data.source as string) === 'YT_LANG_AI_CONTENT';
 
     if (!isFromContent) return;
+
+    if (data.type === 'HAVE_CACHED_TRACK' && data.payload?.videoId) {
+      videosWithCachedTrack.add(data.payload.videoId);
+      cancelFallbackTimer();
+      return;
+    }
 
     if (data.type === 'GET_LATEST_TRACK') {
       const requestedVid =
@@ -620,8 +631,8 @@ interface CaptionTrackItem {
           videoId: track.videoId,
           payload: track
         });
-      } else {
-        // If not yet captured, trigger fallback check immediately
+      } else if (!videosWithCachedTrack.has(requestedVid)) {
+        // If not yet captured and ISOLATED doesn't have it cached, schedule fallback check
         scheduleFallbackActivation();
       }
 
@@ -641,16 +652,42 @@ interface CaptionTrackItem {
     }
 
     if (data.type === 'NAVIGATED' && data.payload) {
+      const vid = data.payload.videoId;
+      if (vid && videosWithCachedTrack.has(vid)) {
+        cancelFallbackTimer();
+        return;
+      }
       scheduleFallbackActivation();
       return;
     }
 
     if (data.type === 'REQUEST_TRANSLATED_TRACK' && data.payload) {
+      if (isCircuitBreakerActive()) {
+        notifyRateLimited();
+        return;
+      }
+
       const { nativeLang, videoId } = data.payload;
       const targetVid = videoId || extractVideoIdFromLocation();
-      const baseUrlStr =
+      if (!targetVid) return;
+
+      const transKey = `${targetVid}:${nativeLang.toLowerCase()}`;
+      if (requestedTranslations.has(transKey)) {
+        console.log('[YT-Lang-AI] Translation already requested for:', transKey);
+        return;
+      }
+
+      let baseUrlStr =
         (targetVid && videoBaseTimedtextMap.get(targetVid)) ||
         lastBaseTimedtextUrl;
+
+      if (!baseUrlStr && targetVid && captionTracksCache.has(targetVid)) {
+        const cachedTracks = captionTracksCache.get(targetVid);
+        const preferred = cachedTracks?.find((t) => t.kind !== 'asr') ?? cachedTracks?.[0];
+        if (preferred?.baseUrl) {
+          baseUrlStr = preferred.baseUrl;
+        }
+      }
 
       if (!baseUrlStr) {
         postToIsolated({
@@ -660,6 +697,8 @@ interface CaptionTrackItem {
         });
         return;
       }
+
+      requestedTranslations.add(transKey);
 
       try {
         const baseUrl = new URL(baseUrlStr);

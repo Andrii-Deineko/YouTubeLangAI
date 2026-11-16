@@ -18,13 +18,60 @@ console.log('[YT-Lang-AI] MAIN interceptor booted', location.href);
     const videoBaseTimedtextMap = /* @__PURE__ */ new Map();
     let lastBaseTimedtextUrl = null;
     let fallbackTimerId = null;
+    const RATE_LIMIT_STORAGE_KEY = "ytai_timedtext_blocked_until";
+    const RATE_LIMIT_COOLDOWN_MS = 12e4;
     const capturedTracksMap = /* @__PURE__ */ new Map();
     const capturedTranslatedMap = /* @__PURE__ */ new Map();
     let lastCapturedTrack = null;
     let lastCapturedTranslatedTrack = null;
     const captionTracksCache = /* @__PURE__ */ new Map();
+    const videosWithCachedTrack = /* @__PURE__ */ new Set();
+    const requestedTranslations = /* @__PURE__ */ new Set();
     function postToIsolated(message) {
       window.postMessage(message, "*");
+    }
+    function getRateLimitBlockedUntil() {
+      try {
+        const val = window.localStorage.getItem(RATE_LIMIT_STORAGE_KEY);
+        if (val) {
+          const num = Number(val);
+          if (!Number.isNaN(num) && num > Date.now()) {
+            return num;
+          }
+        }
+      } catch {
+      }
+      return 0;
+    }
+    function isCircuitBreakerActive() {
+      return getRateLimitBlockedUntil() > Date.now();
+    }
+    function notifyRateLimited(blockedUntil) {
+      const until = blockedUntil ?? getRateLimitBlockedUntil();
+      const remainingMs = Math.max(0, until - Date.now());
+      if (remainingMs > 0) {
+        console.warn("[YT-Lang-AI] Circuit breaker active! Cooldown remaining:", Math.round(remainingMs / 1e3), "sec");
+        postToIsolated({
+          source: MAIN_MESSAGE_SOURCE,
+          type: "CAPTION_RATE_LIMITED",
+          payload: {
+            remainingMs,
+            blockedUntil: until
+          }
+        });
+      }
+    }
+    function triggerRateLimitCircuitBreaker() {
+      const blockedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+      try {
+        window.localStorage.setItem(RATE_LIMIT_STORAGE_KEY, String(blockedUntil));
+      } catch {
+      }
+      cancelFallbackTimer();
+      notifyRateLimited(blockedUntil);
+    }
+    if (isCircuitBreakerActive()) {
+      notifyRateLimited();
     }
     function extractVideoIdFromLocation() {
       try {
@@ -239,36 +286,14 @@ console.log('[YT-Lang-AI] MAIN interceptor booted', location.href);
       if (tracks && tracks.length > 0 && videoId && videoId !== "unknown") {
         console.log("[YT-Lang-AI] Cached captionTracks from player API for videoId:", videoId, tracks.length);
         captionTracksCache.set(videoId, tracks);
-      }
-    }
-    function getCaptionTracksFromGlobals() {
-      const win = window;
-      const candidates = [
-        win.ytInitialPlayerResponse,
-        win.ytplayer?.config
-      ];
-      for (const candidate of candidates) {
-        let parsed = candidate;
-        if (typeof candidate === "string") {
-          try {
-            parsed = JSON.parse(candidate);
-          } catch {
-            parsed = null;
-          }
-        }
-        if (parsed && typeof parsed === "object") {
-          const record = parsed;
-          const rawResponse = record.args?.raw_player_response;
-          const target = rawResponse && typeof rawResponse === "object" ? rawResponse : record;
-          const tracks = extractCaptionTracksFromObject(target);
-          if (tracks && tracks.length > 0) {
-            const vDetails = target.videoDetails;
-            const vid = typeof vDetails?.videoId === "string" ? vDetails.videoId : void 0;
-            return { videoId: vid, tracks };
+        if (!videoBaseTimedtextMap.has(videoId)) {
+          const preferred = tracks.find((t) => t.kind !== "asr") ?? tracks[0];
+          if (preferred?.baseUrl) {
+            videoBaseTimedtextMap.set(videoId, preferred.baseUrl);
+            lastBaseTimedtextUrl = preferred.baseUrl;
           }
         }
       }
-      return null;
     }
     function cancelFallbackTimer() {
       if (fallbackTimerId !== null) {
@@ -278,56 +303,27 @@ console.log('[YT-Lang-AI] MAIN interceptor booted', location.href);
     }
     function scheduleFallbackActivation() {
       cancelFallbackTimer();
+      if (isCircuitBreakerActive()) {
+        notifyRateLimited();
+        return;
+      }
       const targetVideoId = extractVideoId();
-      fallbackTimerId = window.setTimeout(async () => {
+      fallbackTimerId = window.setTimeout(() => {
         fallbackTimerId = null;
-        const currentVideoId = extractVideoId();
-        const effectiveVid = currentVideoId !== "unknown" ? currentVideoId : targetVideoId;
-        if (effectiveVid && effectiveVid !== "unknown" && capturedTracksMap.has(effectiveVid)) {
+        if (isCircuitBreakerActive()) {
+          notifyRateLimited();
           return;
         }
-        console.log("[YT-Lang-AI] 1200ms fallback check for videoId:", effectiveVid);
-        const globalData = getCaptionTracksFromGlobals();
-        let tracks = null;
-        if (effectiveVid && captionTracksCache.has(effectiveVid)) {
-          tracks = captionTracksCache.get(effectiveVid) ?? null;
-        } else if (globalData?.tracks && globalData.tracks.length > 0) {
-          tracks = globalData.tracks;
-          if (effectiveVid && effectiveVid !== "unknown") {
-            captionTracksCache.set(effectiveVid, tracks);
+        const currentVideoId = extractVideoId();
+        const effectiveVid = currentVideoId !== "unknown" ? currentVideoId : targetVideoId;
+        if (effectiveVid && effectiveVid !== "unknown") {
+          if (capturedTracksMap.has(effectiveVid) || videosWithCachedTrack.has(effectiveVid)) {
+            return;
           }
         }
-        if (tracks && tracks.length > 0) {
-          console.log("[YT-Lang-AI] Found captionTracks via fallback:", tracks.length);
-          const preferred = tracks.find((t) => t.kind !== "asr") ?? tracks[0];
-          if (preferred?.baseUrl) {
-            try {
-              const trackUrl = new URL(preferred.baseUrl, window.location.origin);
-              trackUrl.searchParams.set("fmt", "json3");
-              if (effectiveVid && effectiveVid !== "unknown" && !trackUrl.searchParams.get("v")) {
-                trackUrl.searchParams.set("v", effectiveVid);
-              }
-              if (preferred.languageCode && !trackUrl.searchParams.get("lang")) {
-                trackUrl.searchParams.set("lang", preferred.languageCode);
-              }
-              if (preferred.kind && !trackUrl.searchParams.get("kind")) {
-                trackUrl.searchParams.set("kind", preferred.kind);
-              }
-              console.log("[YT-Lang-AI] Fetching fallback track from baseUrl (fmt=json3):", trackUrl.toString());
-              const ok = await fetchAndDispatchTrack(trackUrl, false);
-              if (ok) return;
-              console.log("[YT-Lang-AI] Fallback with fmt=json3 failed, trying raw baseUrl:", preferred.baseUrl);
-              const rawUrl = new URL(preferred.baseUrl, window.location.origin);
-              const rawOk = await fetchAndDispatchTrack(rawUrl, false);
-              if (rawOk) return;
-            } catch (err) {
-              console.warn("[YT-Lang-AI] Error fetching fallback track:", err);
-            }
-          }
-        }
-        console.log("[YT-Lang-AI] Activating native player captions fallback");
+        console.log("[YT-Lang-AI] Fallback CC check for videoId:", effectiveVid);
         const activePlayer = document.querySelector("#movie_player") ?? document.querySelector("ytd-reel-video-renderer[is-active] #shorts-player") ?? document.querySelector("ytd-reel-video-renderer[is-active] .html5-video-player") ?? document.querySelector(".html5-video-player");
-        if (activePlayer) {
+        if (activePlayer && !isCircuitBreakerActive()) {
           try {
             const playerApi = activePlayer;
             playerApi.loadModule?.("captions");
@@ -342,10 +338,19 @@ console.log('[YT-Lang-AI] MAIN interceptor booted', location.href);
       }, 1200);
     }
     async function fetchAndDispatchTrack(urlObj, isTranslated) {
+      if (isCircuitBreakerActive()) {
+        notifyRateLimited();
+        return false;
+      }
       try {
         const response = await originalFetch(urlObj.toString(), {
           credentials: "include"
         });
+        if (response.status === 429) {
+          console.warn("[YT-Lang-AI] HTTP 429 detected during fetchAndDispatchTrack!");
+          triggerRateLimitCircuitBreaker();
+          return false;
+        }
         if (!response.ok) {
           return false;
         }
@@ -399,18 +404,17 @@ console.log('[YT-Lang-AI] MAIN interceptor booted', location.href);
       }
       cancelFallbackTimer();
       recordOriginalTrackUrl(timedtextUrl);
-      const isTranslated = Boolean(timedtextUrl.searchParams.get("tlang"));
       const response = await originalFetch(input, init);
+      if (response.status === 429) {
+        console.warn("[YT-Lang-AI] HTTP 429 detected on timedtext fetch!");
+        triggerRateLimitCircuitBreaker();
+        return response;
+      }
       if (response.ok) {
         try {
           const cloned = response.clone();
           void cloned.text().then((text) => {
-            const dispatched = handleCapturedText(timedtextUrl, text);
-            if (!dispatched && timedtextUrl.searchParams.get("fmt") !== "json3") {
-              const json3Url = new URL(timedtextUrl.toString());
-              json3Url.searchParams.set("fmt", "json3");
-              void fetchAndDispatchTrack(json3Url, isTranslated);
-            }
+            handleCapturedText(timedtextUrl, text);
           }).catch(() => void 0);
         } catch {
         }
@@ -436,19 +440,17 @@ console.log('[YT-Lang-AI] MAIN interceptor booted', location.href);
         cancelFallbackTimer();
         recordOriginalTrackUrl(timedtextUrl);
         this.addEventListener("load", () => {
+          if (this.status === 429) {
+            console.warn("[YT-Lang-AI] HTTP 429 detected on timedtext XHR!");
+            triggerRateLimitCircuitBreaker();
+            return;
+          }
           if (this.status < 200 || this.status >= 300) return;
           const isTranslated = Boolean(timedtextUrl.searchParams.get("tlang"));
-          let dispatched = false;
           if (typeof this.responseText === "string" && this.responseText.length > 0) {
-            dispatched = handleCapturedText(timedtextUrl, this.responseText);
+            handleCapturedText(timedtextUrl, this.responseText);
           } else if (this.response && typeof this.response === "object" && isJson3Data(this.response)) {
             dispatchCapturedTrack(buildPayload(timedtextUrl, this.response), isTranslated);
-            dispatched = true;
-          }
-          if (!dispatched && timedtextUrl.searchParams.get("fmt") !== "json3") {
-            const json3Url = new URL(timedtextUrl.toString());
-            json3Url.searchParams.set("fmt", "json3");
-            void fetchAndDispatchTrack(json3Url, isTranslated);
           }
         });
       }
@@ -460,6 +462,11 @@ console.log('[YT-Lang-AI] MAIN interceptor booted', location.href);
       const data = event.data;
       const isFromContent = data.source === ISOLATED_MESSAGE_SOURCE || data.source === "YT_LANG_AI_CONTENT";
       if (!isFromContent) return;
+      if (data.type === "HAVE_CACHED_TRACK" && data.payload?.videoId) {
+        videosWithCachedTrack.add(data.payload.videoId);
+        cancelFallbackTimer();
+        return;
+      }
       if (data.type === "GET_LATEST_TRACK") {
         const requestedVid = data.payload?.videoId ?? data.videoId ?? extractVideoId();
         console.log("[YT-Lang-AI] MAIN received GET_LATEST_TRACK:", {
@@ -479,7 +486,7 @@ console.log('[YT-Lang-AI] MAIN interceptor booted', location.href);
             videoId: track.videoId,
             payload: track
           });
-        } else {
+        } else if (!videosWithCachedTrack.has(requestedVid)) {
           scheduleFallbackActivation();
         }
         const transTrack = requestedVid && requestedVid !== "unknown" && capturedTranslatedMap.get(requestedVid) || lastCapturedTranslatedTrack;
@@ -494,13 +501,35 @@ console.log('[YT-Lang-AI] MAIN interceptor booted', location.href);
         return;
       }
       if (data.type === "NAVIGATED" && data.payload) {
+        const vid = data.payload.videoId;
+        if (vid && videosWithCachedTrack.has(vid)) {
+          cancelFallbackTimer();
+          return;
+        }
         scheduleFallbackActivation();
         return;
       }
       if (data.type === "REQUEST_TRANSLATED_TRACK" && data.payload) {
+        if (isCircuitBreakerActive()) {
+          notifyRateLimited();
+          return;
+        }
         const { nativeLang, videoId } = data.payload;
         const targetVid = videoId || extractVideoIdFromLocation();
-        const baseUrlStr = targetVid && videoBaseTimedtextMap.get(targetVid) || lastBaseTimedtextUrl;
+        if (!targetVid) return;
+        const transKey = `${targetVid}:${nativeLang.toLowerCase()}`;
+        if (requestedTranslations.has(transKey)) {
+          console.log("[YT-Lang-AI] Translation already requested for:", transKey);
+          return;
+        }
+        let baseUrlStr = targetVid && videoBaseTimedtextMap.get(targetVid) || lastBaseTimedtextUrl;
+        if (!baseUrlStr && targetVid && captionTracksCache.has(targetVid)) {
+          const cachedTracks = captionTracksCache.get(targetVid);
+          const preferred = cachedTracks?.find((t) => t.kind !== "asr") ?? cachedTracks?.[0];
+          if (preferred?.baseUrl) {
+            baseUrlStr = preferred.baseUrl;
+          }
+        }
         if (!baseUrlStr) {
           postToIsolated({
             source: MAIN_MESSAGE_SOURCE,
@@ -509,6 +538,7 @@ console.log('[YT-Lang-AI] MAIN interceptor booted', location.href);
           });
           return;
         }
+        requestedTranslations.add(transKey);
         try {
           const baseUrl = new URL(baseUrlStr);
           baseUrl.searchParams.set("tlang", nativeLang);

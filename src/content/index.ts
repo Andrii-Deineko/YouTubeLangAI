@@ -11,6 +11,7 @@ import {
 import { DEFAULT_SETTINGS, type UserSettings } from '../types/settings';
 import type { SubtitleCue, TrackMetadata } from '../types/subtitles';
 import type { AIExplanation } from '../types/vocabulary';
+import { getCachedCaptionTrack, saveCachedCaptionTrack } from '../shared/captionCache';
 import { setCachedSubtitles } from '../shared/db';
 import { createNewCard } from '../shared/srs';
 import {
@@ -28,6 +29,7 @@ import type { WordSelectionPayload } from './components/SubtitleOverlay';
 import { WordPopup } from './components/WordPopup';
 
 const NATIVE_CAPTIONS_STYLE_ID = 'yt-lang-ai-hide-native-captions';
+const RATE_LIMIT_STORAGE_KEY = 'ytai_timedtext_blocked_until';
 
 const primaryEngine = new SubtitleEngine();
 const translatedEngine = new SubtitleEngine();
@@ -37,6 +39,8 @@ let currentVideoId = '';
 let currentIsShorts = false;
 let trackMeta: TrackMetadata | null = null;
 let isAdShowing = false;
+let isRateLimited = false;
+let rateLimitTimerId: number | null = null;
 let altPressed = false;
 let activePrimaryCue: SubtitleCue | null = null;
 let activeTranslatedCue: SubtitleCue | null = null;
@@ -54,6 +58,36 @@ let sessionAbortController: AbortController | null = null;
 let adObserver: MutationObserver | null = null;
 let domObserver: MutationObserver | null = null;
 let translationRequestedForVideo = '';
+
+function setRateLimitedState(remainingMs: number): void {
+  isRateLimited = true;
+  if (rateLimitTimerId !== null) {
+    window.clearTimeout(rateLimitTimerId);
+  }
+  rateLimitTimerId = window.setTimeout(() => {
+    isRateLimited = false;
+    rateLimitTimerId = null;
+    syncNativeCaptionsVisibility();
+    renderUI();
+  }, remainingMs);
+  syncNativeCaptionsVisibility();
+  renderUI();
+}
+
+function checkInitialRateLimit(): void {
+  try {
+    const val = window.localStorage.getItem(RATE_LIMIT_STORAGE_KEY);
+    if (val) {
+      const blockedUntil = Number(val);
+      const remainingMs = blockedUntil - Date.now();
+      if (!Number.isNaN(blockedUntil) && remainingMs > 0) {
+        setRateLimitedState(remainingMs);
+      }
+    }
+  } catch {
+    // Ignore
+  }
+}
 
 function postToMain(message: IsolatedToMainMessage): void {
   window.postMessage(message, '*');
@@ -143,13 +177,14 @@ function syncNativeCaptionsVisibility(): void {
   const shouldHide =
     settings.enabled &&
     !isAdShowing &&
+    !isRateLimited &&
     (primaryEngine.getCues().length > 0 || isLiveCaptionActive);
   const existing = document.getElementById(NATIVE_CAPTIONS_STYLE_ID);
 
   if (shouldHide && !existing) {
     const style = document.createElement('style');
     style.id = NATIVE_CAPTIONS_STYLE_ID;
-    style.textContent = '.ytp-caption-window-container { opacity: 0 !important; pointer-events: none !important; }';
+    style.textContent = '.ytp-caption-window-container { display: none !important; opacity: 0 !important; pointer-events: none !important; }';
     (document.head ?? document.documentElement).appendChild(style);
     console.log('[YT-Lang-AI] Native YouTube captions hidden via style');
   } else if (!shouldHide && existing) {
@@ -325,6 +360,7 @@ function renderUI(): void {
   mountedUI.update({
     settings,
     isAdShowing,
+    isRateLimited,
     isShorts: currentIsShorts,
     trackMeta,
     cueCount: primaryEngine.getCues().length,
@@ -356,20 +392,31 @@ async function handleUpdateSettings(partial: Partial<UserSettings>): Promise<voi
     translatedEngine.getCues().length === 0 &&
     trackMeta.lang !== settings.nativeLang
   ) {
-    requestTranslatedTrackIfNeeded();
+    void requestTranslatedTrackIfNeeded();
   }
   syncNativeCaptionsVisibility();
   renderUI();
 }
 
-function requestTranslatedTrackIfNeeded(): void {
+async function requestTranslatedTrackIfNeeded(): Promise<void> {
   if (!settings.enabled || !settings.showDualSubtitles) return;
   if (!trackMeta) return;
+  if (isRateLimited) return;
   const vid = trackMeta.videoId || currentVideoId;
   if (!vid) return;
   if (trackMeta.lang.toLowerCase() === settings.nativeLang.toLowerCase()) return;
-  const key = `${vid}:${settings.nativeLang}`;
+  const key = `${vid}:${settings.nativeLang.toLowerCase()}`;
   if (translationRequestedForVideo === key) return;
+
+  // Check persistent cache first
+  const cachedTrans = await getCachedCaptionTrack(vid, undefined, settings.nativeLang);
+  if (cachedTrans) {
+    console.log('[YT-Lang-AI] Restoring translated track from cache for videoId:', vid);
+    translationRequestedForVideo = key;
+    applyCapturedTranslatedTrack(cachedTrans);
+    return;
+  }
+
   translationRequestedForVideo = key;
 
   postToMain({
@@ -601,6 +648,7 @@ function attachToPlayer(): void {
     mountedUI = mountShadowUI(playerEl, {
       settings,
       isAdShowing,
+      isRateLimited,
       isShorts: currentIsShorts,
       trackMeta,
       cueCount: primaryEngine.getCues().length,
@@ -714,7 +762,15 @@ function applyCapturedTrack(payload: TrackCapturedPayload): void {
   syncNativeCaptionsVisibility();
   ensurePlayerAttached();
   renderUI();
-  requestTranslatedTrackIfNeeded();
+  void saveCachedCaptionTrack(payload);
+  if (payload.videoId && payload.videoId !== 'unknown') {
+    postToMain({
+      source: ISOLATED_MESSAGE_SOURCE,
+      type: 'HAVE_CACHED_TRACK',
+      payload: { videoId: payload.videoId }
+    });
+  }
+  void requestTranslatedTrackIfNeeded();
 }
 
 function applyCapturedTranslatedTrack(payload: TrackCapturedPayload): void {
@@ -729,6 +785,14 @@ function applyCapturedTranslatedTrack(payload: TrackCapturedPayload): void {
     videoController?.getCurrentTime() ?? 0
   );
   renderUI();
+  void saveCachedCaptionTrack(payload);
+  if (payload.videoId && payload.videoId !== 'unknown') {
+    postToMain({
+      source: ISOLATED_MESSAGE_SOURCE,
+      type: 'HAVE_CACHED_TRACK',
+      payload: { videoId: payload.videoId, hasTranslated: true }
+    });
+  }
 }
 
 function checkAndHandleVideoChange(): void {
@@ -749,6 +813,33 @@ function checkAndHandleVideoChange(): void {
         if (preloadedTrans) {
           applyCapturedTranslatedTrack(preloadedTrans);
         }
+        postToMain({
+          source: ISOLATED_MESSAGE_SOURCE,
+          type: 'HAVE_CACHED_TRACK',
+          payload: { videoId: nextId, hasTranslated: Boolean(preloadedTrans) }
+        });
+      } else {
+        // Fast instant restore from persistent cache
+        void (async () => {
+          const cachedPrimary = await getCachedCaptionTrack(nextId);
+          if (cachedPrimary && currentVideoId === nextId) {
+            console.log('[YT-Lang-AI] Restoring primary track from cache for videoId:', nextId);
+            applyCapturedTrack(cachedPrimary);
+            postToMain({
+              source: ISOLATED_MESSAGE_SOURCE,
+              type: 'HAVE_CACHED_TRACK',
+              payload: { videoId: nextId }
+            });
+
+            if (settings.showDualSubtitles) {
+              const cachedTrans = await getCachedCaptionTrack(nextId, undefined, settings.nativeLang);
+              if (cachedTrans && currentVideoId === nextId) {
+                console.log('[YT-Lang-AI] Restoring translated track from cache for videoId:', nextId);
+                applyCapturedTranslatedTrack(cachedTrans);
+              }
+            }
+          }
+        })();
       }
 
       postToMain({
@@ -877,6 +968,15 @@ window.addEventListener(
 
       preloadedTracksMap.set(payload.videoId, payload);
       void setCachedSubtitles(payload.videoId, payload.lang, payload.data, payload.tlang);
+      void saveCachedCaptionTrack(payload);
+
+      if (payload.videoId && payload.videoId !== 'unknown') {
+        postToMain({
+          source: ISOLATED_MESSAGE_SOURCE,
+          type: 'HAVE_CACHED_TRACK',
+          payload: { videoId: payload.videoId }
+        });
+      }
 
       const isWatchPage =
         !currentIsShorts &&
@@ -905,6 +1005,15 @@ window.addEventListener(
 
       preloadedTranslatedMap.set(payload.videoId, payload);
       void setCachedSubtitles(payload.videoId, payload.lang, payload.data, payload.tlang);
+      void saveCachedCaptionTrack(payload);
+
+      if (payload.videoId && payload.videoId !== 'unknown') {
+        postToMain({
+          source: ISOLATED_MESSAGE_SOURCE,
+          type: 'HAVE_CACHED_TRACK',
+          payload: { videoId: payload.videoId, hasTranslated: true }
+        });
+      }
 
       const isWatchPage =
         !currentIsShorts &&
@@ -920,6 +1029,9 @@ window.addEventListener(
       if (isMatchingVideo) {
         applyCapturedTranslatedTrack(payload);
       }
+    } else if (msg.type === 'CAPTION_RATE_LIMITED' && msg.payload) {
+      console.warn('[YT-Lang-AI] ISOLATED received CAPTION_RATE_LIMITED:', msg.payload);
+      setRateLimitedState(msg.payload.remainingMs);
     }
   },
   { signal: lifecycleAbortController.signal }
@@ -944,6 +1056,7 @@ window.addEventListener(
 );
 
 async function bootstrap(): Promise<void> {
+  checkInitialRateLimit();
   const [loadedSettings, vocab] = await Promise.all([getSettings(), getVocabulary()]);
   settings = loadedSettings;
   savedWordKeys = new Set(
@@ -960,7 +1073,7 @@ async function bootstrap(): Promise<void> {
     ) {
       translatedEngine.clear();
       translationRequestedForVideo = '';
-      requestTranslatedTrackIfNeeded();
+      void requestTranslatedTrackIfNeeded();
     }
     syncNativeCaptionsVisibility();
     renderUI();
@@ -970,6 +1083,34 @@ async function bootstrap(): Promise<void> {
   currentVideoId = ctx.videoId;
   currentIsShorts = ctx.isShorts;
   startPlayerSession();
+
+  if (currentVideoId) {
+    void (async () => {
+      const cached = await getCachedCaptionTrack(currentVideoId);
+      if (cached && currentVideoId === cached.videoId) {
+        console.log('[YT-Lang-AI] Restoring primary track from cache on bootstrap:', currentVideoId);
+        applyCapturedTrack(cached);
+        postToMain({
+          source: ISOLATED_MESSAGE_SOURCE,
+          type: 'HAVE_CACHED_TRACK',
+          payload: { videoId: currentVideoId }
+        });
+
+        if (settings.showDualSubtitles) {
+          const cachedTrans = await getCachedCaptionTrack(
+            currentVideoId,
+            undefined,
+            settings.nativeLang
+          );
+          if (cachedTrans && currentVideoId === cachedTrans.videoId) {
+            console.log('[YT-Lang-AI] Restoring translated track from cache on bootstrap:', currentVideoId);
+            applyCapturedTranslatedTrack(cachedTrans);
+          }
+        }
+      }
+    })();
+  }
+
   requestLatestTrackFromMain();
 }
 

@@ -29,6 +29,15 @@ export type MainToIsolatedMessage =
     }
   | {
       source: typeof MAIN_MESSAGE_SOURCE;
+      type: 'CAPTION_RATE_LIMITED';
+      payload: {
+        remainingMs: number;
+        blockedUntil: number;
+      };
+      videoId?: string;
+    }
+  | {
+      source: typeof MAIN_MESSAGE_SOURCE;
       type: 'TRACK_ERROR';
       payload: {
         error: string;
@@ -43,6 +52,15 @@ export type IsolatedToMainMessage =
       type: 'GET_LATEST_TRACK';
       payload?: {
         videoId?: string;
+      };
+      videoId?: string;
+    }
+  | {
+      source: typeof ISOLATED_MESSAGE_SOURCE;
+      type: 'HAVE_CACHED_TRACK';
+      payload: {
+        videoId: string;
+        hasTranslated?: boolean;
       };
       videoId?: string;
     }

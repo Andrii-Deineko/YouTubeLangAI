@@ -427,6 +427,7 @@ export function SubtitleOverlay({
                 key={token.id}
                 role="button"
                 tabIndex={0}
+                data-testid="sub-token"
                 onClick={(e) => handleTokenClick(e, token)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
@@ -454,7 +455,7 @@ export function SubtitleOverlay({
                       }
                     : undefined
                 }
-                className={`inline rounded px-0.5 transition-colors cursor-pointer ${
+                className={`yt-lang-sub-token inline rounded px-0.5 transition-colors cursor-pointer ${
                   isSelected ? '' : 'hover:bg-[rgba(var(--ytai-accent-rgb),0.35)]'
                 }`}
               >

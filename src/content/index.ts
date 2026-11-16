@@ -21,7 +21,7 @@ import {
   saveVocabularyCard
 } from '../shared/storage';
 import { getVideoContextFromUrl } from '../shared/youtube';
-import { SubtitleEngine } from './SubtitleEngine';
+import { SubtitleEngine, tokenizeCueText } from './SubtitleEngine';
 import { VideoController } from './VideoController';
 import { mountShadowUI, type MountedShadowUI } from './mountShadowUI';
 import type { WordSelectionPayload } from './components/SubtitleOverlay';
@@ -97,7 +97,16 @@ function findPlayerContainer(): HTMLElement | null {
       ) ??
       document.querySelector<HTMLElement>(
         'ytd-reel-video-renderer[is-active] .html5-video-player'
-      )
+      ) ??
+      document.querySelector<HTMLElement>(
+        'ytd-reel-video-renderer #shorts-player'
+      ) ??
+      document.querySelector<HTMLElement>(
+        'ytd-reel-video-renderer .html5-video-player'
+      ) ??
+      document.querySelector<HTMLElement>('#shorts-player') ??
+      document.querySelector<HTMLElement>('#movie_player') ??
+      document.querySelector<HTMLElement>('.html5-video-player')
     );
   }
   return (
@@ -107,40 +116,116 @@ function findPlayerContainer(): HTMLElement | null {
 }
 
 function findVideoElement(playerEl: HTMLElement | null): HTMLVideoElement | null {
-  if (currentIsShorts) {
-    if (playerEl) {
-      const v = playerEl.querySelector<HTMLVideoElement>('video');
-      if (v) return v;
-    }
-    return document.querySelector<HTMLVideoElement>(
-      'ytd-reel-video-renderer[is-active] video'
-    );
-  }
   if (playerEl) {
-    return (
+    const v =
       playerEl.querySelector<HTMLVideoElement>('video.html5-main-video') ??
-      playerEl.querySelector<HTMLVideoElement>('video')
+      playerEl.querySelector<HTMLVideoElement>('video');
+    if (v) return v;
+  }
+  if (currentIsShorts) {
+    return (
+      document.querySelector<HTMLVideoElement>('ytd-reel-video-renderer[is-active] video') ??
+      document.querySelector<HTMLVideoElement>('ytd-reel-video-renderer video') ??
+      document.querySelector<HTMLVideoElement>('video.html5-main-video') ??
+      document.querySelector<HTMLVideoElement>('video')
     );
   }
   return (
     document.querySelector<HTMLVideoElement>('#movie_player video.html5-main-video') ??
-    document.querySelector<HTMLVideoElement>('#movie_player video')
+    document.querySelector<HTMLVideoElement>('#movie_player video') ??
+    document.querySelector<HTMLVideoElement>('video.html5-main-video') ??
+    document.querySelector<HTMLVideoElement>('video')
   );
 }
 
 function syncNativeCaptionsVisibility(): void {
-  const shouldHide = settings.enabled && !isAdShowing && primaryEngine.getCues().length > 0;
+  const isLiveCaptionActive = activePrimaryCue !== null && activePrimaryCue.id.startsWith('live-cue-');
+  const shouldHide =
+    settings.enabled &&
+    !isAdShowing &&
+    (primaryEngine.getCues().length > 0 || isLiveCaptionActive);
   const existing = document.getElementById(NATIVE_CAPTIONS_STYLE_ID);
 
   if (shouldHide && !existing) {
     const style = document.createElement('style');
     style.id = NATIVE_CAPTIONS_STYLE_ID;
-    style.textContent = '.ytp-caption-window-container { display: none !important; }';
+    style.textContent = '.ytp-caption-window-container { opacity: 0 !important; pointer-events: none !important; }';
     (document.head ?? document.documentElement).appendChild(style);
     console.log('[YT-Lang-AI] Native YouTube captions hidden via style');
   } else if (!shouldHide && existing) {
     existing.remove();
     console.log('[YT-Lang-AI] Native YouTube captions restored');
+  }
+}
+
+let liveCaptionObserver: MutationObserver | null = null;
+let lastLiveCaptionText = '';
+
+function setupNativeCaptionScraper(): void {
+  liveCaptionObserver?.disconnect();
+  liveCaptionObserver = null;
+
+  if (primaryEngine.getCues().length > 0) {
+    return;
+  }
+
+  const checkSegments = () => {
+    if (primaryEngine.getCues().length > 0) {
+      liveCaptionObserver?.disconnect();
+      liveCaptionObserver = null;
+      return;
+    }
+
+    const playerEl = currentPlayerEl ?? findPlayerContainer();
+    if (!playerEl) return;
+
+    const segments = Array.from(playerEl.querySelectorAll<HTMLElement>('.ytp-caption-segment'));
+    const fullText = segments.map((s) => s.textContent || '').join(' ').trim();
+
+    if (!fullText) {
+      if (activePrimaryCue?.id.startsWith('live-cue-')) {
+        activePrimaryCue = null;
+        lastLiveCaptionText = '';
+        syncNativeCaptionsVisibility();
+        renderUI();
+      }
+      return;
+    }
+
+    if (fullText === lastLiveCaptionText) return;
+    lastLiveCaptionText = fullText;
+
+    const currentTime = videoController?.getCurrentTime() ?? 0;
+    const duration = 3.5;
+    const cueId = `live-cue-${Math.floor(currentTime * 10)}`;
+
+    const syntheticCue: SubtitleCue = {
+      id: cueId,
+      index: 0,
+      startTime: currentTime,
+      endTime: currentTime + duration,
+      text: fullText,
+      tokens: tokenizeCueText(cueId, fullText, currentTime, currentTime + duration)
+    };
+
+    activePrimaryCue = syntheticCue;
+    syncNativeCaptionsVisibility();
+    renderUI();
+  };
+
+  const container =
+    document.querySelector('.ytp-caption-window-container') ??
+    currentPlayerEl ??
+    document.body;
+
+  if (container) {
+    liveCaptionObserver = new MutationObserver(() => checkSegments());
+    liveCaptionObserver.observe(container, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
+    checkSegments();
   }
 }
 
@@ -395,7 +480,10 @@ function createVideoController(): VideoController {
     onTimeUpdate: (timeSec: number) => {
       if (!settings.enabled || isAdShowing || !videoController) return;
 
-      const nextPrimary = primaryEngine.findActiveCue(timeSec);
+      const nextPrimary =
+        primaryEngine.getCues().length > 0
+          ? primaryEngine.findActiveCue(timeSec)
+          : activePrimaryCue;
       const nextTranslated = settings.showDualSubtitles
         ? translatedEngine.findActiveCue(timeSec)
         : null;
@@ -537,6 +625,8 @@ function attachToPlayer(): void {
       playerHeight: playerRect.height,
       isShorts: currentIsShorts
     });
+
+    setupNativeCaptionScraper();
   }
 }
 
@@ -579,6 +669,9 @@ function teardownPlayerSession(): void {
     window.clearInterval(playerPollIntervalId);
     playerPollIntervalId = null;
   }
+  liveCaptionObserver?.disconnect();
+  liveCaptionObserver = null;
+  lastLiveCaptionText = '';
   sessionAbortController?.abort();
   sessionAbortController = null;
   adObserver?.disconnect();
@@ -593,6 +686,9 @@ function teardownPlayerSession(): void {
 }
 
 function applyCapturedTrack(payload: TrackCapturedPayload): void {
+  liveCaptionObserver?.disconnect();
+  liveCaptionObserver = null;
+  lastLiveCaptionText = '';
   primaryEngine.loadJson3(payload.data, payload.kind);
   trackMeta = {
     videoId: payload.videoId,
@@ -612,6 +708,9 @@ function applyCapturedTrack(payload: TrackCapturedPayload): void {
   });
 
   activePrimaryCue = primaryEngine.findActiveCue(videoController?.getCurrentTime() ?? 0);
+  if (cueCount === 0) {
+    setupNativeCaptionScraper();
+  }
   syncNativeCaptionsVisibility();
   ensurePlayerAttached();
   renderUI();
@@ -714,6 +813,10 @@ function startPlayerSession(): void {
         attributeFilter: ['is-active']
       });
     }
+
+    if (!playerEl || !videoEl) {
+      ensurePlayerAttached();
+    }
   } else {
     // On /watch: strictly do NOT watch for ytd-reel-video-renderer.
     // If player or video element is not yet attached, observe childList until available and poll every 200ms.
@@ -736,6 +839,9 @@ function startPlayerSession(): void {
 }
 
 function resetVideoState(): void {
+  liveCaptionObserver?.disconnect();
+  liveCaptionObserver = null;
+  lastLiveCaptionText = '';
   primaryEngine.clear();
   translatedEngine.clear();
   trackMeta = null;

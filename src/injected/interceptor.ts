@@ -91,6 +91,129 @@ interface CaptionTrackItem {
     return Array.isArray(candidate.events);
   }
 
+  function decodeHtmlEntities(str: string): string {
+    return str
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&apos;/g, "'")
+      .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)));
+  }
+
+  function parseTimestamp(hours: string | undefined, minutes: string, seconds: string, millis: string): number {
+    const h = hours ? parseInt(hours, 10) : 0;
+    const m = parseInt(minutes, 10);
+    const s = parseInt(seconds, 10);
+    const ms = parseInt(millis, 10);
+    return (h * 3600 + m * 60 + s) * 1000 + ms;
+  }
+
+  function parseVttToEvents(vttText: string): Json3Response | null {
+    const events: Array<{ tStartMs: number; dDurationMs?: number; segs?: Array<{ utf8: string }> }> = [];
+    const cueRegex = /(?:(\d{2,}):)?(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*(?:(\d{2,}):)?(\d{2}):(\d{2})[.,](\d{3})[^\r\n]*\r?\n([\s\S]*?)(?=\r?\n\r?\n|\r?\n?$|$)/g;
+    let match: RegExpExecArray | null = null;
+    while ((match = cueRegex.exec(vttText)) !== null) {
+      const startMs = parseTimestamp(match[1], match[2], match[3], match[4]);
+      const endMs = parseTimestamp(match[5], match[6], match[7], match[8]);
+      const text = match[9].replace(/<[^>]+>/g, '').trim();
+      if (text) {
+        events.push({
+          tStartMs: startMs,
+          dDurationMs: Math.max(endMs - startMs, 100),
+          segs: [{ utf8: text }]
+        });
+      }
+    }
+    return events.length > 0 ? { events } : null;
+  }
+
+  function parseTimedtextToEvents(rawText: string): Json3Response | null {
+    const trimmed = rawText.trim();
+    if (!trimmed) return null;
+
+    // 1. Try JSON3
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const data = JSON.parse(trimmed) as unknown;
+        if (isJson3Data(data)) return data;
+      } catch {
+        // Fall through
+      }
+    }
+
+    // 2. Try XML: SRV3 (<timedtext format="3">)
+    if (trimmed.includes('<timedtext') && trimmed.includes('<p ')) {
+      const events: Array<{ tStartMs: number; dDurationMs?: number; segs?: Array<{ utf8: string; tOffsetMs?: number }> }> = [];
+      const pRegex = /<p\s+([^>]+)>(.*?)<\/p>/gs;
+      let pMatch: RegExpExecArray | null = null;
+      while ((pMatch = pRegex.exec(trimmed)) !== null) {
+        const attrs = pMatch[1];
+        const content = pMatch[2];
+        const tMatch = attrs.match(/\bt="(\d+)"/);
+        const dMatch = attrs.match(/\bd="(\d+)"/);
+        const tStartMs = tMatch ? parseInt(tMatch[1], 10) : 0;
+        const dDurationMs = dMatch ? parseInt(dMatch[1], 10) : 0;
+
+        const segs: Array<{ utf8: string; tOffsetMs?: number }> = [];
+        const sRegex = /<s([^>]*)>([^<]*)<\/s>/gs;
+        let sMatch: RegExpExecArray | null = null;
+        let hasSegs = false;
+        while ((sMatch = sRegex.exec(content)) !== null) {
+          hasSegs = true;
+          const sAttrs = sMatch[1];
+          const offsetMatch = sAttrs.match(/\bt="(\d+)"/);
+          const offset = offsetMatch ? parseInt(offsetMatch[1], 10) : undefined;
+          const text = decodeHtmlEntities(sMatch[2]);
+          if (text) {
+            segs.push({ utf8: text, ...(offset !== undefined ? { tOffsetMs: offset } : {}) });
+          }
+        }
+
+        if (!hasSegs) {
+          const cleanText = decodeHtmlEntities(content.replace(/<[^>]+>/g, ''));
+          if (cleanText) segs.push({ utf8: cleanText });
+        }
+
+        if (segs.length > 0) {
+          events.push({ tStartMs, dDurationMs, segs });
+        }
+      }
+      if (events.length > 0) return { events };
+    }
+
+    // 3. Try XML: Legacy (<transcript>)
+    if (trimmed.includes('<transcript') || (trimmed.includes('<text ') && trimmed.includes('start='))) {
+      const events: Array<{ tStartMs: number; dDurationMs?: number; segs?: Array<{ utf8: string }> }> = [];
+      const textRegex = /<text\s+([^>]+)>([^<]*)<\/text>/gs;
+      let match: RegExpExecArray | null = null;
+      while ((match = textRegex.exec(trimmed)) !== null) {
+        const attrs = match[1];
+        const rawSegText = decodeHtmlEntities(match[2]);
+        const startMatch = attrs.match(/\bstart="([\d.]+)"/);
+        const durMatch = attrs.match(/\bdur="([\d.]+)"/);
+        const startSec = startMatch ? parseFloat(startMatch[1]) : 0;
+        const durSec = durMatch ? parseFloat(durMatch[1]) : 2.0;
+
+        events.push({
+          tStartMs: Math.round(startSec * 1000),
+          dDurationMs: Math.round(durSec * 1000),
+          segs: [{ utf8: rawSegText }]
+        });
+      }
+      if (events.length > 0) return { events };
+    }
+
+    // 4. Try WebVTT
+    if (trimmed.startsWith('WEBVTT') || trimmed.includes('-->')) {
+      const vttEvents = parseVttToEvents(trimmed);
+      if (vttEvents) return vttEvents;
+    }
+
+    return null;
+  }
+
   function buildPayload(urlObj: URL, data: Json3Response): TrackCapturedPayload {
     const videoId = extractVideoId(urlObj);
     const lang = urlObj.searchParams.get('lang') ?? 'unknown';
@@ -249,6 +372,7 @@ interface CaptionTrackItem {
         const preferred = tracks.find((t) => t.kind !== 'asr') ?? tracks[0];
         if (preferred?.baseUrl) {
           try {
+            // Tier 1a: Try fmt=json3
             const trackUrl = new URL(preferred.baseUrl, window.location.origin);
             trackUrl.searchParams.set('fmt', 'json3');
             if (effectiveVid && effectiveVid !== 'unknown' && !trackUrl.searchParams.get('v')) {
@@ -261,9 +385,15 @@ interface CaptionTrackItem {
               trackUrl.searchParams.set('kind', preferred.kind);
             }
 
-            console.log('[YT-Lang-AI] Fetching fallback json3 track from baseUrl:', trackUrl.toString());
-            await fetchJson3AndDispatch(trackUrl, false);
-            return;
+            console.log('[YT-Lang-AI] Fetching fallback track from baseUrl (fmt=json3):', trackUrl.toString());
+            const ok = await fetchAndDispatchTrack(trackUrl, false);
+            if (ok) return;
+
+            // Tier 1b: Try raw baseUrl (preserving whatever format/signature YouTube generated)
+            console.log('[YT-Lang-AI] Fallback with fmt=json3 failed, trying raw baseUrl:', preferred.baseUrl);
+            const rawUrl = new URL(preferred.baseUrl, window.location.origin);
+            const rawOk = await fetchAndDispatchTrack(rawUrl, false);
+            if (rawOk) return;
           } catch (err) {
             console.warn('[YT-Lang-AI] Error fetching fallback track:', err);
           }
@@ -271,6 +401,7 @@ interface CaptionTrackItem {
       }
 
       // 2. Secondary fallback: activate native subtitles button or captions module
+      console.log('[YT-Lang-AI] Activating native player captions fallback');
       const activePlayer =
         document.querySelector<HTMLElement>('#movie_player') ??
         document.querySelector<HTMLElement>('ytd-reel-video-renderer[is-active] #shorts-player') ??
@@ -299,54 +430,41 @@ interface CaptionTrackItem {
     }, 1200);
   }
 
-  async function fetchJson3AndDispatch(urlObj: URL, isTranslated: boolean): Promise<void> {
-    const fetchUrl = new URL(urlObj.toString());
-    fetchUrl.searchParams.set('fmt', 'json3');
-
+  async function fetchAndDispatchTrack(urlObj: URL, isTranslated: boolean): Promise<boolean> {
     try {
-      const response = await originalFetch(fetchUrl.toString(), {
+      const response = await originalFetch(urlObj.toString(), {
         credentials: 'include'
       });
       if (!response.ok) {
-        postToIsolated({
-          source: MAIN_MESSAGE_SOURCE,
-          type: 'TRACK_ERROR',
-          payload: {
-            error: `HTTP ${response.status} fetching json3 timedtext`,
-            url: fetchUrl.toString()
-          }
-        });
-        return;
+        return false;
       }
 
-      const parsed: unknown = await response.json();
-      if (!isJson3Data(parsed)) return;
+      const text = await response.text();
+      const parsed = parseTimedtextToEvents(text);
+      if (!parsed || !parsed.events || parsed.events.length === 0) {
+        return false;
+      }
 
-      const payload = buildPayload(fetchUrl, parsed);
+      const payload = buildPayload(urlObj, parsed);
       dispatchCapturedTrack(payload, isTranslated);
+      return true;
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch json3 timedtext';
-      postToIsolated({
-        source: MAIN_MESSAGE_SOURCE,
-        type: 'TRACK_ERROR',
-        payload: {
-          error: message,
-          url: fetchUrl.toString()
-        }
-      });
+      console.warn('[YT-Lang-AI] Error fetching timedtext:', err);
+      return false;
     }
   }
 
-  function handleCapturedText(urlObj: URL, rawText: string): void {
+  function handleCapturedText(urlObj: URL, rawText: string): boolean {
     try {
-      const parsed: unknown = JSON.parse(rawText);
-      if (!isJson3Data(parsed)) return;
+      const parsed = parseTimedtextToEvents(rawText);
+      if (!parsed || !parsed.events || parsed.events.length === 0) return false;
 
       const isTranslated = Boolean(urlObj.searchParams.get('tlang'));
       const payload = buildPayload(urlObj, parsed);
       dispatchCapturedTrack(payload, isTranslated);
+      return true;
     } catch {
-      // Non-JSON payload even though fmt=json3 was requested
+      return false;
     }
   }
 
@@ -386,18 +504,26 @@ interface CaptionTrackItem {
     cancelFallbackTimer();
     recordOriginalTrackUrl(timedtextUrl);
 
-    const fmt = timedtextUrl.searchParams.get('fmt');
     const isTranslated = Boolean(timedtextUrl.searchParams.get('tlang'));
     const response = await originalFetch(input, init);
 
-    if (fmt === 'json3') {
-      const cloned = response.clone();
-      void cloned
-        .text()
-        .then((text) => handleCapturedText(timedtextUrl, text))
-        .catch(() => undefined);
-    } else if (response.ok) {
-      void fetchJson3AndDispatch(timedtextUrl, isTranslated);
+    if (response.ok) {
+      try {
+        const cloned = response.clone();
+        void cloned
+          .text()
+          .then((text) => {
+            const dispatched = handleCapturedText(timedtextUrl, text);
+            if (!dispatched && timedtextUrl.searchParams.get('fmt') !== 'json3') {
+              const json3Url = new URL(timedtextUrl.toString());
+              json3Url.searchParams.set('fmt', 'json3');
+              void fetchAndDispatchTrack(json3Url, isTranslated);
+            }
+          })
+          .catch(() => undefined);
+      } catch {
+        // Clone error
+      }
     }
 
     return response;
@@ -435,17 +561,20 @@ interface CaptionTrackItem {
       this.addEventListener('load', () => {
         if (this.status < 200 || this.status >= 300) return;
 
-        const fmt = timedtextUrl.searchParams.get('fmt');
         const isTranslated = Boolean(timedtextUrl.searchParams.get('tlang'));
+        let dispatched = false;
 
-        if (fmt === 'json3') {
-          if (typeof this.responseText === 'string' && this.responseText.length > 0) {
-            handleCapturedText(timedtextUrl, this.responseText);
-          } else if (this.response && typeof this.response === 'object' && isJson3Data(this.response)) {
-            dispatchCapturedTrack(buildPayload(timedtextUrl, this.response), isTranslated);
-          }
-        } else {
-          void fetchJson3AndDispatch(timedtextUrl, isTranslated);
+        if (typeof this.responseText === 'string' && this.responseText.length > 0) {
+          dispatched = handleCapturedText(timedtextUrl, this.responseText);
+        } else if (this.response && typeof this.response === 'object' && isJson3Data(this.response)) {
+          dispatchCapturedTrack(buildPayload(timedtextUrl, this.response), isTranslated);
+          dispatched = true;
+        }
+
+        if (!dispatched && timedtextUrl.searchParams.get('fmt') !== 'json3') {
+          const json3Url = new URL(timedtextUrl.toString());
+          json3Url.searchParams.set('fmt', 'json3');
+          void fetchAndDispatchTrack(json3Url, isTranslated);
         }
       });
     }
@@ -536,7 +665,7 @@ interface CaptionTrackItem {
         const baseUrl = new URL(baseUrlStr);
         baseUrl.searchParams.set('tlang', nativeLang);
         baseUrl.searchParams.set('fmt', 'json3');
-        void fetchJson3AndDispatch(baseUrl, true);
+        void fetchAndDispatchTrack(baseUrl, true);
       } catch (err: unknown) {
         postToIsolated({
           source: MAIN_MESSAGE_SOURCE,

@@ -224,27 +224,18 @@ async function processMessage(
         });
         return { ok: true, data: result };
       }
+      case 'OPEN_EXTENSION_POPUP':
       case 'OPEN_OPTIONS': {
         try {
-          if (chrome.runtime.openOptionsPage) {
-            await new Promise<void>((resolve, reject) => {
-              chrome.runtime.openOptionsPage(() => {
-                if (chrome.runtime.lastError) {
-                  reject(new Error(chrome.runtime.lastError.message));
-                } else {
-                  resolve();
-                }
-              });
-            });
-          } else if (chrome.action?.openPopup) {
-            await chrome.action.openPopup().catch(() => undefined);
-          }
-        } catch {
           if (chrome.action?.openPopup) {
-            await chrome.action.openPopup().catch(() => undefined);
+            await chrome.action.openPopup();
+            return { ok: true, data: true };
           }
+          return { ok: false, error: 'openPopup is not supported' };
+        } catch (err) {
+          console.warn('[YT-Lang-AI] openPopup blocked:', err);
+          return { ok: false, error: err instanceof Error ? err.message : 'openPopup blocked' };
         }
-        return { ok: true, data: true };
       }
       case 'QUICK_TRANSLATE': {
         const result = await handleQuickTranslate(

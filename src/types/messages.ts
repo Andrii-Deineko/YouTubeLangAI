@@ -74,6 +74,9 @@ export type RuntimeRequest =
       type: 'OPEN_OPTIONS';
     }
   | {
+      type: 'OPEN_EXTENSION_POPUP';
+    }
+  | {
       type: 'QUICK_TRANSLATE';
       payload: {
         text: string;

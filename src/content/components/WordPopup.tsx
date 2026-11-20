@@ -2,93 +2,22 @@ import { useCallback, useEffect, useRef, useState, type ReactElement } from 'rea
 import {
   Bookmark,
   BookmarkCheck,
-  Check,
   ChevronDown,
   Loader2,
   RotateCcw,
-  Settings,
   Sparkles,
   Volume2,
   X
 } from 'lucide-react';
-import { saveSettings } from '../../shared/storage';
 import type {
   AIExplainResponse,
   FreeTranslateWordResponse,
   FreeTranslateWordResult,
   RuntimeRequest
 } from '../../types/messages';
-import type { LLMConfig, UserSettings } from '../../types/settings';
+import type { UserSettings } from '../../types/settings';
 import type { AIExplanation } from '../../types/vocabulary';
 import type { WordSelectionPayload } from './SubtitleOverlay';
-
-type AIProviderId = 'gemini' | 'openai' | 'openrouter' | 'ollama';
-
-interface AIProviderPreset {
-  id: AIProviderId;
-  label: string;
-  baseUrl: string;
-  model: string;
-  fallbackModel: string;
-  placeholderKey: string;
-  hint: string;
-}
-
-const AI_PROVIDER_PRESETS: Record<AIProviderId, AIProviderPreset> = {
-  gemini: {
-    id: 'gemini',
-    label: 'Gemini',
-    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    model: 'gemini-2.5-flash',
-    fallbackModel: 'gemini-2.5-flash-lite',
-    placeholderKey: 'AIzaSy...',
-    hint: 'Бесплатный ключ на aistudio.google.com'
-  },
-  openai: {
-    id: 'openai',
-    label: 'OpenAI',
-    baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-4o-mini',
-    fallbackModel: 'gpt-4o',
-    placeholderKey: 'sk-proj-...',
-    hint: 'Ключ на platform.openai.com'
-  },
-  openrouter: {
-    id: 'openrouter',
-    label: 'OpenRouter',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    model: 'openai/gpt-4o-mini',
-    fallbackModel: 'google/gemini-2.5-flash',
-    placeholderKey: 'sk-or-v1-...',
-    hint: 'Ключ на openrouter.ai/keys'
-  },
-  ollama: {
-    id: 'ollama',
-    label: 'Ollama',
-    baseUrl: 'http://localhost:11434/v1',
-    model: 'llama3.1',
-    fallbackModel: '',
-    placeholderKey: '',
-    hint: 'Локально без ключа (http://localhost:11434)'
-  }
-};
-
-function detectInitialProvider(llm: LLMConfig): AIProviderId {
-  const base = (llm.baseUrl || '').toLowerCase();
-  if (base.includes('11434') || base.includes('localhost') || base.includes('127.0.0.1')) {
-    return 'ollama';
-  }
-  if (base.includes('generativelanguage')) {
-    return 'gemini';
-  }
-  if (base.includes('openrouter')) {
-    return 'openrouter';
-  }
-  if (base.includes('openai.com')) {
-    return 'openai';
-  }
-  return 'gemini';
-}
 
 interface WordPopupProps {
   selection: WordSelectionPayload;
@@ -169,41 +98,53 @@ export function WordPopup({
   const [aiResult, setAiResult] = useState<AIExplanation | null>(null);
   const [saving, setSaving] = useState(false);
   const [showExamples, setShowExamples] = useState(false);
-
-  // Inline AI setup state
-  const [localLlmConfig, setLocalLlmConfig] = useState<LLMConfig | null>(null);
-  const [showAiSetup, setShowAiSetup] = useState(false);
-  const [selectedProvider, setSelectedProvider] = useState<AIProviderId>(() =>
-    detectInitialProvider(settings.llm)
-  );
-  const [apiKeyInput, setApiKeyInput] = useState(settings.llm.apiKey || '');
-  const [ollamaUrlInput, setOllamaUrlInput] = useState(() =>
-    settings.llm.baseUrl &&
-    (settings.llm.baseUrl.includes('11434') || settings.llm.baseUrl.includes('localhost'))
-      ? settings.llm.baseUrl
-      : 'http://localhost:11434'
-  );
-  const [ollamaModelInput, setOllamaModelInput] = useState(
-    () => settings.llm.model || 'llama3.1'
-  );
-  const [savingSetup, setSavingSetup] = useState(false);
-  const [setupError, setSetupError] = useState<string | null>(null);
+  const [popupHintVisible, setPopupHintVisible] = useState(false);
 
   const activeRequestKeyRef = useRef('');
   const popupRef = useRef<HTMLDivElement | null>(null);
+  const popupHintTimerRef = useRef<number | null>(null);
 
-  const activeLlm = localLlmConfig ?? settings.llm;
   const isLocalOllama = Boolean(
-    activeLlm.baseUrl &&
-      (activeLlm.baseUrl.includes('11434') ||
-        activeLlm.baseUrl.includes('localhost') ||
-        activeLlm.baseUrl.includes('127.0.0.1'))
+    settings.llm.baseUrl &&
+      (settings.llm.baseUrl.includes('11434') ||
+        settings.llm.baseUrl.includes('localhost') ||
+        settings.llm.baseUrl.includes('127.0.0.1'))
   );
   const isLLMConfigured = Boolean(
-    isLocalOllama || (activeLlm.apiKey && activeLlm.apiKey.trim().length > 0)
+    isLocalOllama || (settings.llm.apiKey && settings.llm.apiKey.trim().length > 0)
   );
 
   const requestKey = `${videoId}:${selection.cue.id}:${selection.target}`;
+
+  const showPopupHint = useCallback((): void => {
+    setPopupHintVisible(true);
+    if (popupHintTimerRef.current !== null) {
+      window.clearTimeout(popupHintTimerRef.current);
+    }
+    popupHintTimerRef.current = window.setTimeout(() => {
+      setPopupHintVisible(false);
+      popupHintTimerRef.current = null;
+    }, 4000);
+  }, []);
+
+  const handleOpenPopup = useCallback(async (): Promise<void> => {
+    try {
+      const res = await sendRuntimeMessage<{ ok: boolean }>({ type: 'OPEN_EXTENSION_POPUP' });
+      if (!res || !res.ok) {
+        showPopupHint();
+      }
+    } catch {
+      showPopupHint();
+    }
+  }, [showPopupHint]);
+
+  useEffect(() => {
+    return () => {
+      if (popupHintTimerRef.current !== null) {
+        window.clearTimeout(popupHintTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -281,115 +222,61 @@ export function WordPopup({
       });
   }, [requestKey, selection.cue.text, selection.target, settings.nativeLang, sourceLang]);
 
-  const handleRequestAI = useCallback(
-    async (configOverride?: { llm: LLMConfig; fallbackModel?: string }): Promise<void> => {
-      const cfg = configOverride?.llm ?? activeLlm;
-      const isOllama = Boolean(
-        cfg.baseUrl &&
-          (cfg.baseUrl.includes('11434') ||
-            cfg.baseUrl.includes('localhost') ||
-            cfg.baseUrl.includes('127.0.0.1'))
-      );
-      const configured = isOllama || (cfg.apiKey && cfg.apiKey.trim().length > 0);
-      if (!configured) {
-        setShowAiSetup(true);
-        return;
-      }
-
-      if (aiLoading) return;
-      setAiLoading(true);
-      setAiError(null);
-
-      try {
-        const res = await sendRuntimeMessage<AIExplainResponse>({
-          type: 'AI_EXPLAIN',
-          payload: {
-            videoId: videoId || 'unknown',
-            cueId: selection.cue.id,
-            target: selection.target,
-            prevSentence,
-            currentSentence: selection.cue.text,
-            nextSentence,
-            videoTitle,
-            nativeLang: settings.nativeLang,
-            llmConfig: cfg,
-            fallbackModel: configOverride?.fallbackModel ?? settings.fallbackModel
-          }
-        });
-        if (activeRequestKeyRef.current !== requestKey) return;
-        if (res.ok) {
-          setAiResult(res.data);
-        } else {
-          setAiError(res.error);
-        }
-      } catch (err: unknown) {
-        if (activeRequestKeyRef.current !== requestKey) return;
-        setAiError(err instanceof Error ? err.message : 'AI explanation failed');
-      } finally {
-        if (activeRequestKeyRef.current === requestKey) {
-          setAiLoading(false);
-        }
-      }
-    },
-    [
-      activeLlm,
-      aiLoading,
-      nextSentence,
-      prevSentence,
-      requestKey,
-      selection.cue.id,
-      selection.cue.text,
-      selection.target,
-      settings.fallbackModel,
-      settings.nativeLang,
-      videoId,
-      videoTitle
-    ]
-  );
-
-  const handleSaveAiSetup = async (): Promise<void> => {
-    setSetupError(null);
-    const preset = AI_PROVIDER_PRESETS[selectedProvider];
-
-    let newBaseUrl = preset.baseUrl;
-    let newModel = preset.model;
-    let newApiKey = apiKeyInput.trim();
-
-    if (selectedProvider === 'ollama') {
-      const trimmedUrl = ollamaUrlInput.trim() || 'http://localhost:11434';
-      newBaseUrl = trimmedUrl.endsWith('/v1') ? trimmedUrl : `${trimmedUrl.replace(/\/+$/, '')}/v1`;
-      newModel = ollamaModelInput.trim() || 'llama3.1';
-      newApiKey = '';
-    } else {
-      if (!newApiKey) {
-        setSetupError('Пожалуйста, введите API-ключ');
-        return;
-      }
+  const handleRequestAI = useCallback(async (): Promise<void> => {
+    if (aiLoading) return;
+    if (!isLLMConfigured) {
+      void handleOpenPopup();
+      return;
     }
+    setAiLoading(true);
+    setAiError(null);
 
-    const newConfig: LLMConfig = {
-      baseUrl: newBaseUrl,
-      apiKey: newApiKey,
-      model: newModel
-    };
-
-    setSavingSetup(true);
     try {
-      await saveSettings({
-        llm: newConfig,
-        fallbackModel: preset.fallbackModel
+      const res = await sendRuntimeMessage<AIExplainResponse>({
+        type: 'AI_EXPLAIN',
+        payload: {
+          videoId: videoId || 'unknown',
+          cueId: selection.cue.id,
+          target: selection.target,
+          prevSentence,
+          currentSentence: selection.cue.text,
+          nextSentence,
+          videoTitle,
+          nativeLang: settings.nativeLang,
+          llmConfig: settings.llm,
+          fallbackModel: settings.fallbackModel
+        }
       });
-
-      setLocalLlmConfig(newConfig);
-      setShowAiSetup(false);
-      // Immediately run AI breakdown for the current word
-      void handleRequestAI({ llm: newConfig, fallbackModel: preset.fallbackModel });
+      if (activeRequestKeyRef.current !== requestKey) return;
+      if (res.ok) {
+        setAiResult(res.data);
+      } else {
+        setAiError(res.error);
+      }
     } catch (err: unknown) {
-      setSetupError(err instanceof Error ? err.message : 'Не удалось сохранить настройки');
+      if (activeRequestKeyRef.current !== requestKey) return;
+      setAiError(err instanceof Error ? err.message : 'AI explanation failed');
     } finally {
-      setSavingSetup(false);
+      if (activeRequestKeyRef.current === requestKey) {
+        setAiLoading(false);
+      }
     }
-  };
+  }, [
+    aiLoading,
+    handleOpenPopup,
+    isLLMConfigured,
+    nextSentence,
+    prevSentence,
+    requestKey,
+    selection.cue.id,
+    selection.cue.text,
+    selection.target,
+    settings.fallbackModel,
+    settings.llm,
+    settings.nativeLang,
+    videoId,
+    videoTitle
+  ]);
 
   useEffect(() => {
     if (selection.isPhrase && isLLMConfigured) {
@@ -605,186 +492,22 @@ export function WordPopup({
           </div>
         )}
 
-        {/* AI Breakdown or Inline AI Setup or Zero-Config Promotion Banner */}
-        {showAiSetup ? (
-          <div
-            className="rounded-xl border p-2.5 text-xs shadow-sm space-y-2.5"
-            style={{
-              backgroundColor: 'var(--ytai-surface)',
-              borderColor: 'var(--ytai-border)'
-            }}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 font-semibold text-white/95 text-xs">
-                <Sparkles className="h-3.5 w-3.5 text-amber-400" />
-                <span>Подключение AI</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAiSetup(false);
-                  setSetupError(null);
-                }}
-                className="rounded p-0.5 text-slate-400 hover:text-white transition"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-
-            {/* Provider Segmented Pills */}
-            <div className="grid grid-cols-4 gap-1 p-0.5 rounded-lg bg-black/30 border border-white/5">
-              {(['gemini', 'openai', 'openrouter', 'ollama'] as const).map((provId) => {
-                const preset = AI_PROVIDER_PRESETS[provId];
-                const isActive = selectedProvider === provId;
-                return (
-                  <button
-                    key={provId}
-                    type="button"
-                    onClick={() => {
-                      setSelectedProvider(provId);
-                      setSetupError(null);
-                      if (provId === 'ollama') {
-                        if (!ollamaUrlInput || ollamaUrlInput.includes('openai') || ollamaUrlInput.includes('google')) {
-                          setOllamaUrlInput('http://localhost:11434');
-                        }
-                        if (!ollamaModelInput || ollamaModelInput.includes('gpt') || ollamaModelInput.includes('gemini')) {
-                          setOllamaModelInput('llama3.1');
-                        }
-                      }
-                    }}
-                    style={
-                      isActive
-                        ? {
-                            backgroundColor: 'var(--ytai-accent)',
-                            color: '#ffffff'
-                          }
-                        : {
-                            color: 'var(--ytai-text-secondary)'
-                          }
-                    }
-                    className="rounded-md py-1 text-[11px] font-medium transition hover:text-white truncate text-center"
-                  >
-                    {preset.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Provider-specific inputs */}
-            {selectedProvider === 'ollama' ? (
-              <div className="space-y-1.5">
-                <div>
-                  <label className="block text-[10px] text-slate-400 mb-0.5">
-                    URL сервера Ollama
-                  </label>
-                  <input
-                    type="text"
-                    value={ollamaUrlInput}
-                    onChange={(e) => setOllamaUrlInput(e.target.value)}
-                    onKeyDown={(e) => e.stopPropagation()}
-                    onKeyUp={(e) => e.stopPropagation()}
-                    onKeyPress={(e) => e.stopPropagation()}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    placeholder="http://localhost:11434"
-                    className="w-full rounded-lg border border-white/10 bg-slate-950/80 px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] text-slate-400 mb-0.5">
-                    Модель
-                  </label>
-                  <input
-                    type="text"
-                    value={ollamaModelInput}
-                    onChange={(e) => setOllamaModelInput(e.target.value)}
-                    onKeyDown={(e) => e.stopPropagation()}
-                    onKeyUp={(e) => e.stopPropagation()}
-                    onKeyPress={(e) => e.stopPropagation()}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    placeholder="llama3.1"
-                    className="w-full rounded-lg border border-white/10 bg-slate-950/80 px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-1">
-                <label className="block text-[10px] text-slate-400 mb-0.5">
-                  API-ключ {AI_PROVIDER_PRESETS[selectedProvider].label}
-                </label>
-                <input
-                  type="password"
-                  value={apiKeyInput}
-                  onChange={(e) => setApiKeyInput(e.target.value)}
-                  onKeyDown={(e) => e.stopPropagation()}
-                  onKeyUp={(e) => e.stopPropagation()}
-                  onKeyPress={(e) => e.stopPropagation()}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  placeholder={AI_PROVIDER_PRESETS[selectedProvider].placeholderKey}
-                  className="w-full rounded-lg border border-white/10 bg-slate-950/80 px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
-                />
-                <div className="text-[10px] text-slate-400">
-                  {AI_PROVIDER_PRESETS[selectedProvider].hint}
-                </div>
-              </div>
-            )}
-
-            {setupError && (
-              <div className="text-[11px] text-rose-400">{setupError}</div>
-            )}
-
-            {/* Action buttons */}
-            <div className="flex items-center justify-end gap-2 pt-1 border-t border-white/10">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAiSetup(false);
-                  setSetupError(null);
-                }}
-                className="rounded-lg px-2.5 py-1 text-xs text-slate-300 hover:text-white transition"
-              >
-                Отмена
-              </button>
-              <button
-                type="button"
-                disabled={savingSetup}
-                onClick={() => void handleSaveAiSetup()}
-                style={{ backgroundColor: 'var(--ytai-accent)' }}
-                className="flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-semibold text-white shadow transition hover:opacity-90 disabled:opacity-50"
-              >
-                {savingSetup ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Check className="h-3 w-3" />
-                )}
-                <span>Сохранить</span>
-              </button>
-            </div>
-          </div>
-        ) : isLLMConfigured ? (
+        {/* AI Breakdown or Zero-Config Promotion Banner */}
+        {isLLMConfigured ? (
           <div>
             {!aiResult && !aiLoading && (
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => void handleRequestAI()}
-                  style={{
-                    backgroundColor: 'var(--ytai-accent)',
-                    color: '#ffffff'
-                  }}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow transition hover:opacity-90"
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  <span>AI Контекстный разбор</span>
-                </button>
-                <button
-                  type="button"
-                  title="Настроить AI провайдер"
-                  onClick={() => setShowAiSetup(true)}
-                  className="rounded-xl border border-white/10 p-2 text-slate-400 hover:text-white transition hover:bg-white/5 shrink-0"
-                >
-                  <Settings className="h-3.5 w-3.5" />
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => void handleRequestAI()}
+                style={{
+                  backgroundColor: 'var(--ytai-accent)',
+                  color: '#ffffff'
+                }}
+                className="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow transition hover:opacity-90"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>AI Контекстный разбор</span>
+              </button>
             )}
 
             {aiLoading && (
@@ -816,24 +539,14 @@ export function WordPopup({
                     aiError
                   )}
                 </div>
-                <div className="mt-2 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void handleRequestAI()}
-                    className="flex items-center gap-1.5 rounded-lg bg-rose-500/25 px-2.5 py-1 text-[11px] font-semibold text-rose-100 transition hover:bg-rose-500/40"
-                  >
-                    <RotateCcw className="h-3 w-3" />
-                    <span>Повторить</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowAiSetup(true)}
-                    className="flex items-center gap-1.5 rounded-lg bg-white/10 px-2.5 py-1 text-[11px] font-semibold text-slate-200 transition hover:bg-white/20"
-                  >
-                    <Settings className="h-3 w-3" />
-                    <span>Настройки AI</span>
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleRequestAI()}
+                  className="mt-2 flex items-center gap-1.5 rounded-lg bg-rose-500/25 px-2.5 py-1 text-[11px] font-semibold text-rose-100 transition hover:bg-rose-500/40"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  <span>Повторить</span>
+                </button>
               </div>
             )}
 
@@ -849,25 +562,15 @@ export function WordPopup({
                   <span className="font-semibold text-xs" style={{ color: 'var(--ytai-accent)' }}>
                     AI Разбор · {aiResult.lemma}
                   </span>
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className="rounded px-1.5 py-0.5 text-[10px]"
-                      style={{
-                        backgroundColor: 'rgba(var(--ytai-accent-rgb), 0.2)',
-                        color: 'var(--ytai-accent)'
-                      }}
-                    >
-                      {aiResult.partOfSpeech}
-                    </span>
-                    <button
-                      type="button"
-                      title="Настроить AI"
-                      onClick={() => setShowAiSetup(true)}
-                      className="rounded p-1 text-slate-400 hover:text-white transition"
-                    >
-                      <Settings className="h-3 w-3" />
-                    </button>
-                  </div>
+                  <span
+                    className="rounded px-1.5 py-0.5 text-[10px]"
+                    style={{
+                      backgroundColor: 'rgba(var(--ytai-accent-rgb), 0.2)',
+                      color: 'var(--ytai-accent)'
+                    }}
+                  >
+                    {aiResult.partOfSpeech}
+                  </span>
                 </div>
 
                 <div className="text-sm font-semibold text-white">
@@ -968,18 +671,26 @@ export function WordPopup({
                 <div className="font-semibold text-white/95 text-xs">
                   ✨ Хотите разбор грамматики и нюансов контекста?
                 </div>
-                <div className="mt-0.5 text-[11px] leading-relaxed" style={{ color: 'var(--ytai-text-secondary)' }}>
+                <div
+                  className="mt-0.5 text-[11px] leading-relaxed"
+                  style={{ color: 'var(--ytai-text-secondary)' }}
+                >
                   Подключите бесплатный ключ Gemini или локальную Ollama без лимитов
                 </div>
                 <button
                   type="button"
-                  onClick={() => setShowAiSetup(true)}
+                  onClick={() => void handleOpenPopup()}
                   className="mt-2 flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 shadow-sm"
                   style={{ backgroundColor: 'var(--ytai-accent)' }}
                 >
                   <Sparkles className="h-3 w-3" />
-                  <span>Подключить AI (Ollama / Gemini)</span>
+                  <span>Подключить AI (Gemini / Ollama)</span>
                 </button>
+                {popupHintVisible && (
+                  <div className="mt-1.5 text-[11px] font-medium text-amber-300">
+                    Нажмите на иконку расширения на панели браузера
+                  </div>
+                )}
               </div>
             </div>
           </div>

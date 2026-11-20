@@ -225,10 +225,22 @@ async function processMessage(
         return { ok: true, data: result };
       }
       case 'OPEN_OPTIONS': {
-        if (chrome.runtime.openOptionsPage) {
-          chrome.runtime.openOptionsPage();
-        } else {
-          void chrome.tabs.create({ url: chrome.runtime.getURL('src/app/index.html') });
+        try {
+          if (chrome.runtime.openOptionsPage) {
+            await new Promise<void>((resolve, reject) => {
+              chrome.runtime.openOptionsPage(() => {
+                if (chrome.runtime.lastError) {
+                  reject(new Error(chrome.runtime.lastError.message));
+                } else {
+                  resolve();
+                }
+              });
+            });
+          } else {
+            await chrome.tabs.create({ url: chrome.runtime.getURL('src/app/index.html') });
+          }
+        } catch {
+          await chrome.tabs.create({ url: chrome.runtime.getURL('src/app/index.html') });
         }
         return { ok: true, data: true };
       }

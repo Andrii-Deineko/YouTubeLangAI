@@ -167,13 +167,21 @@ async function fetchSingleText(
     sl
   )}&tl=${encodeURIComponent(targetLang)}&${dtParam}&q=${encodeURIComponent(cleanText)}`;
 
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Google Translate error ${response.status}`);
-  }
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Google Translate error ${response.status}`);
+    }
 
-  const json: unknown = await response.json();
-  return parseSingleResponse(json, cleanText);
+    const json: unknown = await response.json();
+    return parseSingleResponse(json, cleanText);
+  } catch (err) {
+    console.warn(`[YT-Lang-AI] Translation fetch error for "${cleanText}":`, err);
+    return {
+      translation: cleanText,
+      alternatives: []
+    };
+  }
 }
 
 /**
@@ -211,34 +219,45 @@ export async function translateWordAndContext(params: {
     const cleanWord = params.word.trim();
     const cleanSentence = params.sentence?.trim() || '';
 
-    const [wordResult, sentenceResult] = await Promise.all([
-      fetchSingleText(cleanWord, sl, tl, true),
-      cleanSentence && cleanSentence.toLowerCase() !== cleanWord.toLowerCase()
-        ? fetchSingleText(cleanSentence, sl, tl, false)
-        : Promise.resolve(null)
-    ]);
+    try {
+      const [wordResult, sentenceResult] = await Promise.all([
+        fetchSingleText(cleanWord, sl, tl, true),
+        cleanSentence && cleanSentence.toLowerCase() !== cleanWord.toLowerCase()
+          ? fetchSingleText(cleanSentence, sl, tl, false)
+          : Promise.resolve(null)
+      ]);
 
-    const result: FreeTranslateWordResult = {
-      word: cleanWord,
-      translation: wordResult.translation || cleanWord,
-      sentenceTranslation: sentenceResult?.translation || '',
-      alternatives: wordResult.alternatives,
-      partOfSpeech: wordResult.partOfSpeech,
-      detectedLang: wordResult.detectedLang,
-      fromCache: false
-    };
+      const result: FreeTranslateWordResult = {
+        word: cleanWord,
+        translation: wordResult.translation || cleanWord,
+        sentenceTranslation: sentenceResult?.translation || '',
+        alternatives: wordResult.alternatives,
+        partOfSpeech: wordResult.partOfSpeech,
+        detectedLang: wordResult.detectedLang,
+        fromCache: false
+      };
 
-    // Store in LRU cache (enforce max size)
-    if (wordMemoryCache.size >= WORD_CACHE_MAX_SIZE) {
-      const oldestKey = wordMemoryCache.keys().next().value;
-      if (oldestKey) {
-        wordMemoryCache.delete(oldestKey);
+      // Store in LRU cache (enforce max size)
+      if (wordMemoryCache.size >= WORD_CACHE_MAX_SIZE) {
+        const oldestKey = wordMemoryCache.keys().next().value;
+        if (oldestKey) {
+          wordMemoryCache.delete(oldestKey);
+        }
       }
-    }
-    wordMemoryCache.set(cacheKey, result);
-    void persistWordCacheToStorage();
+      wordMemoryCache.set(cacheKey, result);
+      void persistWordCacheToStorage();
 
-    return result;
+      return result;
+    } catch (err) {
+      console.warn('[YT-Lang-AI] Word translation task error:', err);
+      return {
+        word: cleanWord,
+        translation: cleanWord,
+        sentenceTranslation: '',
+        alternatives: [],
+        fromCache: false
+      };
+    }
   })();
 
   inFlightWordRequests.set(cacheKey, task);

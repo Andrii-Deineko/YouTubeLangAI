@@ -17,6 +17,10 @@
     },
     "default_title": "YouTube Lang AI"
   },
+  "options_ui": {
+    "page": "src/app/index.html",
+    "open_in_tab": true
+  },
   "background": {
     "service_worker": "src/background/service-worker.ts",
     "type": "module"

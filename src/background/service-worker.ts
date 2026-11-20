@@ -13,6 +13,7 @@ import {
   testLLMConnection
 } from '../shared/llm';
 import { getSettings } from '../shared/storage';
+import { translateCueBatch, translateWordAndContext } from './freeTranslate';
 import type { RuntimeRequest, RuntimeResponse } from '../types/messages';
 import type { AIExplanation, QuickTranslationResult } from '../types/vocabulary';
 
@@ -188,9 +189,49 @@ async function handleAIExplain(
   }
 }
 
-async function processMessage(message: RuntimeRequest): Promise<RuntimeResponse<unknown>> {
+async function processMessage(
+  message: RuntimeRequest,
+  sender: chrome.runtime.MessageSender
+): Promise<RuntimeResponse<unknown>> {
   try {
     switch (message.type) {
+      case 'FREE_TRANSLATE_WORD': {
+        const result = await translateWordAndContext({
+          word: message.payload.word,
+          sentence: message.payload.sentence,
+          sourceLang: message.payload.sourceLang,
+          targetLang: message.payload.targetLang
+        });
+        return { ok: true, data: result };
+      }
+      case 'FREE_TRANSLATE_CUES': {
+        const result = await translateCueBatch({
+          videoId: message.payload.videoId,
+          cues: message.payload.cues,
+          sourceLang: message.payload.sourceLang,
+          targetLang: message.payload.targetLang,
+          onBatchProgress: (batchTranslations) => {
+            if (sender.tab?.id) {
+              chrome.tabs.sendMessage(sender.tab.id, {
+                type: 'FREE_TRANSLATE_CUES_BATCH',
+                payload: {
+                  videoId: message.payload.videoId,
+                  batchTranslations
+                }
+              }).catch(() => undefined);
+            }
+          }
+        });
+        return { ok: true, data: result };
+      }
+      case 'OPEN_OPTIONS': {
+        if (chrome.runtime.openOptionsPage) {
+          chrome.runtime.openOptionsPage();
+        } else {
+          void chrome.tabs.create({ url: chrome.runtime.getURL('src/app/index.html') });
+        }
+        return { ok: true, data: true };
+      }
       case 'QUICK_TRANSLATE': {
         const result = await handleQuickTranslate(
           message.payload.text,
@@ -240,10 +281,10 @@ async function processMessage(message: RuntimeRequest): Promise<RuntimeResponse<
 chrome.runtime.onMessage.addListener(
   (
     message: RuntimeRequest,
-    _sender: chrome.runtime.MessageSender,
+    sender: chrome.runtime.MessageSender,
     sendResponse: (response: RuntimeResponse<unknown>) => void
   ): boolean => {
-    void processMessage(message).then(sendResponse);
+    void processMessage(message, sender).then(sendResponse);
     return true;
   }
 );

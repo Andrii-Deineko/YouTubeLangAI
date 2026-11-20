@@ -2,6 +2,8 @@ import { createElement } from 'react';
 import {
   ISOLATED_MESSAGE_SOURCE,
   MAIN_MESSAGE_SOURCE,
+  type FreeTranslateCuesBatchMessage,
+  type FreeTranslateCuesResponse,
   type IsolatedToMainMessage,
   type MainToIsolatedMessage,
   type QuickTranslateResponse,
@@ -48,6 +50,7 @@ let sessionAbortController: AbortController | null = null;
 let adObserver: MutationObserver | null = null;
 let domObserver: MutationObserver | null = null;
 let translationRequestedForVideo = '';
+let freeTranslationRequestedKey = '';
 
 function postToMain(message: IsolatedToMainMessage): void {
   window.postMessage(message, '*');
@@ -225,9 +228,55 @@ async function handleUpdateSettings(partial: Partial<UserSettings>): Promise<voi
     trackMeta.lang !== settings.nativeLang
   ) {
     requestTranslatedTrackIfNeeded();
+    requestFreeSubtitleTranslationIfNeeded();
   }
   syncNativeCaptionsVisibility();
   renderUI();
+}
+
+function requestFreeSubtitleTranslationIfNeeded(): void {
+  if (!settings.enabled || !settings.showDualSubtitles) return;
+  const vid = currentVideoId || trackMeta?.videoId || getVideoIdFromUrl();
+  if (!vid || vid === 'unknown') return;
+
+  const cues = primaryEngine.getCues();
+  if (cues.length === 0) return;
+
+  const sourceLang = trackMeta?.lang ?? 'auto';
+  if (sourceLang.toLowerCase() === settings.nativeLang.toLowerCase()) return;
+
+  const key = `${vid}:${settings.nativeLang.toLowerCase()}`;
+  if (freeTranslationRequestedKey === key) return;
+  freeTranslationRequestedKey = key;
+
+  console.log('[YT-Lang-AI] Requesting free batched subtitle translation for video:', vid, cues.length, 'cues');
+
+  const cuesPayload = cues.map((c) => ({ id: c.id, text: c.text }));
+
+  chrome.runtime.sendMessage(
+    {
+      type: 'FREE_TRANSLATE_CUES',
+      payload: {
+        videoId: vid,
+        cues: cuesPayload,
+        sourceLang,
+        targetLang: settings.nativeLang
+      }
+    },
+    (response: FreeTranslateCuesResponse | undefined) => {
+      if (chrome.runtime.lastError) {
+        console.warn('[YT-Lang-AI] Free subtitle translation failed:', chrome.runtime.lastError.message);
+        return;
+      }
+      if (response && response.ok && Array.isArray(response.data)) {
+        if (currentVideoId === vid) {
+          translatedEngine.setTranslatedCuesFromBatch(response.data, primaryEngine.getCues());
+          activeTranslatedCue = translatedEngine.findActiveCue(videoController?.getCurrentTime() ?? 0);
+          renderUI();
+        }
+      }
+    }
+  );
 }
 
 function requestTranslatedTrackIfNeeded(): void {
@@ -248,6 +297,9 @@ function requestTranslatedTrackIfNeeded(): void {
       videoId: vid
     }
   });
+
+  // Also trigger free subtitle translation so users get instant translations even without native timedtext
+  requestFreeSubtitleTranslationIfNeeded();
 }
 
 function closePopupAndResume(allowAutoResume = true): void {
@@ -497,12 +549,33 @@ function resetVideoState(): void {
   selectedSelection = null;
   lastAutoPausedCueId = null;
   translationRequestedForVideo = '';
+  freeTranslationRequestedKey = '';
   videoController?.resetInspectionState();
   syncNativeCaptionsVisibility();
   renderUI();
 }
 
 const lifecycleAbortController = new AbortController();
+
+chrome.runtime.onMessage.addListener((message: unknown) => {
+  if (
+    message &&
+    typeof message === 'object' &&
+    (message as { type?: string }).type === 'FREE_TRANSLATE_CUES_BATCH'
+  ) {
+    const batchMsg = message as FreeTranslateCuesBatchMessage;
+    if (batchMsg.payload && batchMsg.payload.videoId === currentVideoId) {
+      translatedEngine.setTranslatedCuesFromBatch(
+        batchMsg.payload.batchTranslations,
+        primaryEngine.getCues()
+      );
+      activeTranslatedCue = translatedEngine.findActiveCue(
+        videoController?.getCurrentTime() ?? 0
+      );
+      renderUI();
+    }
+  }
+});
 
 window.addEventListener(
   'message',
@@ -540,6 +613,9 @@ window.addEventListener(
         videoController?.getCurrentTime() ?? 0
       );
       renderUI();
+    } else if (msg.type === 'TRACK_ERROR') {
+      console.warn('[YT-Lang-AI] Native timedtext track error from MAIN, triggering free subtitle translation');
+      requestFreeSubtitleTranslationIfNeeded();
     }
   },
   { signal: lifecycleAbortController.signal }

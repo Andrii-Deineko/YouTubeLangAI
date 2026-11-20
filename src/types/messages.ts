@@ -53,6 +53,27 @@ export type IsolatedToMainMessage =
 
 export type RuntimeRequest =
   | {
+      type: 'FREE_TRANSLATE_WORD';
+      payload: {
+        word: string;
+        sentence?: string;
+        sourceLang?: string;
+        targetLang: string;
+      };
+    }
+  | {
+      type: 'FREE_TRANSLATE_CUES';
+      payload: {
+        videoId: string;
+        cues: Array<{ id: string; text: string }>;
+        sourceLang?: string;
+        targetLang: string;
+      };
+    }
+  | {
+      type: 'OPEN_OPTIONS';
+    }
+  | {
       type: 'QUICK_TRANSLATE';
       payload: {
         text: string;
@@ -107,6 +128,25 @@ export type RuntimeResponse<T> =
   | { ok: true; data: T }
   | { ok: false; error: string };
 
+export interface FreeTranslateWordResult {
+  word: string;
+  translation: string;
+  sentenceTranslation: string;
+  alternatives: string[];
+  partOfSpeech?: string;
+  detectedLang?: string;
+  fromCache?: boolean;
+  isZeroConfigMode?: boolean;
+}
+
+export interface FreeTranslateCuesBatchMessage {
+  type: 'FREE_TRANSLATE_CUES_BATCH';
+  payload: {
+    videoId: string;
+    batchTranslations: Array<{ id: string; text: string }>;
+  };
+}
+
 export interface AnkiTestResult {
   version: number;
 }
@@ -124,6 +164,8 @@ export interface LLMTestResult {
   replyPreview: string;
 }
 
+export type FreeTranslateWordResponse = RuntimeResponse<FreeTranslateWordResult>;
+export type FreeTranslateCuesResponse = RuntimeResponse<Array<{ id: string; text: string }>>;
 export type QuickTranslateResponse = RuntimeResponse<QuickTranslationResult>;
 export type AIExplainResponse = RuntimeResponse<AIExplanation>;
 export type AnkiTestResponse = RuntimeResponse<AnkiTestResult>;

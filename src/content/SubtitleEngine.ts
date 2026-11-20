@@ -133,6 +133,30 @@ export class SubtitleEngine {
     this.isAsrTrack = false;
   }
 
+  public setTranslatedCuesFromBatch(
+    batch: Array<{ id: string; text: string }>,
+    primaryCues: SubtitleCue[]
+  ): void {
+    const primaryMap = new Map<string, SubtitleCue>(primaryCues.map((c) => [c.id, c]));
+    const cueMap = new Map<string, SubtitleCue>(this.cues.map((c) => [c.id, c]));
+
+    for (const item of batch) {
+      const prim = primaryMap.get(item.id);
+      if (!prim) continue;
+      const cleanText = item.text.trim();
+      cueMap.set(item.id, {
+        id: item.id,
+        index: prim.index,
+        startTime: prim.startTime,
+        endTime: prim.endTime,
+        text: cleanText,
+        tokens: tokenizeCueText(item.id, cleanText, prim.startTime, prim.endTime)
+      });
+    }
+
+    this.cues = Array.from(cueMap.values()).sort((a, b) => a.startTime - b.startTime);
+  }
+
   public getCues(): SubtitleCue[] {
     return this.cues;
   }

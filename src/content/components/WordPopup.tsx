@@ -11,11 +11,12 @@ import {
 } from 'lucide-react';
 import type {
   AIExplainResponse,
-  QuickTranslateResponse,
+  FreeTranslateWordResponse,
+  FreeTranslateWordResult,
   RuntimeRequest
 } from '../../types/messages';
 import type { UserSettings } from '../../types/settings';
-import type { AIExplanation, QuickTranslationResult } from '../../types/vocabulary';
+import type { AIExplanation } from '../../types/vocabulary';
 import type { WordSelectionPayload } from './SubtitleOverlay';
 
 interface WordPopupProps {
@@ -88,9 +89,9 @@ export function WordPopup({
   onSaveCard,
   onClose
 }: WordPopupProps): ReactElement {
-  const [quickLoading, setQuickLoading] = useState(true);
-  const [quickError, setQuickError] = useState<string | null>(null);
-  const [quickResult, setQuickResult] = useState<QuickTranslationResult | null>(null);
+  const [freeLoading, setFreeLoading] = useState(true);
+  const [freeError, setFreeError] = useState<string | null>(null);
+  const [freeResult, setFreeResult] = useState<FreeTranslateWordResult | null>(null);
 
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -100,6 +101,16 @@ export function WordPopup({
 
   const activeRequestKeyRef = useRef('');
   const popupRef = useRef<HTMLDivElement | null>(null);
+
+  const isLocalOllama = Boolean(
+    settings.llm.baseUrl &&
+      (settings.llm.baseUrl.includes('11434') ||
+        settings.llm.baseUrl.includes('localhost') ||
+        settings.llm.baseUrl.includes('127.0.0.1'))
+  );
+  const isLLMConfigured = Boolean(
+    isLocalOllama || (settings.llm.apiKey && settings.llm.apiKey.trim().length > 0)
+  );
 
   const requestKey = `${videoId}:${selection.cue.id}:${selection.target}`;
 
@@ -142,43 +153,49 @@ export function WordPopup({
 
   useEffect(() => {
     activeRequestKeyRef.current = requestKey;
-    setQuickLoading(true);
-    setQuickError(null);
-    setQuickResult(null);
+    setFreeLoading(true);
+    setFreeError(null);
+    setFreeResult(null);
     setAiLoading(false);
     setAiError(null);
     setAiResult(null);
     setShowExamples(false);
 
-    void sendRuntimeMessage<QuickTranslateResponse>({
-      type: 'QUICK_TRANSLATE',
+    // 1. Immediately request fast free translation (<150ms)
+    void sendRuntimeMessage<FreeTranslateWordResponse>({
+      type: 'FREE_TRANSLATE_WORD',
       payload: {
-        text: selection.target,
+        word: selection.target,
+        sentence: selection.cue.text,
         sourceLang,
-        nativeLang: settings.nativeLang
+        targetLang: settings.nativeLang
       }
     })
       .then((res) => {
         if (activeRequestKeyRef.current !== requestKey) return;
         if (res.ok) {
-          setQuickResult(res.data);
+          setFreeResult(res.data);
         } else {
-          setQuickError(res.error);
+          setFreeError(res.error);
         }
       })
       .catch((err: unknown) => {
         if (activeRequestKeyRef.current !== requestKey) return;
-        setQuickError(err instanceof Error ? err.message : 'Translation error');
+        setFreeError(err instanceof Error ? err.message : 'Translation error');
       })
       .finally(() => {
         if (activeRequestKeyRef.current === requestKey) {
-          setQuickLoading(false);
+          setFreeLoading(false);
         }
       });
-  }, [requestKey, selection.target, sourceLang, settings.nativeLang]);
+  }, [requestKey, selection.cue.text, selection.target, settings.nativeLang, sourceLang]);
 
   const handleRequestAI = useCallback(async (): Promise<void> => {
     if (aiLoading) return;
+    if (!isLLMConfigured) {
+      void sendRuntimeMessage({ type: 'OPEN_OPTIONS' });
+      return;
+    }
     setAiLoading(true);
     setAiError(null);
 
@@ -214,6 +231,7 @@ export function WordPopup({
     }
   }, [
     aiLoading,
+    isLLMConfigured,
     nextSentence,
     prevSentence,
     requestKey,
@@ -228,19 +246,19 @@ export function WordPopup({
   ]);
 
   useEffect(() => {
-    if (selection.isPhrase && settings.llm.apiKey.trim()) {
+    if (selection.isPhrase && isLLMConfigured) {
       void handleRequestAI();
     }
-    // Trigger automatic AI explanation only when opening a multi-word phrase selection
+    // Trigger automatic AI explanation only when opening a multi-word phrase selection and LLM is configured
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestKey, selection.isPhrase]);
+  }, [requestKey, selection.isPhrase, isLLMConfigured]);
 
   const handleSave = async (): Promise<void> => {
     if (saving) return;
     setSaving(true);
     try {
       const bestTranslation =
-        aiResult?.contextualTranslation || quickResult?.translation || selection.target;
+        aiResult?.contextualTranslation || freeResult?.translation || selection.target;
       await onSaveCard({
         word: selection.target,
         translation: bestTranslation,
@@ -328,13 +346,13 @@ export function WordPopup({
           <button
             type="button"
             title="Pronounce"
-            onClick={() => speakText(selection.target, quickResult?.detectedLang || sourceLang)}
+            onClick={() => speakText(selection.target, freeResult?.detectedLang || sourceLang)}
             style={{ color: 'var(--ytai-accent)' }}
             className="rounded-lg p-1 transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)] shrink-0"
           >
             <Volume2 className="h-4 w-4" />
           </button>
-          {(aiResult?.partOfSpeech || quickResult?.partOfSpeech) && (
+          {(aiResult?.partOfSpeech || freeResult?.partOfSpeech) && (
             <span
               className="truncate rounded border px-1.5 py-0.5 text-[10px] font-medium shrink-0"
               style={{
@@ -343,7 +361,7 @@ export function WordPopup({
                 color: 'var(--ytai-text-secondary)'
               }}
             >
-              {aiResult?.partOfSpeech || quickResult?.partOfSpeech}
+              {aiResult?.partOfSpeech || freeResult?.partOfSpeech}
             </span>
           )}
         </div>
@@ -361,7 +379,7 @@ export function WordPopup({
 
       {/* 2. Scrollable Middle Body (flex-1 min-h-0 overflow-y-auto) */}
       <div className="flex-1 min-h-0 overflow-y-auto space-y-2 py-2 pr-0.5">
-        {/* Quick Translation & Compact Synonyms */}
+        {/* Word Translation & Synonyms Chips */}
         <div
           className="rounded-xl border p-2.5 text-xs"
           style={{
@@ -369,21 +387,21 @@ export function WordPopup({
             borderColor: 'var(--ytai-border)'
           }}
         >
-          {quickLoading ? (
+          {freeLoading ? (
             <div className="flex items-center gap-2" style={{ color: 'var(--ytai-text-secondary)' }}>
               <Loader2 className="h-3.5 w-3.5 animate-spin" style={{ color: 'var(--ytai-accent)' }} />
               <span>Translating...</span>
             </div>
-          ) : quickError ? (
-            <div className="text-xs text-rose-400">{quickError}</div>
-          ) : quickResult ? (
+          ) : freeError ? (
+            <div className="text-xs text-rose-400">{freeError}</div>
+          ) : freeResult ? (
             <div>
               <div className="text-sm font-semibold" style={{ color: 'var(--ytai-accent)' }}>
-                {quickResult.translation}
+                {freeResult.translation}
               </div>
-              {quickResult.alternatives.length > 0 && (
+              {freeResult.alternatives.length > 0 && (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                  {quickResult.alternatives.slice(0, 4).map((alt) => (
+                  {freeResult.alternatives.slice(0, 4).map((alt) => (
                     <span
                       key={alt}
                       className="rounded-md border px-1.5 py-0.5 text-[11px]"
@@ -396,12 +414,12 @@ export function WordPopup({
                       {alt}
                     </span>
                   ))}
-                  {quickResult.alternatives.length > 4 && (
+                  {freeResult.alternatives.length > 4 && (
                     <span
                       className="text-[10px] opacity-75"
                       style={{ color: 'var(--ytai-text-secondary)' }}
                     >
-                      +{quickResult.alternatives.length - 4}
+                      +{freeResult.alternatives.length - 4}
                     </span>
                   )}
                 </div>
@@ -410,169 +428,232 @@ export function WordPopup({
           ) : null}
         </div>
 
-        {/* AI Breakdown Button & Container */}
-        <div>
-          {!aiResult && !aiLoading && (
-            <button
-              type="button"
-              onClick={() => void handleRequestAI()}
-              style={{
-                backgroundColor: 'var(--ytai-accent)',
-                color: '#ffffff'
-              }}
-              className="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow transition hover:opacity-90"
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              <span>AI Контекстный разбор</span>
-            </button>
-          )}
-
-          {aiLoading && (
-            <div
-              className="flex items-center justify-center gap-2 rounded-xl border p-2.5 text-xs"
-              style={{
-                backgroundColor: 'rgba(var(--ytai-accent-rgb), 0.1)',
-                borderColor: 'rgba(var(--ytai-accent-rgb), 0.3)',
-                color: 'var(--ytai-accent)'
-              }}
-            >
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              <span>Analyzing scene context with AI...</span>
+        {/* Current Sentence Context with neat italic translation */}
+        {selection.cue.text && (
+          <div
+            className="rounded-xl border p-2.5 text-xs"
+            style={{
+              backgroundColor: 'rgba(var(--ytai-bg-rgb), 0.55)',
+              borderColor: 'var(--ytai-border)'
+            }}
+          >
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              Контекст субтитра
             </div>
-          )}
-
-          {aiError && (
-            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-200">
-              <div className="break-words">
-                {aiError.includes('503') ? (
-                  <span>
-                    <strong>Сервер модели временно перегружен (503).</strong> Попробуйте ещё раз через несколько секунд.
-                  </span>
-                ) : aiError.includes('429') ? (
-                  <span>
-                    <strong>Превышен лимит запросов (429).</strong> Подождите немного и повторите попытку.
-                  </span>
-                ) : (
-                  aiError
-                )}
+            <div className="mt-1 text-xs text-white/95 leading-relaxed">
+              &ldquo;{selection.cue.text}&rdquo;
+            </div>
+            {freeResult?.sentenceTranslation ? (
+              <div
+                className="mt-1.5 text-xs italic leading-relaxed"
+                style={{ color: 'var(--ytai-text-secondary)' }}
+              >
+                {freeResult.sentenceTranslation}
               </div>
+            ) : freeLoading ? (
+              <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-400">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                <span>Загрузка перевода контекста...</span>
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        {/* AI Breakdown or Zero-Config Promotion Banner */}
+        {isLLMConfigured ? (
+          <div>
+            {!aiResult && !aiLoading && (
               <button
                 type="button"
                 onClick={() => void handleRequestAI()}
-                className="mt-2 flex items-center gap-1.5 rounded-lg bg-rose-500/25 px-2.5 py-1 text-[11px] font-semibold text-rose-100 transition hover:bg-rose-500/40"
+                style={{
+                  backgroundColor: 'var(--ytai-accent)',
+                  color: '#ffffff'
+                }}
+                className="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow transition hover:opacity-90"
               >
-                <RotateCcw className="h-3 w-3" />
-                <span>Повторить</span>
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>AI Контекстный разбор</span>
               </button>
-            </div>
-          )}
+            )}
 
-          {aiResult && (
-            <div
-              className="space-y-2 rounded-xl border p-2.5 text-xs"
-              style={{
-                backgroundColor: 'var(--ytai-surface)',
-                borderColor: 'var(--ytai-border)'
-              }}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-xs" style={{ color: 'var(--ytai-accent)' }}>
-                  AI Разбор · {aiResult.lemma}
-                </span>
-                <span
-                  className="rounded px-1.5 py-0.5 text-[10px]"
-                  style={{
-                    backgroundColor: 'rgba(var(--ytai-accent-rgb), 0.2)',
-                    color: 'var(--ytai-accent)'
-                  }}
-                >
-                  {aiResult.partOfSpeech}
-                </span>
+            {aiLoading && (
+              <div
+                className="flex items-center justify-center gap-2 rounded-xl border p-2.5 text-xs"
+                style={{
+                  backgroundColor: 'rgba(var(--ytai-accent-rgb), 0.1)',
+                  borderColor: 'rgba(var(--ytai-accent-rgb), 0.3)',
+                  color: 'var(--ytai-accent)'
+                }}
+              >
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span>Analyzing scene context with AI...</span>
               </div>
+            )}
 
-              <div className="text-sm font-semibold text-white">
-                {aiResult.contextualTranslation}
-              </div>
-
-              {aiResult.literalTranslation && (
-                <div style={{ color: 'var(--ytai-text-secondary)' }}>
-                  <span className="font-medium text-white">Дословно: </span>
-                  {aiResult.literalTranslation}
-                </div>
-              )}
-
-              {aiResult.grammarNote && (
-                <div style={{ color: 'var(--ytai-text-secondary)' }}>
-                  <span className="font-medium" style={{ color: 'var(--ytai-accent)' }}>
-                    Грамматика:{' '}
-                  </span>
-                  {aiResult.grammarNote}
-                </div>
-              )}
-
-              {aiResult.nuanceExplanation && (
-                <div style={{ color: 'var(--ytai-text-secondary)' }}>
-                  <span className="font-medium" style={{ color: 'var(--ytai-accent)' }}>
-                    Нюанс:{' '}
-                  </span>
-                  {aiResult.nuanceExplanation}
-                </div>
-              )}
-
-              {/* Collapsible Examples Accordion */}
-              {aiResult.examples.length > 0 && (
-                <div
-                  className="border-t pt-1.5"
-                  style={{ borderColor: 'var(--ytai-border)' }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setShowExamples((prev) => !prev)}
-                    className="flex w-full items-center justify-between py-1 text-left font-medium transition hover:opacity-80"
-                    style={{ color: 'var(--ytai-text-secondary)' }}
-                  >
-                    <span>Примеры ({aiResult.examples.length})</span>
-                    <ChevronDown
-                      className={`h-3.5 w-3.5 transition-transform duration-200 ${
-                        showExamples ? 'rotate-180' : ''
-                      }`}
-                    />
-                  </button>
-
-                  {showExamples && (
-                    <div className="mt-1.5 space-y-1.5">
-                      {aiResult.examples.map((ex, idx) => (
-                        <div
-                          key={idx}
-                          className="rounded-lg border p-2"
-                          style={{
-                            backgroundColor: 'rgba(var(--ytai-bg-rgb), 0.65)',
-                            borderColor: 'var(--ytai-border)'
-                          }}
-                        >
-                          <div className="flex items-start justify-between gap-1.5 text-white">
-                            <span>{ex.source}</span>
-                            <button
-                              type="button"
-                              onClick={() => speakText(ex.source, quickResult?.detectedLang || sourceLang)}
-                              style={{ color: 'var(--ytai-accent)' }}
-                              className="shrink-0 transition hover:opacity-80"
-                            >
-                              <Volume2 className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                          <div className="mt-0.5 text-[11px]" style={{ color: 'var(--ytai-text-secondary)' }}>
-                            {ex.translation}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+            {aiError && (
+              <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-200">
+                <div className="break-words">
+                  {aiError.includes('503') ? (
+                    <span>
+                      <strong>Сервер модели временно перегружен (503).</strong> Попробуйте ещё раз через несколько секунд.
+                    </span>
+                  ) : aiError.includes('429') ? (
+                    <span>
+                      <strong>Превышен лимит запросов (429).</strong> Подождите немного и повторите попытку.
+                    </span>
+                  ) : (
+                    aiError
                   )}
                 </div>
-              )}
+                <button
+                  type="button"
+                  onClick={() => void handleRequestAI()}
+                  className="mt-2 flex items-center gap-1.5 rounded-lg bg-rose-500/25 px-2.5 py-1 text-[11px] font-semibold text-rose-100 transition hover:bg-rose-500/40"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  <span>Повторить</span>
+                </button>
+              </div>
+            )}
+
+            {aiResult && (
+              <div
+                className="space-y-2 rounded-xl border p-2.5 text-xs"
+                style={{
+                  backgroundColor: 'var(--ytai-surface)',
+                  borderColor: 'var(--ytai-border)'
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-xs" style={{ color: 'var(--ytai-accent)' }}>
+                    AI Разбор · {aiResult.lemma}
+                  </span>
+                  <span
+                    className="rounded px-1.5 py-0.5 text-[10px]"
+                    style={{
+                      backgroundColor: 'rgba(var(--ytai-accent-rgb), 0.2)',
+                      color: 'var(--ytai-accent)'
+                    }}
+                  >
+                    {aiResult.partOfSpeech}
+                  </span>
+                </div>
+
+                <div className="text-sm font-semibold text-white">
+                  {aiResult.contextualTranslation}
+                </div>
+
+                {aiResult.literalTranslation && (
+                  <div style={{ color: 'var(--ytai-text-secondary)' }}>
+                    <span className="font-medium text-white">Дословно: </span>
+                    {aiResult.literalTranslation}
+                  </div>
+                )}
+
+                {aiResult.grammarNote && (
+                  <div style={{ color: 'var(--ytai-text-secondary)' }}>
+                    <span className="font-medium" style={{ color: 'var(--ytai-accent)' }}>
+                      Грамматика:{' '}
+                    </span>
+                    {aiResult.grammarNote}
+                  </div>
+                )}
+
+                {aiResult.nuanceExplanation && (
+                  <div style={{ color: 'var(--ytai-text-secondary)' }}>
+                    <span className="font-medium" style={{ color: 'var(--ytai-accent)' }}>
+                      Нюанс:{' '}
+                    </span>
+                    {aiResult.nuanceExplanation}
+                  </div>
+                )}
+
+                {/* Collapsible Examples Accordion */}
+                {aiResult.examples.length > 0 && (
+                  <div
+                    className="border-t pt-1.5"
+                    style={{ borderColor: 'var(--ytai-border)' }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setShowExamples((prev) => !prev)}
+                      className="flex w-full items-center justify-between py-1 text-left font-medium transition hover:opacity-80"
+                      style={{ color: 'var(--ytai-text-secondary)' }}
+                    >
+                      <span>Примеры ({aiResult.examples.length})</span>
+                      <ChevronDown
+                        className={`h-3.5 w-3.5 transition-transform duration-200 ${
+                          showExamples ? 'rotate-180' : ''
+                        }`}
+                      />
+                    </button>
+
+                    {showExamples && (
+                      <div className="mt-1.5 space-y-1.5">
+                        {aiResult.examples.map((ex, idx) => (
+                          <div
+                            key={idx}
+                            className="rounded-lg border p-2"
+                            style={{
+                              backgroundColor: 'rgba(var(--ytai-bg-rgb), 0.65)',
+                              borderColor: 'var(--ytai-border)'
+                            }}
+                          >
+                            <div className="flex items-start justify-between gap-1.5 text-white">
+                              <span>{ex.source}</span>
+                              <button
+                                type="button"
+                                onClick={() => speakText(ex.source, freeResult?.detectedLang || sourceLang)}
+                                style={{ color: 'var(--ytai-accent)' }}
+                                className="shrink-0 transition hover:opacity-80"
+                              >
+                                <Volume2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                            <div className="mt-0.5 text-[11px]" style={{ color: 'var(--ytai-text-secondary)' }}>
+                              {ex.translation}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Zero-Config Mode Banner */
+          <div
+            className="rounded-xl border p-2.5 text-xs shadow-sm"
+            style={{
+              backgroundColor: 'var(--ytai-surface)',
+              borderColor: 'var(--ytai-border)'
+            }}
+          >
+            <div className="flex items-start gap-2.5">
+              <Sparkles className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-white/95 text-xs">
+                  ✨ Хотите разбор грамматики и нюансов контекста?
+                </div>
+                <div className="mt-0.5 text-[11px] leading-relaxed" style={{ color: 'var(--ytai-text-secondary)' }}>
+                  Подключите бесплатный ключ Gemini или локальную Ollama без лимитов
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void sendRuntimeMessage({ type: 'OPEN_OPTIONS' })}
+                  className="mt-2 flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 shadow-sm"
+                  style={{ backgroundColor: 'var(--ytai-accent)' }}
+                >
+                  <Sparkles className="h-3 w-3" />
+                  <span>Подключить AI (Gemini / Ollama)</span>
+                </button>
+              </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* 3. Pinned Footer (shrink-0) */}
@@ -586,7 +667,7 @@ export function WordPopup({
 
         <button
           type="button"
-          disabled={saving || quickLoading}
+          disabled={saving || freeLoading}
           onClick={() => void handleSave()}
           style={
             isSaved

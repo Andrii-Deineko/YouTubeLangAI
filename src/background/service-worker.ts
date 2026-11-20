@@ -236,11 +236,13 @@ async function processMessage(
                 }
               });
             });
-          } else {
-            await chrome.tabs.create({ url: chrome.runtime.getURL('src/app/index.html') });
+          } else if (chrome.action?.openPopup) {
+            await chrome.action.openPopup().catch(() => undefined);
           }
         } catch {
-          await chrome.tabs.create({ url: chrome.runtime.getURL('src/app/index.html') });
+          if (chrome.action?.openPopup) {
+            await chrome.action.openPopup().catch(() => undefined);
+          }
         }
         return { ok: true, data: true };
       }

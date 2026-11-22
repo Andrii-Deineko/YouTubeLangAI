@@ -8,7 +8,8 @@ import {
   Search,
   Send,
   Trash2,
-  Upload
+  Upload,
+  Volume2
 } from 'lucide-react';
 import { State } from 'ts-fsrs';
 import {
@@ -21,6 +22,7 @@ import { getCardStateLabel } from '../../shared/srs';
 import type { AnkiExportResponse, RuntimeRequest } from '../../types/messages';
 import type { UserSettings } from '../../types/settings';
 import type { VocabularyCard } from '../../types/vocabulary';
+import { speakText } from '../../content/components/WordPopup';
 
 type VocabFilter = 'all' | 'due' | 'new' | 'learning' | 'review';
 
@@ -170,69 +172,69 @@ export function VocabularyList({
 
   return (
     <div className="space-y-3">
-      {/* Search & Filters */}
-      <div className="space-y-2">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search word, translation, sentence, video..."
-            style={{
-              backgroundColor: 'var(--ytai-surface)',
-              borderColor: 'var(--ytai-border)'
-            }}
-            className="w-full rounded-xl border py-2 pl-9 pr-3 text-xs text-slate-100 placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
-          />
-        </div>
+      {/* Search Input */}
+      <div className="relative">
+        <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Поиск по слову, переводу или контексту..."
+          style={{
+            backgroundColor: 'var(--ytai-surface, var(--ai-surface))',
+            borderColor: 'var(--ytai-border, var(--ai-border))'
+          }}
+          className="w-full rounded-xl border py-2 pl-9 pr-3 text-xs text-slate-100 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
+        />
+      </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap gap-1">
-            {(['all', 'due', 'new', 'learning', 'review'] as const).map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => setFilter(tab)}
-                style={
-                  filter === tab
-                    ? { backgroundColor: 'var(--ytai-accent)', color: '#ffffff' }
-                    : undefined
-                }
-                className={`rounded-lg px-2.5 py-1 text-[11px] font-medium capitalize transition ${
-                  filter === tab
-                    ? 'shadow-sm'
-                    : 'bg-slate-900/80 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                }`}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-          <span className="text-[11px] text-slate-400">
-            {filteredCards.length} / {cards.length}
-          </span>
+      {/* Filter Tabs */}
+      <div className="flex items-center justify-between gap-2 overflow-x-auto text-xs">
+        <div className="flex gap-1">
+          {(['all', 'due', 'new', 'learning', 'review'] as VocabFilter[]).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setFilter(tab)}
+              style={
+                filter === tab
+                  ? {
+                      backgroundColor: 'var(--ytai-accent, var(--ai-accent))',
+                      color: 'var(--ytai-accent-fg, var(--ai-accent-fg, #ffffff))'
+                    }
+                  : undefined
+              }
+              className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition ${
+                filter === tab
+                  ? 'shadow-sm'
+                  : 'bg-slate-900/80 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              }`}
+            >
+              {tab === 'all'
+                ? 'Все'
+                : tab === 'due'
+                  ? 'К повторению'
+                  : tab === 'new'
+                    ? 'Новые'
+                    : tab === 'learning'
+                      ? 'Изучаемые'
+                      : 'На повторении'}
+            </button>
+          ))}
         </div>
+        <span className="text-[11px] text-slate-400 shrink-0">
+          {filteredCards.length} / {cards.length}
+        </span>
       </div>
 
       {/* Export Toolbar */}
       <div
         className="flex flex-wrap items-center gap-1.5 rounded-xl border p-2 transition-colors"
         style={{
-          backgroundColor: 'var(--ytai-surface)',
-          borderColor: 'var(--ytai-border)'
+          backgroundColor: 'var(--ytai-surface, var(--ai-surface))',
+          borderColor: 'var(--ytai-border, var(--ai-border))'
         }}
       >
-        <button
-          type="button"
-          disabled={filteredCards.length === 0}
-          onClick={() => downloadVocabularyCsv(filteredCards)}
-          className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-2.5 py-1.5 text-[11px] font-medium text-slate-200 transition hover:bg-slate-700 disabled:opacity-40"
-        >
-          <Download className="h-3.5 w-3.5 text-emerald-400" />
-          <span>CSV (UTF-8)</span>
-        </button>
-
         <button
           type="button"
           disabled={filteredCards.length === 0 || ankiLoading}
@@ -244,7 +246,17 @@ export function VocabularyList({
           ) : (
             <Upload className="h-3.5 w-3.5" />
           )}
-          <span>AnkiConnect</span>
+          <span>В Anki ({filteredCards.length})</span>
+        </button>
+
+        <button
+          type="button"
+          disabled={filteredCards.length === 0}
+          onClick={() => downloadVocabularyCsv(filteredCards)}
+          className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-2.5 py-1.5 text-[11px] font-medium text-slate-200 transition hover:bg-slate-700 disabled:opacity-40"
+        >
+          <Download className="h-3.5 w-3.5 text-emerald-400" />
+          <span>CSV</span>
         </button>
 
         <button
@@ -258,7 +270,7 @@ export function VocabularyList({
           ) : (
             <Copy className="h-3.5 w-3.5 text-sky-400" />
           )}
-          <span>{copiedTelegram ? 'Copied' : 'TG Copy'}</span>
+          <span>{copiedTelegram ? 'Скопировано' : 'TG Copy'}</span>
         </button>
 
         <button
@@ -289,11 +301,11 @@ export function VocabularyList({
         <div
           className="rounded-2xl border p-6 text-center text-xs text-slate-400"
           style={{
-            backgroundColor: 'var(--ytai-surface)',
-            borderColor: 'var(--ytai-border)'
+            backgroundColor: 'var(--ytai-surface, var(--ai-surface))',
+            borderColor: 'var(--ytai-border, var(--ai-border))'
           }}
         >
-          No vocabulary cards match your filter.
+          {cards.length === 0 ? 'Словарь пуст.' : 'Нет карточек по заданному фильтру.'}
         </div>
       ) : (
         <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
@@ -303,8 +315,8 @@ export function VocabularyList({
               <div
                 key={card.id}
                 style={{
-                  backgroundColor: 'var(--ytai-surface)',
-                  borderColor: 'var(--ytai-border)'
+                  backgroundColor: 'var(--ytai-surface, var(--ai-surface))',
+                  borderColor: 'var(--ytai-border, var(--ai-border))'
                 }}
                 className="flex gap-3 rounded-xl border p-3 transition hover:border-white/25"
               >
@@ -323,6 +335,14 @@ export function VocabularyList({
                         <span className="truncate text-sm font-bold text-white">
                           {card.word}
                         </span>
+                        <button
+                          type="button"
+                          onClick={() => speakText(card.word, card.sourceLang)}
+                          className="text-slate-400 hover:text-indigo-400 transition"
+                          title="Озвучить"
+                        >
+                          <Volume2 className="h-3.5 w-3.5" />
+                        </button>
                         <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300">
                           {getCardStateLabel(card.fsrsState.state)}
                         </span>
@@ -337,14 +357,14 @@ export function VocabularyList({
                         href={ytUrl}
                         target="_blank"
                         rel="noreferrer"
-                        title="Open YouTube at timestamp"
+                        title="Открыть видео с таймкодом"
                         className="rounded-lg p-1 text-indigo-400 hover:bg-indigo-500/15 hover:text-indigo-300"
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
                       </a>
                       <button
                         type="button"
-                        title="Delete card"
+                        title="Удалить карточку"
                         onClick={() => void onDeleteCard(card.id)}
                         className="rounded-lg p-1 text-slate-400 hover:bg-rose-500/15 hover:text-rose-400"
                       >

@@ -9,6 +9,7 @@ export interface ThemeDefinition {
   textSecondary: string;
   accent: string;
   accentRgb: string;
+  accentFg: string;
   border: string;
   surface: string;
   textShadow: string;
@@ -27,6 +28,7 @@ export const THEMES: Record<ThemeId, ThemeDefinition> = {
     textSecondary: '#94A3B8',
     accent: '#818CF8',
     accentRgb: '129, 140, 248',
+    accentFg: '#FFFFFF',
     border: 'rgba(255, 255, 255, 0.12)',
     surface: 'rgba(30, 41, 59, 0.75)',
     textShadow: '0 1px 3px rgba(0, 0, 0, 0.6)',
@@ -43,6 +45,7 @@ export const THEMES: Record<ThemeId, ThemeDefinition> = {
     textSecondary: '#FDE047',
     accent: '#F59E0B',
     accentRgb: '245, 158, 11',
+    accentFg: '#0F172A',
     border: 'rgba(255, 255, 255, 0.08)',
     surface: 'rgba(20, 20, 20, 0.8)',
     textShadow: '0 2px 6px rgba(0, 0, 0, 0.95)',
@@ -59,6 +62,7 @@ export const THEMES: Record<ThemeId, ThemeDefinition> = {
     textSecondary: '#88C0D0',
     accent: '#5E81AC',
     accentRgb: '94, 129, 172',
+    accentFg: '#FFFFFF',
     border: 'rgba(136, 192, 208, 0.2)',
     surface: 'rgba(46, 52, 64, 0.8)',
     textShadow: '0 1px 3px rgba(0, 0, 0, 0.5)',
@@ -75,10 +79,11 @@ export const THEMES: Record<ThemeId, ThemeDefinition> = {
     textSecondary: '#D6D3D1',
     accent: '#F97316',
     accentRgb: '249, 115, 22',
+    accentFg: '#FFFFFF',
     border: 'rgba(245, 245, 244, 0.12)',
-    surface: 'rgba(41, 37, 36, 0.85)',
-    textShadow: '0 1px 3px rgba(0, 0, 0, 0.6)',
-    backdropBlur: '10px',
+    surface: 'rgba(38, 33, 30, 0.96)',
+    textShadow: 'none',
+    backdropBlur: '12px',
     previewOriginal: 'Comfort for your eyes',
     previewTranslation: 'Комфорт для вечерних глаз'
   },
@@ -91,6 +96,7 @@ export const THEMES: Record<ThemeId, ThemeDefinition> = {
     textSecondary: '#6EE7B7',
     accent: '#10B981',
     accentRgb: '16, 185, 129',
+    accentFg: '#0F172A',
     border: 'rgba(16, 185, 129, 0.2)',
     surface: 'rgba(6, 78, 59, 0.35)',
     textShadow: '0 1px 3px rgba(0, 0, 0, 0.7)',
@@ -108,7 +114,7 @@ export const THEME_LIST: ThemeDefinition[] = [
   THEMES['emerald-noir']
 ];
 
-export const SUBTITLE_SCALES: Array<{
+export const SUBTITLE_SCALES: ReadonlyArray<{
   id: SubtitleScale;
   label: string;
   name: string;
@@ -147,5 +153,39 @@ export function getSubtitleFontSizes(
   return {
     primary,
     translated: Math.max(12, Math.round(primary * 0.75))
+  };
+}
+
+export function getThemeCssVariables(
+  themeId: ThemeId = 'midnight-glass',
+  overlayOpacity = 0.85
+): Record<string, string> {
+  const theme = THEMES[themeId] || THEMES['midnight-glass'];
+
+  return {
+    '--ytai-bg-rgb': theme.bgRgb,
+    '--ytai-bg-opacity': String(overlayOpacity),
+    '--ytai-text-primary': theme.textPrimary,
+    '--ytai-text-secondary': theme.textSecondary,
+    '--ytai-accent': theme.accent,
+    '--ytai-accent-rgb': theme.accentRgb,
+    '--ytai-accent-fg': theme.accentFg || '#ffffff',
+    '--ytai-border': theme.border,
+    '--ytai-surface': theme.surface,
+    '--ytai-text-shadow': theme.textShadow,
+    '--ytai-backdrop-blur': theme.backdropBlur,
+
+    // Aliases for --ai-*
+    '--ai-bg-rgb': theme.bgRgb,
+    '--ai-bg-opacity': String(overlayOpacity),
+    '--ai-text-primary': theme.textPrimary,
+    '--ai-text-secondary': theme.textSecondary,
+    '--ai-accent': theme.accent,
+    '--ai-accent-rgb': theme.accentRgb,
+    '--ai-accent-fg': theme.accentFg || '#ffffff',
+    '--ai-border': theme.border,
+    '--ai-surface': theme.surface,
+    '--ai-text-shadow': theme.textShadow,
+    '--ai-backdrop': `blur(${theme.backdropBlur})`
   };
 }

@@ -3,8 +3,7 @@ import {
   BookOpen,
   GraduationCap,
   Maximize2,
-  Settings as SettingsIcon,
-  Sparkles
+  Settings as SettingsIcon
 } from 'lucide-react';
 import { getDueCards } from '../shared/srs';
 import {
@@ -90,8 +89,9 @@ export function App(): ReactElement {
       style={
         {
           '--ytai-bg-opacity': String(settings.overlayOpacity ?? 0.85),
-          backgroundColor: 'rgb(var(--ytai-bg-rgb))',
-          color: 'var(--ytai-text-primary)'
+          '--ai-bg-opacity': String(settings.overlayOpacity ?? 0.85),
+          backgroundColor: 'rgb(var(--ytai-bg-rgb, var(--ai-bg-rgb, 15, 17, 23)))',
+          color: 'var(--ytai-text-primary, var(--ai-text-primary))'
         } as React.CSSProperties
       }
       className={`transition-colors duration-200 ${
@@ -104,21 +104,23 @@ export function App(): ReactElement {
         {/* Header */}
         <header className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div
-              className="flex h-8 w-8 items-center justify-center rounded-xl shadow-lg transition-colors"
-              style={{
-                backgroundColor: 'var(--ytai-accent)',
-                boxShadow: '0 4px 14px rgba(var(--ytai-accent-rgb), 0.35)'
-              }}
-            >
-              <Sparkles className="h-4 w-4 text-white" />
-            </div>
+            <img
+              src="/logo.svg"
+              alt="CineLingua"
+              className="h-8 w-8 rounded-xl shadow-md shrink-0 object-contain"
+            />
             <div>
-              <h1 className="text-sm font-bold tracking-tight" style={{ color: 'var(--ytai-text-primary)' }}>
-                YouTube Lang AI
+              <h1
+                className="text-sm font-bold tracking-tight"
+                style={{ color: 'var(--ytai-text-primary, var(--ai-text-primary))' }}
+              >
+                CineLingua
               </h1>
-              <p className="text-[11px]" style={{ color: 'var(--ytai-text-secondary)' }}>
-                {cards.length} words · {dueCount} due for review
+              <p
+                className="text-[11px]"
+                style={{ color: 'var(--ytai-text-secondary, var(--ai-text-secondary))' }}
+              >
+                {cards.length} слов в словаре · {dueCount} к повторению
               </p>
             </div>
           </div>
@@ -126,17 +128,17 @@ export function App(): ReactElement {
           {!isFullscreen && (
             <button
               type="button"
-              title="Open fullscreen trainer"
+              title="Открыть в отдельной вкладке во весь экран"
               onClick={openFullscreenTrainer}
               style={{
-                backgroundColor: 'var(--ytai-surface)',
-                borderColor: 'var(--ytai-border)',
-                color: 'var(--ytai-text-secondary)'
+                backgroundColor: 'var(--ytai-surface, var(--ai-surface))',
+                borderColor: 'var(--ytai-border, var(--ai-border))',
+                color: 'var(--ytai-text-secondary, var(--ai-text-secondary))'
               }}
               className="flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-[11px] font-medium transition hover:text-white"
             >
               <Maximize2 className="h-3.5 w-3.5" />
-              <span>Fullscreen</span>
+              <span>Во весь экран</span>
             </button>
           )}
         </header>
@@ -145,8 +147,8 @@ export function App(): ReactElement {
         <nav
           className="mb-4 grid grid-cols-3 gap-1.5 rounded-xl border p-1"
           style={{
-            backgroundColor: 'var(--ytai-surface)',
-            borderColor: 'var(--ytai-border)'
+            backgroundColor: 'var(--ytai-surface, var(--ai-surface))',
+            borderColor: 'var(--ytai-border, var(--ai-border))'
           }}
         >
           <button
@@ -155,17 +157,17 @@ export function App(): ReactElement {
             style={
               activeTab === 'trainer'
                 ? {
-                    backgroundColor: 'var(--ytai-accent)',
-                    color: '#ffffff'
+                    backgroundColor: 'var(--ytai-accent, var(--ai-accent))',
+                    color: 'var(--ytai-accent-fg, var(--ai-accent-fg, #ffffff))'
                   }
                 : {
-                    color: 'var(--ytai-text-secondary)'
+                    color: 'var(--ytai-text-secondary, var(--ai-text-secondary))'
                   }
             }
             className="flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition hover:text-white shadow-sm"
           >
             <GraduationCap className="h-3.5 w-3.5" />
-            <span>Trainer</span>
+            <span>Тренажёр</span>
             {dueCount > 0 && (
               <span className="rounded-full bg-white/20 px-1.5 py-0.2 text-[10px]">
                 {dueCount}
@@ -179,17 +181,17 @@ export function App(): ReactElement {
             style={
               activeTab === 'vocabulary'
                 ? {
-                    backgroundColor: 'var(--ytai-accent)',
-                    color: '#ffffff'
+                    backgroundColor: 'var(--ytai-accent, var(--ai-accent))',
+                    color: 'var(--ytai-accent-fg, var(--ai-accent-fg, #ffffff))'
                   }
                 : {
-                    color: 'var(--ytai-text-secondary)'
+                    color: 'var(--ytai-text-secondary, var(--ai-text-secondary))'
                   }
             }
             className="flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition hover:text-white shadow-sm"
           >
             <BookOpen className="h-3.5 w-3.5" />
-            <span>Vocabulary</span>
+            <span>Словарь</span>
           </button>
 
           <button
@@ -198,24 +200,24 @@ export function App(): ReactElement {
             style={
               activeTab === 'settings'
                 ? {
-                    backgroundColor: 'var(--ytai-accent)',
-                    color: '#ffffff'
+                    backgroundColor: 'var(--ytai-accent, var(--ai-accent))',
+                    color: 'var(--ytai-accent-fg, var(--ai-accent-fg, #ffffff))'
                   }
                 : {
-                    color: 'var(--ytai-text-secondary)'
+                    color: 'var(--ytai-text-secondary, var(--ai-text-secondary))'
                   }
             }
             className="flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition hover:text-white shadow-sm"
           >
             <SettingsIcon className="h-3.5 w-3.5" />
-            <span>Settings</span>
+            <span>Настройки</span>
           </button>
         </nav>
 
         {/* Tab Content */}
         {!loaded ? (
           <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-8 text-center text-xs text-slate-400">
-            Loading workspace...
+            Загрузка данных...
           </div>
         ) : activeTab === 'trainer' ? (
           <FlashcardTrainer cards={cards} onUpdateCard={handleUpdateCard} />

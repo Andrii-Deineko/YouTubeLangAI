@@ -338,13 +338,13 @@ export function SettingsPanel({
       <section
         className="space-y-3.5 rounded-2xl border p-3.5 transition-colors"
         style={{
-          backgroundColor: 'var(--ytai-surface)',
-          borderColor: 'var(--ytai-border)'
+          backgroundColor: 'var(--ytai-surface, var(--ai-surface))',
+          borderColor: 'var(--ytai-border, var(--ai-border))'
         }}
       >
         <div className="flex items-center gap-2">
-          <Palette className="h-4 w-4" style={{ color: 'var(--ytai-accent)' }} />
-          <h3 className="font-semibold text-white">Appearance & Subtitles</h3>
+          <Palette className="h-4 w-4" style={{ color: 'var(--ytai-accent, var(--ai-accent))' }} />
+          <h3 className="font-semibold text-white">Тема оформления & Визуальный стиль</h3>
         </div>
 
         {/* Compact Theme Dropdown & Live Preview Strip */}
@@ -616,11 +616,11 @@ export function SettingsPanel({
       <section
         className="space-y-3 rounded-2xl border p-3.5 transition-colors"
         style={{
-          backgroundColor: 'var(--ytai-surface)',
-          borderColor: 'var(--ytai-border)'
+          backgroundColor: 'var(--ytai-surface, var(--ai-surface))',
+          borderColor: 'var(--ytai-border, var(--ai-border))'
         }}
       >
-        <h3 className="font-semibold text-white">Languages & Player</h3>
+        <h3 className="font-semibold text-white">Языки и воспроизведение</h3>
 
         <div>
           <label className="mb-1 block text-[11px] text-slate-400">
@@ -685,8 +685,8 @@ export function SettingsPanel({
       <section
         className="space-y-3 rounded-2xl border p-3.5 transition-colors"
         style={{
-          backgroundColor: 'var(--ytai-surface)',
-          borderColor: 'var(--ytai-border)'
+          backgroundColor: 'var(--ytai-surface, var(--ai-surface))',
+          borderColor: 'var(--ytai-border, var(--ai-border))'
         }}
       >
         <div className="flex items-center justify-between">
@@ -959,8 +959,11 @@ export function SettingsPanel({
           type="button"
           disabled={testingLLM}
           onClick={() => void handleTestLLM()}
-          style={{ backgroundColor: 'var(--ytai-accent)' }}
-          className="flex items-center gap-1.5 rounded-xl px-3 py-2 font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
+          style={{
+            backgroundColor: 'var(--ytai-accent, var(--ai-accent))',
+            color: 'var(--ytai-accent-fg, var(--ai-accent-fg, #ffffff))'
+          }}
+          className="flex items-center gap-1.5 rounded-xl px-3 py-2 font-semibold shadow-sm transition hover:opacity-90 disabled:opacity-50"
         >
           {testingLLM ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -992,8 +995,8 @@ export function SettingsPanel({
       <section
         className="space-y-3 rounded-2xl border p-3.5 transition-colors"
         style={{
-          backgroundColor: 'var(--ytai-surface)',
-          borderColor: 'var(--ytai-border)'
+          backgroundColor: 'var(--ytai-surface, var(--ai-surface))',
+          borderColor: 'var(--ytai-border, var(--ai-border))'
         }}
       >
         <h3 className="font-semibold text-white">AnkiConnect & Cache</h3>
@@ -1030,8 +1033,11 @@ export function SettingsPanel({
             type="button"
             disabled={testingAnki}
             onClick={() => void handleTestAnki()}
-            style={{ backgroundColor: 'var(--ytai-accent)' }}
-            className="flex items-center gap-1.5 rounded-xl px-3 py-2 font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
+            style={{
+              backgroundColor: 'var(--ytai-accent, var(--ai-accent))',
+              color: 'var(--ytai-accent-fg, var(--ai-accent-fg, #ffffff))'
+            }}
+            className="flex items-center gap-1.5 rounded-xl px-3 py-2 font-semibold shadow-sm transition hover:opacity-90 disabled:opacity-50"
           >
             {testingAnki ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

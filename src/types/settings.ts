@@ -24,16 +24,24 @@ export interface SubtitlePosition {
 
 export interface UserSettings {
   enabled: boolean;
+  overlayEnabled?: boolean;
   nativeLang: string;
+  videoLang?: string;
   showDualSubtitles: boolean;
+  secondTrackEnabled?: boolean;
   activeListeningMode: ActiveListeningMode;
+  activeListening?: boolean;
+  pauseOnAltReveal?: boolean;
   autoPauseAfterCue: boolean;
+  autoPauseAtCueEnd?: boolean;
+  autoPauseResumeDelaySec?: number | null;
   autoPauseOnWordClick: boolean;
   autoHideControls: boolean;
   controlsScale?: ControlsScale;
   subtitleFontSize: number;
   subtitleScale: SubtitleScale;
   subtitlePosition: SubtitlePosition | null;
+  subtitleOffsetSec?: number;
   theme: ThemeId;
   overlayOpacity: number;
   fallbackModel: string;

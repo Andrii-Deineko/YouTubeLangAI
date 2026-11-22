@@ -5,6 +5,12 @@
 :host {
   all: initial;
   font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
 }
 
 /* Default / Midnight Glass Theme */
@@ -18,14 +24,27 @@
   --ytai-text-primary: #f8fafc;
   --ytai-text-secondary: #94a3b8;
   --ytai-accent: #818cf8;
-  --ytai-accent-fg: #ffffff;
   --ytai-accent-rgb: 129, 140, 248;
+  --ytai-accent-fg: #ffffff;
   --ytai-border: rgba(255, 255, 255, 0.12);
   --ytai-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
   --ytai-backdrop-blur: 12px;
+
+  /* CineLingua Aliases */
+  --ai-bg-rgb: 15, 17, 23;
+  --ai-bg-opacity: 0.85;
+  --ai-surface: rgba(30, 41, 59, 0.75);
+  --ai-text-primary: #f8fafc;
+  --ai-text-secondary: #94a3b8;
+  --ai-accent: #818cf8;
+  --ai-accent-rgb: 129, 140, 248;
+  --ai-accent-fg: #ffffff;
+  --ai-border: rgba(255, 255, 255, 0.12);
+  --ai-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  --ai-backdrop: blur(12px);
 }
 
-/* Cinema Minimal Theme (Ultra transparent with yellow subtitles and high text-shadow) */
+/* Cinema Minimal Theme (Ultra transparent with yellow subtitles and deep shadows) */
 :host([data-theme='cinema-transparent']),
 [data-theme='cinema-transparent'] {
   --ytai-bg-rgb: 0, 0, 0;
@@ -35,11 +54,24 @@
   --ytai-text-primary: #ffffff;
   --ytai-text-secondary: #fde047;
   --ytai-accent: #f59e0b;
-  --ytai-accent-fg: #111827;
   --ytai-accent-rgb: 245, 158, 11;
+  --ytai-accent-fg: #0f172a;
   --ytai-border: rgba(255, 255, 255, 0.1);
   --ytai-text-shadow: 0 2px 6px rgba(0, 0, 0, 0.95);
   --ytai-backdrop-blur: 4px;
+
+  /* CineLingua Aliases */
+  --ai-bg-rgb: 0, 0, 0;
+  --ai-bg-opacity: 0.45;
+  --ai-surface: rgba(20, 20, 20, 0.8);
+  --ai-text-primary: #ffffff;
+  --ai-text-secondary: #fde047;
+  --ai-accent: #f59e0b;
+  --ai-accent-rgb: 245, 158, 11;
+  --ai-accent-fg: #0f172a;
+  --ai-border: rgba(255, 255, 255, 0.1);
+  --ai-text-shadow: 0 2px 6px rgba(0, 0, 0, 0.95);
+  --ai-backdrop: blur(4px);
 }
 
 /* Nordic Frost Theme (Cool slate with arctic cyan/ice accents) */
@@ -52,28 +84,54 @@
   --ytai-text-primary: #eceff4;
   --ytai-text-secondary: #88c0d0;
   --ytai-accent: #5e81ac;
-  --ytai-accent-fg: #ffffff;
   --ytai-accent-rgb: 94, 129, 172;
+  --ytai-accent-fg: #ffffff;
   --ytai-border: rgba(136, 192, 208, 0.2);
   --ytai-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
   --ytai-backdrop-blur: 10px;
+
+  /* CineLingua Aliases */
+  --ai-bg-rgb: 30, 36, 48;
+  --ai-bg-opacity: 0.85;
+  --ai-surface: rgba(46, 52, 64, 0.8);
+  --ai-text-primary: #eceff4;
+  --ai-text-secondary: #88c0d0;
+  --ai-accent: #5e81ac;
+  --ai-accent-rgb: 94, 129, 172;
+  --ai-accent-fg: #ffffff;
+  --ai-border: rgba(136, 192, 208, 0.2);
+  --ai-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --ai-backdrop: blur(10px);
 }
 
-/* Warm Espresso Theme (Warm dark chocolate with amber accent) */
+/* Warm Espresso Theme (Warm dark chocolate with amber/orange accent) */
 :host([data-theme='warm-espresso']),
 [data-theme='warm-espresso'] {
   --ytai-bg-rgb: 28, 25, 23;
   --ytai-bg-opacity: 0.85;
-  --ytai-surface: rgba(41, 37, 36, 0.85);
-  --ytai-surface-hover: rgba(68, 64, 60, 0.9);
+  --ytai-surface: rgba(38, 33, 30, 0.96);
+  --ytai-surface-hover: rgba(56, 48, 44, 0.96);
   --ytai-text-primary: #f5f5f4;
   --ytai-text-secondary: #d6d3d1;
   --ytai-accent: #f97316;
-  --ytai-accent-fg: #111827;
   --ytai-accent-rgb: 249, 115, 22;
+  --ytai-accent-fg: #ffffff;
   --ytai-border: rgba(245, 245, 244, 0.12);
-  --ytai-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
-  --ytai-backdrop-blur: 10px;
+  --ytai-text-shadow: none;
+  --ytai-backdrop-blur: 12px;
+
+  /* CineLingua Aliases */
+  --ai-bg-rgb: 28, 25, 23;
+  --ai-bg-opacity: 0.85;
+  --ai-surface: rgba(38, 33, 30, 0.96);
+  --ai-text-primary: #f5f5f4;
+  --ai-text-secondary: #d6d3d1;
+  --ai-accent: #f97316;
+  --ai-accent-rgb: 249, 115, 22;
+  --ai-accent-fg: #ffffff;
+  --ai-border: rgba(245, 245, 244, 0.12);
+  --ai-backdrop: blur(12px);
+  --ai-text-shadow: none;
 }
 
 /* Emerald Noir Theme (Deep black with high contrast neon emerald) */
@@ -86,11 +144,45 @@
   --ytai-text-primary: #ecfdf5;
   --ytai-text-secondary: #6ee7b7;
   --ytai-accent: #10b981;
-  --ytai-accent-fg: #042f2e;
   --ytai-accent-rgb: 16, 185, 129;
+  --ytai-accent-fg: #0f172a;
   --ytai-border: rgba(16, 185, 129, 0.2);
   --ytai-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
   --ytai-backdrop-blur: 10px;
+
+  /* CineLingua Aliases */
+  --ai-bg-rgb: 10, 14, 12;
+  --ai-bg-opacity: 0.85;
+  --ai-surface: rgba(6, 78, 59, 0.4);
+  --ai-text-primary: #ecfdf5;
+  --ai-text-secondary: #6ee7b7;
+  --ai-accent: #10b981;
+  --ai-accent-rgb: 16, 185, 129;
+  --ai-accent-fg: #0f172a;
+  --ai-border: rgba(16, 185, 129, 0.2);
+  --ai-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+  --ai-backdrop: blur(10px);
+}
+
+/* ==========================================================================
+   Animations
+   ========================================================================== */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.96) translateY(6px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 150ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-pop-in {
+  animation: popIn 180ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 /* ==========================================================================
@@ -98,7 +190,7 @@
    ========================================================================== */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--ytai-border) transparent;
+  scrollbar-color: var(--ytai-border, var(--ai-border)) transparent;
 }
 
 ::-webkit-scrollbar {
@@ -111,13 +203,13 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: var(--ytai-border);
+  background-color: var(--ytai-border, var(--ai-border));
   border-radius: 9999px;
   transition: background-color 0.2s ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: var(--ytai-text-secondary);
+  background-color: var(--ytai-text-secondary, var(--ai-text-secondary));
 }
 
 ::-webkit-scrollbar-corner {
@@ -157,5 +249,3 @@
   opacity: 1 !important;
   pointer-events: auto !important;
 }
-
-

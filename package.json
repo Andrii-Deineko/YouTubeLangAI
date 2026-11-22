@@ -6,8 +6,8 @@
   "description": "YouTube Language Learning Chrome Extension (MV3) with AI Context Analysis, Active Listening, FSRS & Anki Export",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc --noEmit && vite build",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

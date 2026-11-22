@@ -10,7 +10,11 @@ import {
 import { DEFAULT_SETTINGS, type UserSettings } from '../types/settings';
 import type { SubtitleCue, TrackMetadata } from '../types/subtitles';
 import type { AIExplanation } from '../types/vocabulary';
-import { setCachedSubtitles } from '../shared/db';
+import {
+  getCachedCaptionTrack,
+  getRateLimitBlockedUntil,
+  saveCachedCaptionTrack
+} from '../shared/captionCache';
 import { createNewCard } from '../shared/srs';
 import {
   getSettings,
@@ -40,6 +44,7 @@ let activeTranslatedCue: SubtitleCue | null = null;
 let selectedSelection: WordSelectionPayload | null = null;
 let lastAutoPausedCueId: string | null = null;
 let savedWordKeys = new Set<string>();
+let captionRateLimitedUntil = getRateLimitBlockedUntil();
 
 let mountedUI: MountedShadowUI | null = null;
 let currentPlayerEl: HTMLElement | null = null;
@@ -203,6 +208,7 @@ function renderUI(): void {
     isAdShowing,
     trackMeta,
     cueCount: primaryEngine.getCues().length,
+    captionRateLimitedUntil,
     primaryCue: activePrimaryCue,
     translatedCue: activeTranslatedCue,
     altPressed,
@@ -470,6 +476,11 @@ function teardownPlayerSession(): void {
 
 function startPlayerSession(): void {
   teardownPlayerSession();
+  const vid = getVideoIdFromUrl();
+  if (!vid) {
+    return;
+  }
+
   sessionAbortController = new AbortController();
   videoController = createVideoController();
   attachToPlayer();
@@ -485,6 +496,46 @@ function startPlayerSession(): void {
   });
   if (document.body) {
     domObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  void loadCachedSubtitlesIfAvailable(vid);
+}
+
+async function loadCachedSubtitlesIfAvailable(vid: string): Promise<void> {
+  if (!vid) return;
+  try {
+    const cachedPrimary = await getCachedCaptionTrack(vid);
+    if (cachedPrimary && (!trackMeta || trackMeta.videoId !== vid)) {
+      currentVideoId = vid;
+      primaryEngine.loadJson3(cachedPrimary.data, cachedPrimary.kind);
+      trackMeta = {
+        videoId: vid,
+        lang: cachedPrimary.lang,
+        tlang: cachedPrimary.tlang,
+        kind: cachedPrimary.kind,
+        isAsr: primaryEngine.getIsAsr(),
+        url: cachedPrimary.url
+      };
+      activePrimaryCue = primaryEngine.findActiveCue(videoController?.getCurrentTime() ?? 0);
+      syncNativeCaptionsVisibility();
+      attachToPlayer();
+      renderUI();
+    }
+
+    if (settings.showDualSubtitles && settings.nativeLang) {
+      const cachedTranslated = await getCachedCaptionTrack(vid, undefined, settings.nativeLang);
+      if (cachedTranslated && translatedEngine.getCues().length === 0) {
+        translatedEngine.loadJson3(cachedTranslated.data, cachedTranslated.kind);
+        activeTranslatedCue = translatedEngine.findActiveCue(
+          videoController?.getCurrentTime() ?? 0
+        );
+        renderUI();
+      } else if (!cachedTranslated) {
+        requestTranslatedTrackIfNeeded();
+      }
+    }
+  } catch (err) {
+    console.warn('[YT-Lang-AI] Error checking cached subtitles:', err);
   }
 }
 
@@ -517,7 +568,7 @@ window.addEventListener(
       const payload = msg.payload;
       currentVideoId = payload.videoId || getVideoIdFromUrl();
       primaryEngine.loadJson3(payload.data, payload.kind);
-      void setCachedSubtitles(currentVideoId, payload.lang, payload.data, payload.tlang);
+      void saveCachedCaptionTrack(payload);
       trackMeta = {
         videoId: currentVideoId,
         lang: payload.lang,
@@ -533,12 +584,14 @@ window.addEventListener(
       requestTranslatedTrackIfNeeded();
     } else if (msg.type === 'TRANSLATED_TRACK_CAPTURED' && msg.payload) {
       const payload = msg.payload;
-      const vid = payload.videoId || currentVideoId;
       translatedEngine.loadJson3(payload.data, payload.kind);
-      void setCachedSubtitles(vid, payload.lang, payload.data, payload.tlang);
+      void saveCachedCaptionTrack(payload);
       activeTranslatedCue = translatedEngine.findActiveCue(
         videoController?.getCurrentTime() ?? 0
       );
+      renderUI();
+    } else if (msg.type === 'CAPTION_RATE_LIMITED' && msg.payload) {
+      captionRateLimitedUntil = msg.payload.blockedUntil;
       renderUI();
     }
   },

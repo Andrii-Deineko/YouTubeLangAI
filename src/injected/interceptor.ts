@@ -28,8 +28,66 @@ import {
   let lastCapturedVideoId: string | null = null;
   let fallbackTimerId: number | null = null;
 
+  const RATE_LIMIT_STORAGE_KEY = 'ytai_timedtext_blocked_until';
+  const RATE_LIMIT_COOLDOWN_MS = 120_000; // 2 minutes
+
   function postToIsolated(message: MainToIsolatedMessage): void {
     window.postMessage(message, '*');
+  }
+
+  function getRateLimitBlockedUntil(): number {
+    try {
+      const val = window.localStorage.getItem(RATE_LIMIT_STORAGE_KEY);
+      if (val) {
+        const num = Number(val);
+        if (!Number.isNaN(num) && num > Date.now()) {
+          return num;
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return 0;
+  }
+
+  function isCircuitBreakerActive(): boolean {
+    return getRateLimitBlockedUntil() > Date.now();
+  }
+
+  function notifyRateLimited(blockedUntil?: number): void {
+    const until = blockedUntil ?? getRateLimitBlockedUntil();
+    const remainingMs = Math.max(0, until - Date.now());
+    if (remainingMs > 0) {
+      console.warn(
+        '[YT-Lang-AI] Circuit breaker active! Cooldown remaining:',
+        Math.round(remainingMs / 1000),
+        'sec'
+      );
+      postToIsolated({
+        source: MAIN_MESSAGE_SOURCE,
+        type: 'CAPTION_RATE_LIMITED',
+        payload: {
+          remainingMs,
+          blockedUntil: until
+        }
+      });
+    }
+  }
+
+  function triggerRateLimitCircuitBreaker(): void {
+    const blockedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+    try {
+      window.localStorage.setItem(RATE_LIMIT_STORAGE_KEY, String(blockedUntil));
+    } catch {
+      // Ignore
+    }
+    cancelFallbackTimer();
+    notifyRateLimited(blockedUntil);
+  }
+
+  // Initial check on load
+  if (isCircuitBreakerActive()) {
+    notifyRateLimited();
   }
 
   function extractVideoIdFromLocation(): string {
@@ -46,6 +104,7 @@ import {
   }
 
   function parseTimedtextUrl(rawUrl: string): URL | null {
+    if (!rawUrl || !rawUrl.includes('/api/timedtext')) return null;
     try {
       const url = new URL(rawUrl, window.location.origin);
       if (url.pathname.includes('/api/timedtext')) {
@@ -61,6 +120,150 @@ import {
     if (typeof value !== 'object' || value === null) return false;
     const candidate = value as { events?: unknown };
     return Array.isArray(candidate.events);
+  }
+
+  function decodeHtmlEntities(str: string): string {
+    return str
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&apos;/g, "'")
+      .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)));
+  }
+
+  function parseTimestamp(
+    hours: string | undefined,
+    minutes: string,
+    seconds: string,
+    millis: string
+  ): number {
+    const h = hours ? parseInt(hours, 10) : 0;
+    const m = parseInt(minutes, 10);
+    const s = parseInt(seconds, 10);
+    const ms = parseInt(millis, 10);
+    return (h * 3600 + m * 60 + s) * 1000 + ms;
+  }
+
+  function parseVttToEvents(vttText: string): Json3Response | null {
+    const events: Array<{
+      tStartMs: number;
+      dDurationMs?: number;
+      segs?: Array<{ utf8: string }>;
+    }> = [];
+    const cueRegex =
+      /(?:(\d{2,}):)?(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*(?:(\d{2,}):)?(\d{2}):(\d{2})[.,](\d{3})[^\r\n]*\r?\n([\s\S]*?)(?=\r?\n\r?\n|\r?\n?$|$)/g;
+    let match: RegExpExecArray | null = null;
+    while ((match = cueRegex.exec(vttText)) !== null) {
+      const startMs = parseTimestamp(match[1], match[2], match[3], match[4]);
+      const endMs = parseTimestamp(match[5], match[6], match[7], match[8]);
+      const text = match[9].replace(/<[^>]+>/g, '').trim();
+      if (text) {
+        events.push({
+          tStartMs: startMs,
+          dDurationMs: Math.max(endMs - startMs, 100),
+          segs: [{ utf8: text }]
+        });
+      }
+    }
+    return events.length > 0 ? { events } : null;
+  }
+
+  function parseTimedtextToEvents(rawText: string): Json3Response | null {
+    const trimmed = rawText.trim();
+    if (!trimmed) return null;
+
+    // 1. Try JSON3
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const data = JSON.parse(trimmed) as unknown;
+        if (isJson3Data(data)) return data;
+      } catch {
+        // Fall through
+      }
+    }
+
+    // 2. Try XML: SRV3 (<timedtext format="3">)
+    if (trimmed.includes('<timedtext') && trimmed.includes('<p ')) {
+      const events: Array<{
+        tStartMs: number;
+        dDurationMs?: number;
+        segs?: Array<{ utf8: string; tOffsetMs?: number }>;
+      }> = [];
+      const pRegex = /<p\s+([^>]+)>(.*?)<\/p>/gs;
+      let pMatch: RegExpExecArray | null = null;
+      while ((pMatch = pRegex.exec(trimmed)) !== null) {
+        const attrs = pMatch[1];
+        const content = pMatch[2];
+        const tMatch = attrs.match(/\bt="(\d+)"/);
+        const dMatch = attrs.match(/\bd="(\d+)"/);
+        const tStartMs = tMatch ? parseInt(tMatch[1], 10) : 0;
+        const dDurationMs = dMatch ? parseInt(dMatch[1], 10) : 0;
+
+        const segs: Array<{ utf8: string; tOffsetMs?: number }> = [];
+        const sRegex = /<s([^>]*)>([^<]*)<\/s>/gs;
+        let sMatch: RegExpExecArray | null = null;
+        let hasSegs = false;
+        while ((sMatch = sRegex.exec(content)) !== null) {
+          hasSegs = true;
+          const sAttrs = sMatch[1];
+          const offsetMatch = sAttrs.match(/\bt="(\d+)"/);
+          const offset = offsetMatch ? parseInt(offsetMatch[1], 10) : undefined;
+          const text = decodeHtmlEntities(sMatch[2]);
+          if (text) {
+            segs.push({ utf8: text, ...(offset !== undefined ? { tOffsetMs: offset } : {}) });
+          }
+        }
+
+        if (!hasSegs) {
+          const cleanText = decodeHtmlEntities(content.replace(/<[^>]+>/g, ''));
+          if (cleanText) segs.push({ utf8: cleanText });
+        }
+
+        if (segs.length > 0) {
+          events.push({ tStartMs, dDurationMs, segs });
+        }
+      }
+      if (events.length > 0) return { events };
+    }
+
+    // 3. Try XML: Legacy (<transcript>)
+    if (
+      trimmed.includes('<transcript') ||
+      (trimmed.includes('<text ') && trimmed.includes('start='))
+    ) {
+      const events: Array<{
+        tStartMs: number;
+        dDurationMs?: number;
+        segs?: Array<{ utf8: string }>;
+      }> = [];
+      const textRegex = /<text\s+([^>]+)>([^<]*)<\/text>/gs;
+      let match: RegExpExecArray | null = null;
+      while ((match = textRegex.exec(trimmed)) !== null) {
+        const attrs = match[1];
+        const rawSegText = decodeHtmlEntities(match[2]);
+        const startMatch = attrs.match(/\bstart="([\d.]+)"/);
+        const durMatch = attrs.match(/\bdur="([\d.]+)"/);
+        const startSec = startMatch ? parseFloat(startMatch[1]) : 0;
+        const durSec = durMatch ? parseFloat(durMatch[1]) : 2.0;
+
+        events.push({
+          tStartMs: Math.round(startSec * 1000),
+          dDurationMs: Math.round(durSec * 1000),
+          segs: [{ utf8: rawSegText }]
+        });
+      }
+      if (events.length > 0) return { events };
+    }
+
+    // 4. Try VTT (WEBVTT)
+    if (trimmed.includes('WEBVTT') || trimmed.includes('-->')) {
+      const vttEvents = parseVttToEvents(trimmed);
+      if (vttEvents) return vttEvents;
+    }
+
+    return null;
   }
 
   function buildPayload(urlObj: URL, data: Json3Response): TrackCapturedPayload {
@@ -94,11 +297,18 @@ import {
 
   function scheduleFallbackActivation(): void {
     cancelFallbackTimer();
+    if (isCircuitBreakerActive()) {
+      notifyRateLimited();
+      return;
+    }
+
     const targetVideoId = extractVideoIdFromLocation();
     if (!targetVideoId) return;
 
     fallbackTimerId = window.setTimeout(() => {
       fallbackTimerId = null;
+      if (isCircuitBreakerActive()) return;
+
       const currentVideoId = extractVideoIdFromLocation();
       if (!currentVideoId || currentVideoId !== targetVideoId) return;
       if (lastCapturedVideoId === currentVideoId && lastBaseTimedtextUrl) return;
@@ -110,63 +320,17 @@ import {
     }, 2000);
   }
 
-  async function fetchJson3AndDispatch(urlObj: URL, isTranslated: boolean): Promise<void> {
-    const fetchUrl = new URL(urlObj.toString());
-    fetchUrl.searchParams.set('fmt', 'json3');
-
-    try {
-      const response = await originalFetch(fetchUrl.toString(), {
-        credentials: 'include'
-      });
-      if (!response.ok) {
-        postToIsolated({
-          source: MAIN_MESSAGE_SOURCE,
-          type: 'TRACK_ERROR',
-          payload: {
-            error: `HTTP ${response.status} fetching json3 timedtext`,
-            url: fetchUrl.toString()
-          }
-        });
-        return;
-      }
-
-      const parsed: unknown = await response.json();
-      if (!isJson3Data(parsed)) return;
-
-      const payload = buildPayload(fetchUrl, parsed);
-      postToIsolated({
-        source: MAIN_MESSAGE_SOURCE,
-        type: isTranslated ? 'TRANSLATED_TRACK_CAPTURED' : 'TRACK_CAPTURED',
-        payload
-      });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch json3 timedtext';
-      postToIsolated({
-        source: MAIN_MESSAGE_SOURCE,
-        type: 'TRACK_ERROR',
-        payload: {
-          error: message,
-          url: fetchUrl.toString()
-        }
-      });
-    }
-  }
-
   function handleCapturedText(urlObj: URL, rawText: string): void {
-    try {
-      const parsed: unknown = JSON.parse(rawText);
-      if (!isJson3Data(parsed)) return;
+    const parsed = parseTimedtextToEvents(rawText);
+    if (!parsed) return;
 
-      const isTranslated = Boolean(urlObj.searchParams.get('tlang'));
-      const payload = buildPayload(urlObj, parsed);
-      postToIsolated({
-        source: MAIN_MESSAGE_SOURCE,
-        type: isTranslated ? 'TRANSLATED_TRACK_CAPTURED' : 'TRACK_CAPTURED',
-        payload
-      });
-    } catch {
-      // Non-JSON payload even though fmt=json3 was requested
-    }
+    const isTranslated = Boolean(urlObj.searchParams.get('tlang'));
+    const payload = buildPayload(urlObj, parsed);
+    postToIsolated({
+      source: MAIN_MESSAGE_SOURCE,
+      type: isTranslated ? 'TRANSLATED_TRACK_CAPTURED' : 'TRACK_CAPTURED',
+      payload
+    });
   }
 
   function getRequestUrl(input: RequestInfo | URL): string {
@@ -189,18 +353,23 @@ import {
     cancelFallbackTimer();
     recordOriginalTrackUrl(timedtextUrl);
 
-    const fmt = timedtextUrl.searchParams.get('fmt');
-    const isTranslated = Boolean(timedtextUrl.searchParams.get('tlang'));
+    if (isCircuitBreakerActive()) {
+      notifyRateLimited();
+    }
+
     const response = await originalFetch(input, init);
 
-    if (fmt === 'json3') {
+    if (response.status === 429) {
+      triggerRateLimitCircuitBreaker();
+      return response;
+    }
+
+    if (response.ok) {
       const cloned = response.clone();
       void cloned
         .text()
         .then((text) => handleCapturedText(timedtextUrl, text))
         .catch(() => undefined);
-    } else if (response.ok) {
-      void fetchJson3AndDispatch(timedtextUrl, isTranslated);
     }
 
     return response;
@@ -235,24 +404,31 @@ import {
       cancelFallbackTimer();
       recordOriginalTrackUrl(timedtextUrl);
 
+      if (isCircuitBreakerActive()) {
+        notifyRateLimited();
+      }
+
       this.addEventListener('load', () => {
+        if (this.status === 429) {
+          triggerRateLimitCircuitBreaker();
+          return;
+        }
+
         if (this.status < 200 || this.status >= 300) return;
 
-        const fmt = timedtextUrl.searchParams.get('fmt');
-        const isTranslated = Boolean(timedtextUrl.searchParams.get('tlang'));
-
-        if (fmt === 'json3') {
-          if (typeof this.responseText === 'string' && this.responseText.length > 0) {
-            handleCapturedText(timedtextUrl, this.responseText);
-          } else if (this.response && typeof this.response === 'object' && isJson3Data(this.response)) {
-            postToIsolated({
-              source: MAIN_MESSAGE_SOURCE,
-              type: isTranslated ? 'TRANSLATED_TRACK_CAPTURED' : 'TRACK_CAPTURED',
-              payload: buildPayload(timedtextUrl, this.response)
-            });
-          }
-        } else {
-          void fetchJson3AndDispatch(timedtextUrl, isTranslated);
+        if (typeof this.responseText === 'string' && this.responseText.length > 0) {
+          handleCapturedText(timedtextUrl, this.responseText);
+        } else if (
+          this.response &&
+          typeof this.response === 'object' &&
+          isJson3Data(this.response)
+        ) {
+          const isTranslated = Boolean(timedtextUrl.searchParams.get('tlang'));
+          postToIsolated({
+            source: MAIN_MESSAGE_SOURCE,
+            type: isTranslated ? 'TRANSLATED_TRACK_CAPTURED' : 'TRACK_CAPTURED',
+            payload: buildPayload(timedtextUrl, this.response)
+          });
         }
       });
     }
@@ -277,6 +453,11 @@ import {
     }
 
     if (data.type === 'REQUEST_TRANSLATED_TRACK' && data.payload) {
+      if (isCircuitBreakerActive()) {
+        notifyRateLimited();
+        return;
+      }
+
       const { nativeLang, videoId } = data.payload;
       if (!lastBaseTimedtextUrl) {
         postToIsolated({
@@ -294,7 +475,38 @@ import {
         }
         baseUrl.searchParams.set('tlang', nativeLang);
         baseUrl.searchParams.set('fmt', 'json3');
-        void fetchJson3AndDispatch(baseUrl, true);
+
+        void (async () => {
+          try {
+            const resp = await originalFetch(baseUrl.toString(), { credentials: 'include' });
+            if (resp.status === 429) {
+              triggerRateLimitCircuitBreaker();
+              return;
+            }
+            if (!resp.ok) {
+              postToIsolated({
+                source: MAIN_MESSAGE_SOURCE,
+                type: 'TRACK_ERROR',
+                payload: {
+                  error: `HTTP ${resp.status} requesting translated track`,
+                  url: baseUrl.toString()
+                }
+              });
+              return;
+            }
+            const text = await resp.text();
+            handleCapturedText(baseUrl, text);
+          } catch (err: unknown) {
+            postToIsolated({
+              source: MAIN_MESSAGE_SOURCE,
+              type: 'TRACK_ERROR',
+              payload: {
+                error: err instanceof Error ? err.message : 'Failed to fetch translated timedtext',
+                url: baseUrl.toString()
+              }
+            });
+          }
+        })();
       } catch (err: unknown) {
         postToIsolated({
           source: MAIN_MESSAGE_SOURCE,

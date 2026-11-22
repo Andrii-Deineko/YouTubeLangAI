@@ -161,10 +161,11 @@ async function handleAIExplain(
   }
 
   const promise = llmQueue.run(async () => {
+    const settings = await getSettings();
     const fallbackModel =
       payload.fallbackModel !== undefined
         ? payload.fallbackModel
-        : (await getSettings()).fallbackModel;
+        : settings.fallbackModel;
 
     const explanation = await requestAIExplanation({
       target: payload.target,
@@ -173,7 +174,7 @@ async function handleAIExplain(
       nextSentence: payload.nextSentence,
       videoTitle: payload.videoTitle,
       nativeLang: payload.nativeLang,
-      llmConfig: payload.llmConfig,
+      llmConfig: settings.llm,
       fallbackModel
     });
     await setCachedAIExplanation(cacheKey, explanation);
@@ -225,6 +226,23 @@ async function processMessage(message: RuntimeRequest): Promise<RuntimeResponse<
           message.payload.apiKey
         );
         return { ok: true, data: models };
+      }
+      case 'OPEN_EXTENSION_POPUP': {
+        if (chrome.action?.openPopup) {
+          try {
+            await chrome.action.openPopup();
+            return { ok: true, data: true };
+          } catch (openErr: unknown) {
+            return {
+              ok: false,
+              error: openErr instanceof Error ? openErr.message : 'Failed to open popup'
+            };
+          }
+        }
+        return {
+          ok: false,
+          error: 'chrome.action.openPopup is not supported in this browser version'
+        };
       }
       default:
         return { ok: false, error: 'Unsupported message type' };

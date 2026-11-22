@@ -17,6 +17,7 @@ interface PlayerControlsProps {
   settings: UserSettings;
   trackMeta: TrackMetadata | null;
   cueCount: number;
+  captionRateLimitedUntil?: number;
   altPressed?: boolean;
   hasActivePopup?: boolean;
   onUpdateSettings: (partial: Partial<UserSettings>) => void;
@@ -105,6 +106,7 @@ export function PlayerControls({
   settings,
   trackMeta,
   cueCount,
+  captionRateLimitedUntil,
   altPressed,
   hasActivePopup,
   onUpdateSettings,
@@ -282,6 +284,15 @@ export function PlayerControls({
         <Power size={scale.iconSize} />
         <span>Lang AI</span>
       </button>
+
+      {Boolean(captionRateLimitedUntil && captionRateLimitedUntil > Date.now()) && (
+        <span
+          title="YouTube HTTP 429: Лимит запросов. Кэш активен, повторные запросы приостановлены."
+          className="rounded-full bg-amber-500/25 px-2 py-0.5 text-[10px] font-bold text-amber-300 border border-amber-500/40 select-none animate-pulse"
+        >
+          429
+        </span>
+      )}
 
       {settings.enabled && (
         <>

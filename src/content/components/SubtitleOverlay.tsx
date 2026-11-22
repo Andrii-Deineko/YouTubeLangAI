@@ -35,6 +35,40 @@ interface SubtitleOverlayProps {
 
 const DRAG_THRESHOLD = 5;
 
+function getPlayerContainer(node: HTMLElement | null): HTMLElement | null {
+  if (!node) {
+    return document.querySelector('#movie_player') ?? document.querySelector('.html5-video-player');
+  }
+  return (
+    node.closest('#movie_player') ??
+    document.querySelector('#movie_player') ??
+    node.closest('.html5-video-player') ??
+    document.querySelector('.html5-video-player')
+  );
+}
+
+function getYouTubeChromeBottomHeight(playerEl: HTMLElement | null): number {
+  if (!playerEl) return 48;
+  const chromeBottom = playerEl.querySelector<HTMLElement>('.ytp-chrome-bottom');
+  if (!chromeBottom) return 48;
+  const rect = chromeBottom.getBoundingClientRect();
+  return rect.height > 0 ? rect.height : 48;
+}
+
+function areYouTubeControlsVisible(playerEl: HTMLElement | null): boolean {
+  if (!playerEl) return false;
+  return !playerEl.classList.contains('ytp-autohide');
+}
+
+function getDefaultSubtitleBottom(playerEl: HTMLElement | null): number {
+  const isControlsVisible = areYouTubeControlsVisible(playerEl);
+  if (!isControlsVisible) {
+    return 28;
+  }
+  const ytBottomHeight = getYouTubeChromeBottomHeight(playerEl);
+  return Math.max(68, ytBottomHeight + 16);
+}
+
 export function SubtitleOverlay({
   primaryCue,
   translatedCue,
@@ -52,6 +86,10 @@ export function SubtitleOverlay({
   const [hovered, setHovered] = useState(false);
   const [livePosition, setLivePosition] = useState<SubtitlePosition | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [bottomOffset, setBottomOffset] = useState<number>(() => {
+    if (typeof document === 'undefined') return 68;
+    return getDefaultSubtitleBottom(document.querySelector<HTMLElement>('#movie_player'));
+  });
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const isDraggingRef = useRef(false);
@@ -67,10 +105,44 @@ export function SubtitleOverlay({
     boxHeight: number;
   } | null>(null);
 
-  // Sync external position changes (e.g. reset) to livePosition
+  // Sync external position changes (e.g. reset) to livePosition and reset coordinates
   useEffect(() => {
     setLivePosition(null);
+    if (!position && containerRef.current) {
+      containerRef.current.style.top = 'auto';
+      containerRef.current.style.left = '50%';
+      containerRef.current.style.transform = 'translateX(-50%)';
+    }
   }, [position]);
+
+  // Dynamically track YouTube controls autohide and bottom bar height
+  useEffect(() => {
+    const playerEl = getPlayerContainer(containerRef.current);
+    if (!playerEl) return;
+
+    const updateBottomOffset = (): void => {
+      const nextOffset = getDefaultSubtitleBottom(playerEl);
+      setBottomOffset(nextOffset);
+    };
+
+    updateBottomOffset();
+
+    const observer = new MutationObserver(() => {
+      updateBottomOffset();
+    });
+
+    observer.observe(playerEl, {
+      attributes: true,
+      attributeFilter: ['class']
+    });
+
+    window.addEventListener('resize', updateBottomOffset);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateBottomOffset);
+    };
+  }, []);
 
   const effectivePosition = livePosition ?? position;
 
@@ -317,13 +389,17 @@ export function SubtitleOverlay({
         position: 'absolute',
         left: `${effectivePosition.xPercent}%`,
         top: `${effectivePosition.yPercent}%`,
+        bottom: 'auto',
+        right: 'auto',
         transform: 'translate(-50%, -50%)',
         maxWidth
       }
     : {
         position: 'absolute',
         left: '50%',
-        bottom: '4rem',
+        top: 'auto',
+        right: 'auto',
+        bottom: `${bottomOffset}px`,
         transform: 'translateX(-50%)',
         maxWidth
       };
@@ -332,11 +408,16 @@ export function SubtitleOverlay({
     <div className="pointer-events-none absolute inset-0 z-10 overflow-visible">
       <div
         ref={containerRef}
-        className={`text-center shadow-2xl select-none transition-opacity duration-150 ${
+        className={`text-center shadow-2xl select-none ${
+          isDragging ? '' : 'transition-[bottom,opacity] duration-200 ease-out'
+        } ${
           isCardVisible ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
         } ${isDragging ? 'cursor-grabbing' : ''}`}
         style={{
           ...positionStyle,
+          transition: isDragging
+            ? 'none'
+            : 'bottom 200ms cubic-bezier(0, 0, 0.2, 1), opacity 150ms ease-out',
           padding: `${dynamicPadY}px ${dynamicPadX}px`,
           borderRadius: `${dynamicRadius}px`,
           backgroundColor: `rgba(var(--ytai-bg-rgb), var(--ytai-bg-opacity, ${overlayOpacity ?? 0.85}))`,

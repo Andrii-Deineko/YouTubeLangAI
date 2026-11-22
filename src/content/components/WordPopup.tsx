@@ -177,6 +177,19 @@ export function WordPopup({
       });
   }, [requestKey, selection.target, sourceLang, settings.nativeLang]);
 
+  const isLlmConfigured = Boolean(
+    (settings.llm?.baseUrl && /localhost|127\.0\.0\.1|::1/i.test(settings.llm.baseUrl)) ||
+      (settings.llm?.apiKey && settings.llm.apiKey.trim().length > 0)
+  );
+
+  const handleOpenPopup = async (): Promise<void> => {
+    try {
+      await sendRuntimeMessage({ type: 'OPEN_EXTENSION_POPUP' });
+    } catch {
+      // Ignore
+    }
+  };
+
   const handleRequestAI = useCallback(async (): Promise<void> => {
     if (aiLoading) return;
     setAiLoading(true);
@@ -194,7 +207,6 @@ export function WordPopup({
           nextSentence,
           videoTitle,
           nativeLang: settings.nativeLang,
-          llmConfig: settings.llm,
           fallbackModel: settings.fallbackModel
         }
       });
@@ -221,7 +233,6 @@ export function WordPopup({
     selection.cue.text,
     selection.target,
     settings.fallbackModel,
-    settings.llm,
     settings.nativeLang,
     videoId,
     videoTitle
@@ -413,18 +424,36 @@ export function WordPopup({
         {/* AI Breakdown Button & Container */}
         <div>
           {!aiResult && !aiLoading && (
-            <button
-              type="button"
-              onClick={() => void handleRequestAI()}
-              style={{
-                backgroundColor: 'var(--ytai-accent)',
-                color: '#ffffff'
-              }}
-              className="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow transition hover:opacity-90"
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              <span>AI Контекстный разбор</span>
-            </button>
+            isLlmConfigured ? (
+              <button
+                type="button"
+                onClick={() => void handleRequestAI()}
+                style={{
+                  backgroundColor: 'var(--ytai-accent)',
+                  color: 'var(--ytai-accent-fg, #ffffff)'
+                }}
+                className="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow transition hover:opacity-90"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>AI Контекстный разбор</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void handleOpenPopup()}
+                style={{
+                  backgroundColor: 'var(--ytai-surface)',
+                  borderColor: 'var(--ytai-border)',
+                  borderWidth: '1px',
+                  borderStyle: 'solid',
+                  color: 'var(--ytai-accent)'
+                }}
+                className="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow transition hover:opacity-90"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>Подключить AI (Gemini / Ollama)</span>
+              </button>
+            )
           )}
 
           {aiLoading && (
@@ -444,7 +473,11 @@ export function WordPopup({
           {aiError && (
             <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-200">
               <div className="break-words">
-                {aiError.includes('503') ? (
+                {aiError.includes('API key is missing') ? (
+                  <span>
+                    <strong>Не настроен API-ключ.</strong> Подключите AI в настройках расширения.
+                  </span>
+                ) : aiError.includes('503') ? (
                   <span>
                     <strong>Сервер модели временно перегружен (503).</strong> Попробуйте ещё раз через несколько секунд.
                   </span>
@@ -456,14 +489,27 @@ export function WordPopup({
                   aiError
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => void handleRequestAI()}
-                className="mt-2 flex items-center gap-1.5 rounded-lg bg-rose-500/25 px-2.5 py-1 text-[11px] font-semibold text-rose-100 transition hover:bg-rose-500/40"
-              >
-                <RotateCcw className="h-3 w-3" />
-                <span>Повторить</span>
-              </button>
+              <div className="mt-2 flex items-center gap-2">
+                {aiError.includes('API key is missing') ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleOpenPopup()}
+                    className="flex items-center gap-1.5 rounded-lg bg-indigo-500/30 px-2.5 py-1 text-[11px] font-semibold text-indigo-100 transition hover:bg-indigo-500/50"
+                  >
+                    <Sparkles className="h-3 w-3" />
+                    <span>Настроить AI</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void handleRequestAI()}
+                    className="flex items-center gap-1.5 rounded-lg bg-rose-500/25 px-2.5 py-1 text-[11px] font-semibold text-rose-100 transition hover:bg-rose-500/40"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    <span>Повторить</span>
+                  </button>
+                )}
+              </div>
             </div>
           )}
 

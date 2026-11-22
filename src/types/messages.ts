@@ -32,6 +32,14 @@ export type MainToIsolatedMessage =
         error: string;
         url?: string;
       };
+    }
+  | {
+      source: typeof MAIN_MESSAGE_SOURCE;
+      type: 'CAPTION_RATE_LIMITED';
+      payload: {
+        remainingMs: number;
+        blockedUntil: number;
+      };
     };
 
 export type IsolatedToMainMessage =
@@ -71,9 +79,11 @@ export type RuntimeRequest =
         nextSentence: string;
         videoTitle: string;
         nativeLang: string;
-        llmConfig: LLMConfig;
         fallbackModel?: string;
       };
+    }
+  | {
+      type: 'OPEN_EXTENSION_POPUP';
     }
   | {
       type: 'ANKI_TEST';

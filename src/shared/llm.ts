@@ -258,7 +258,8 @@ export async function fetchAvailableModels(
 
   const response = await fetch(endpoint, {
     method: 'GET',
-    headers
+    headers,
+    signal: AbortSignal.timeout(15_000)
   });
 
   const responseText = await response.text();
@@ -347,6 +348,7 @@ export async function testLLMConnection(llmConfig: LLMConfig): Promise<LLMTestRe
   const response = await fetch(endpoint, {
     method: 'POST',
     headers,
+    signal: AbortSignal.timeout(15_000),
     body: JSON.stringify({
       model,
       max_tokens: 5,
@@ -390,6 +392,7 @@ async function callChatCompletionsSingleAttempt(
     response = await fetch(endpoint, {
       method: 'POST',
       headers,
+      signal: AbortSignal.timeout(15_000),
       body: JSON.stringify({
         model,
         temperature: 0.2,

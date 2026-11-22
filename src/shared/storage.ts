@@ -150,18 +150,24 @@ export async function getSettings(): Promise<UserSettings> {
   return mergeSettings(raw);
 }
 
-export async function saveSettings(partial: Partial<UserSettings>): Promise<UserSettings> {
-  const current = await getSettings();
-  const next: UserSettings = {
-    ...current,
-    ...partial,
-    llm: {
-      ...current.llm,
-      ...(partial.llm ?? {})
-    }
-  };
-  await chrome.storage.local.set({ [SETTINGS_KEY]: next });
-  return next;
+let storageQueue: Promise<unknown> = Promise.resolve();
+
+export function saveSettings(partial: Partial<UserSettings>): Promise<UserSettings> {
+  const nextTask = storageQueue.then(async () => {
+    const current = await getSettings();
+    const next: UserSettings = {
+      ...current,
+      ...partial,
+      llm: {
+        ...current.llm,
+        ...(partial.llm ?? {})
+      }
+    };
+    await chrome.storage.local.set({ [SETTINGS_KEY]: next });
+    return next;
+  });
+  storageQueue = nextTask.catch(() => undefined);
+  return nextTask;
 }
 
 export function onSettingsChanged(callback: (settings: UserSettings) => void): () => void {
@@ -185,35 +191,47 @@ export async function getVocabulary(): Promise<VocabularyCard[]> {
   return Array.isArray(raw) ? (raw as VocabularyCard[]) : [];
 }
 
-export async function saveVocabularyCard(card: VocabularyCard): Promise<VocabularyCard[]> {
-  const cards = await getVocabulary();
-  const existingIdx = cards.findIndex(
-    (c) =>
-      c.id === card.id ||
-      (c.word.toLowerCase() === card.word.toLowerCase() &&
-        c.videoId === card.videoId &&
-        Math.abs(c.timestampSec - card.timestampSec) < 2)
-  );
-  const updated =
-    existingIdx >= 0
-      ? cards.map((c, idx) => (idx === existingIdx ? card : c))
-      : [card, ...cards];
-  await chrome.storage.local.set({ [VOCABULARY_KEY]: updated });
-  return updated;
+export function saveVocabularyCard(card: VocabularyCard): Promise<VocabularyCard[]> {
+  const nextTask = storageQueue.then(async () => {
+    const cards = await getVocabulary();
+    const existingIdx = cards.findIndex(
+      (c) =>
+        c.id === card.id ||
+        (c.word.toLowerCase() === card.word.toLowerCase() &&
+          c.videoId === card.videoId &&
+          Math.abs(c.timestampSec - card.timestampSec) < 2)
+    );
+    const updated =
+      existingIdx >= 0
+        ? cards.map((c, idx) => (idx === existingIdx ? card : c))
+        : [card, ...cards];
+    await chrome.storage.local.set({ [VOCABULARY_KEY]: updated });
+    return updated;
+  });
+  storageQueue = nextTask.catch(() => undefined);
+  return nextTask;
 }
 
-export async function updateVocabularyCard(card: VocabularyCard): Promise<VocabularyCard[]> {
-  const cards = await getVocabulary();
-  const updated = cards.map((c) => (c.id === card.id ? card : c));
-  await chrome.storage.local.set({ [VOCABULARY_KEY]: updated });
-  return updated;
+export function updateVocabularyCard(card: VocabularyCard): Promise<VocabularyCard[]> {
+  const nextTask = storageQueue.then(async () => {
+    const cards = await getVocabulary();
+    const updated = cards.map((c) => (c.id === card.id ? card : c));
+    await chrome.storage.local.set({ [VOCABULARY_KEY]: updated });
+    return updated;
+  });
+  storageQueue = nextTask.catch(() => undefined);
+  return nextTask;
 }
 
-export async function deleteVocabularyCard(cardId: string): Promise<VocabularyCard[]> {
-  const cards = await getVocabulary();
-  const updated = cards.filter((c) => c.id !== cardId);
-  await chrome.storage.local.set({ [VOCABULARY_KEY]: updated });
-  return updated;
+export function deleteVocabularyCard(cardId: string): Promise<VocabularyCard[]> {
+  const nextTask = storageQueue.then(async () => {
+    const cards = await getVocabulary();
+    const updated = cards.filter((c) => c.id !== cardId);
+    await chrome.storage.local.set({ [VOCABULARY_KEY]: updated });
+    return updated;
+  });
+  storageQueue = nextTask.catch(() => undefined);
+  return nextTask;
 }
 
 export function onVocabularyChanged(callback: (cards: VocabularyCard[]) => void): () => void {

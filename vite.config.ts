@@ -1,42 +1,62 @@
 import { resolve } from 'node:path';
-import { readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { defineConfig, build as viteBuild, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { crx } from '@crxjs/vite-plugin';
+import { buildSync as esbuildSync } from 'esbuild';
 import manifest from './manifest.json';
 
-function mainWorldContentScriptFix(): Plugin {
+function contentScriptsBundlePlugin(): Plugin {
   return {
-    name: 'yt-lang-ai-main-world-fix',
+    name: 'yt-lang-ai-content-scripts-fix',
     apply: 'build',
+    enforce: 'post',
     async closeBundle() {
       const distDir = resolve(process.cwd(), 'dist');
       const manifestPath = resolve(distDir, 'manifest.json');
+      if (!existsSync(manifestPath)) return;
+
       const builtManifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
         content_scripts?: Array<{
           js?: string[];
           world?: string;
+          matches?: string[];
+          run_at?: string;
+        }>;
+        web_accessible_resources?: Array<{
+          matches?: string[];
+          resources?: string[];
+          use_dynamic_url?: boolean;
         }>;
       };
 
-      const mainEntry = builtManifest.content_scripts?.find((cs) => cs.world === 'MAIN');
-      if (!mainEntry) return;
+      const assetsDir = resolve(distDir, 'assets');
 
-      const loaderFiles = mainEntry.js ?? [];
+      // 1. Bundle src/injected/interceptor.ts via esbuild as a self-contained IIFE (MAIN world)
+      esbuildSync({
+        entryPoints: [resolve(process.cwd(), 'src', 'injected', 'interceptor.ts')],
+        bundle: true,
+        format: 'iife',
+        target: 'es2022',
+        outfile: resolve(assetsDir, 'interceptor-main.js')
+      });
 
-      // Bundle src/injected/interceptor.ts as a synchronous self-contained IIFE
-      // so it executes immediately at document_start in MAIN world without chrome.runtime.getURL
+      // 2. Bundle src/content/index.ts via viteBuild as a self-contained IIFE (ISOLATED world)
       await viteBuild({
         configFile: false,
         logLevel: 'silent',
+        plugins: [react()],
+        define: {
+          'process.env.NODE_ENV': JSON.stringify('production')
+        },
         build: {
-          outDir: resolve(distDir, 'assets'),
+          outDir: assetsDir,
           emptyOutDir: false,
           lib: {
-            entry: resolve(process.cwd(), 'src', 'injected', 'interceptor.ts'),
-            name: 'YTLangAIMainInterceptor',
+            entry: resolve(process.cwd(), 'src', 'content', 'index.ts'),
+            name: 'YTLangAIContentScript',
             formats: ['iife'],
-            fileName: () => 'interceptor-main.js'
+            fileName: () => 'content-isolated.js'
           },
           rollupOptions: {
             output: {
@@ -46,15 +66,34 @@ function mainWorldContentScriptFix(): Plugin {
         }
       });
 
-      // Manifest V3 requires forward slashes for extension web resource paths
-      mainEntry.js = ['assets/interceptor-main.js'];
+      // 3. Point content_scripts directly to self-contained IIFEs
+      if (Array.isArray(builtManifest.content_scripts)) {
+        for (const cs of builtManifest.content_scripts) {
+          if (cs.world === 'MAIN') {
+            cs.js = ['assets/interceptor-main.js'];
+          } else if (cs.world === 'ISOLATED' || !cs.world) {
+            cs.js = ['assets/content-isolated.js'];
+          }
+        }
+      }
+
+      // 4. Force use_dynamic_url: false on web_accessible_resources
+      builtManifest.web_accessible_resources = [
+        {
+          matches: ['*://*.youtube.com/*'],
+          resources: ['assets/*', '*.js', '*.css'],
+          use_dynamic_url: false
+        }
+      ];
+
       writeFileSync(manifestPath, JSON.stringify(builtManifest, null, 2));
 
-      for (const oldFile of loaderFiles) {
-        if (oldFile.includes('interceptor.ts-loader-')) {
-          // Normalize oldFile path segments to work reliably across Unix & Windows
-          const targetFile = resolve(distDir, ...oldFile.split(/[/\\]/));
-          rmSync(targetFile, { force: true });
+      // 5. Remove any CRXJS loader wrappers from dist/assets
+      if (existsSync(assetsDir)) {
+        for (const file of readdirSync(assetsDir)) {
+          if (file.includes('-loader-')) {
+            rmSync(resolve(assetsDir, file), { force: true });
+          }
         }
       }
     }
@@ -62,7 +101,7 @@ function mainWorldContentScriptFix(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), crx({ manifest }), mainWorldContentScriptFix()],
+  plugins: [react(), crx({ manifest }), contentScriptsBundlePlugin()],
   build: {
     outDir: 'dist',
     emptyOutDir: true,

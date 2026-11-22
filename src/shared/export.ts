@@ -105,7 +105,8 @@ async function invokeAnkiConnect<T>(
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, version: 6, params })
+    body: JSON.stringify({ action, version: 6, params }),
+    signal: AbortSignal.timeout(8_000)
   });
 
   if (!response.ok) {
@@ -136,6 +137,17 @@ export async function exportCardsToAnki(
   let skipped = 0;
   const errors: string[] = [];
 
+  interface AnkiNotePayload {
+    deckName: string;
+    modelName: string;
+    fields: { Front: string; Back: string };
+    options: { allowDuplicate: boolean };
+    tags: string[];
+  }
+
+  const notes: AnkiNotePayload[] = [];
+  const cardOrder: VocabularyCard[] = [];
+
   for (const card of cards) {
     try {
       let mediaHtml = '';
@@ -144,11 +156,15 @@ export async function exportCardsToAnki(
         if (base64Match?.[2]) {
           const ext = base64Match[1] === 'jpeg' ? 'jpg' : base64Match[1];
           const mediaFilename = `yt-lang-ai-${card.id}.${ext}`;
-          await invokeAnkiConnect<string>(url, 'storeMediaFile', {
-            filename: mediaFilename,
-            data: base64Match[2]
-          });
-          mediaHtml = `<div style="margin-top:10px;"><img src="${escapeHtml(mediaFilename)}" style="max-width:320px;border-radius:8px;" /></div>`;
+          try {
+            await invokeAnkiConnect<string>(url, 'storeMediaFile', {
+              filename: mediaFilename,
+              data: base64Match[2]
+            });
+            mediaHtml = `<div style="margin-top:10px;"><img src="${escapeHtml(mediaFilename)}" style="max-width:320px;border-radius:8px;" /></div>`;
+          } catch {
+            // Proceed without media if storing media fails
+          }
         }
       }
 
@@ -221,28 +237,56 @@ export async function exportCardsToAnki(
         )}">▶ Watch on YouTube (${escapeHtml(card.videoTitle || card.videoId)})</a></div>`
       );
 
-      await invokeAnkiConnect<number>(url, 'addNote', {
-        note: {
-          deckName: targetDeck,
-          modelName: 'Basic',
-          fields: {
-            Front: frontHtml,
-            Back: backParts.join('')
-          },
-          options: {
-            allowDuplicate: false
-          },
-          tags: ['youtube-lang-ai', card.sourceLang || 'lang']
-        }
+      notes.push({
+        deckName: targetDeck,
+        modelName: 'Basic',
+        fields: {
+          Front: frontHtml,
+          Back: backParts.join('')
+        },
+        options: {
+          allowDuplicate: false
+        },
+        tags: ['youtube-lang-ai', card.sourceLang || 'lang']
       });
+      cardOrder.push(card);
+    } catch (prepErr: unknown) {
+      errors.push(`${card.word}: ${prepErr instanceof Error ? prepErr.message : 'Preparation error'}`);
+    }
+  }
 
-      added++;
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Unknown AnkiConnect error';
-      if (msg.toLowerCase().includes('duplicate')) {
-        skipped++;
+  if (notes.length === 0) {
+    return { added, skipped, errors };
+  }
+
+  // Attempt batch addNotes for instant export
+  try {
+    const results = await invokeAnkiConnect<Array<number | null>>(url, 'addNotes', {
+      notes
+    });
+    for (let i = 0; i < results.length; i++) {
+      const res = results[i];
+      if (typeof res === 'number') {
+        added++;
       } else {
-        errors.push(`${card.word}: ${msg}`);
+        skipped++;
+      }
+    }
+  } catch {
+    // Fallback to single addNote if addNotes fails (e.g. older AnkiConnect version)
+    for (let i = 0; i < notes.length; i++) {
+      try {
+        await invokeAnkiConnect<number>(url, 'addNote', {
+          note: notes[i]
+        });
+        added++;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Unknown AnkiConnect error';
+        if (msg.toLowerCase().includes('duplicate')) {
+          skipped++;
+        } else {
+          errors.push(`${cardOrder[i]?.word || 'Card'}: ${msg}`);
+        }
       }
     }
   }

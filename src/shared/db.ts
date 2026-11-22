@@ -84,11 +84,6 @@ export function buildAIExplanationCacheKey(
   return `${videoId}:${cueId}:${normalizedTarget}:${nativeLang.toLowerCase()}`;
 }
 
-export async function getCachedSubtitles(key: string): Promise<Json3Response | null> {
-  const db = await getDB();
-  const entry = await db.get('subtitles', key);
-  return entry ? entry.data : null;
-}
 
 export async function setCachedSubtitles(
   videoId: string,

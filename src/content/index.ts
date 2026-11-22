@@ -15,7 +15,7 @@ import {
   getRateLimitBlockedUntil,
   saveCachedCaptionTrack
 } from '../shared/captionCache';
-import { createNewCard } from '../shared/srs';
+import { createNewCard } from '../shared/cardFactory';
 import {
   getSettings,
   getVocabulary,
@@ -447,7 +447,14 @@ function attachToPlayer(): void {
     currentPlayerEl = playerEl;
     checkAdState(playerEl);
 
-    adObserver = new MutationObserver(() => checkAdState(playerEl));
+    let adRafId: number | null = null;
+    adObserver = new MutationObserver(() => {
+      if (adRafId !== null) return;
+      adRafId = window.requestAnimationFrame(() => {
+        adRafId = null;
+        checkAdState(playerEl);
+      });
+    });
     adObserver.observe(playerEl, {
       attributes: true,
       attributeFilter: ['class']
@@ -496,17 +503,43 @@ function startPlayerSession(): void {
   videoController = createVideoController();
   attachToPlayer();
 
-  domObserver = new MutationObserver(() => {
-    const playerEl = findPlayerContainer();
-    if (playerEl && (!mountedUI || !playerEl.contains(mountedUI.host))) {
-      attachToPlayer();
-    } else if (playerEl && videoController && !videoController.getVideo()) {
-      const videoEl = findVideoElement(playerEl);
-      if (videoEl) videoController.attach(videoEl);
+  let domObserverPending = false;
+  const onDomMutation = (): void => {
+    if (domObserverPending) return;
+    domObserverPending = true;
+    window.requestAnimationFrame(() => {
+      domObserverPending = false;
+      const playerEl = findPlayerContainer();
+      if (playerEl && (!mountedUI || !playerEl.contains(mountedUI.host))) {
+        attachToPlayer();
+        // Once attached, narrow observer scope strictly to the player container
+        if (domObserver && playerEl) {
+          domObserver.disconnect();
+          domObserver.observe(playerEl, { childList: true });
+        }
+      } else if (playerEl && videoController && !videoController.getVideo()) {
+        const videoEl = findVideoElement(playerEl);
+        if (videoEl) videoController.attach(videoEl);
+      }
+    });
+  };
+
+  domObserver = new MutationObserver(onDomMutation);
+
+  const initialPlayer = findPlayerContainer();
+  if (initialPlayer) {
+    // Narrow scope strictly to #movie_player (NOT document.body with subtree: true)
+    domObserver.observe(initialPlayer, { childList: true });
+  } else {
+    // If player container is not yet ready, observe immediate parent briefly
+    const parentContainer =
+      document.querySelector('#player-container') ??
+      document.querySelector('#ytd-player') ??
+      document.querySelector('ytd-watch-flexy') ??
+      document.body;
+    if (parentContainer) {
+      domObserver.observe(parentContainer, { childList: true, subtree: false });
     }
-  });
-  if (document.body) {
-    domObserver.observe(document.body, { childList: true, subtree: true });
   }
 
   void loadCachedSubtitlesIfAvailable(vid);
@@ -617,14 +650,16 @@ window.addEventListener(
       currentVideoId = nextId;
       resetVideoState();
     }
-    startPlayerSession();
-    if (nextId) {
-      postToMain({
-        source: ISOLATED_MESSAGE_SOURCE,
-        type: 'NAVIGATED',
-        payload: { videoId: nextId }
-      });
+    if (!nextId) {
+      teardownPlayerSession();
+      return;
     }
+    startPlayerSession();
+    postToMain({
+      source: ISOLATED_MESSAGE_SOURCE,
+      type: 'NAVIGATED',
+      payload: { videoId: nextId }
+    });
   },
   { signal: lifecycleAbortController.signal }
 );

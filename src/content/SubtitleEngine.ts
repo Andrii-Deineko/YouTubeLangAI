@@ -11,11 +11,25 @@ const SENTENCE_END_REGEX = /[.!?]["'”’)\]]*$/;
 const MAX_PAUSE_MS = 600;
 const MAX_CUE_LENGTH = 110;
 
+const normalizedWordCache = new Map<string, string>();
+
+export function clearNormalizedWordCache(): void {
+  normalizedWordCache.clear();
+}
+
 export function normalizeWord(word: string): string {
-  return word
+  const cached = normalizedWordCache.get(word);
+  if (cached !== undefined) return cached;
+
+  const result = word
     .trim()
     .toLowerCase()
     .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+
+  if (normalizedWordCache.size < 5000) {
+    normalizedWordCache.set(word, result);
+  }
+  return result;
 }
 
 export function tokenizeCueText(
@@ -131,6 +145,7 @@ export class SubtitleEngine {
   public clear(): void {
     this.cues = [];
     this.isAsrTrack = false;
+    clearNormalizedWordCache();
   }
 
   public getCues(): SubtitleCue[] {

@@ -1,6 +1,8 @@
 import {
+  memo,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type MouseEvent,
@@ -34,6 +36,50 @@ interface SubtitleOverlayProps {
 }
 
 const DRAG_THRESHOLD = 5;
+
+interface WordTokenItemProps {
+  token: WordToken;
+  isSelected: boolean;
+  onSelect: (e: MouseEvent<HTMLSpanElement>, token: WordToken) => void;
+  onEnter: (e: React.KeyboardEvent<HTMLSpanElement>, token: WordToken) => void;
+}
+
+const WordTokenItem = memo(function WordTokenItem({
+  token,
+  isSelected,
+  onSelect,
+  onEnter
+}: WordTokenItemProps): ReactElement {
+  if (!token.isWord) {
+    return <span className="whitespace-pre-wrap">{token.text}</span>;
+  }
+
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={(e) => onSelect(e, token)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          onEnter(e, token);
+        }
+      }}
+      style={
+        isSelected
+          ? {
+              backgroundColor: 'rgba(var(--ytai-accent-rgb), 0.75)',
+              color: '#ffffff'
+            }
+          : undefined
+      }
+      className={`inline rounded px-0.5 transition-colors cursor-pointer ${
+        isSelected ? '' : 'hover:bg-[rgba(var(--ytai-accent-rgb),0.35)]'
+      }`}
+    >
+      {token.text}
+    </span>
+  );
+});
 
 function getPlayerContainer(node: HTMLElement | null): HTMLElement | null {
   if (!node) {
@@ -83,8 +129,6 @@ export function SubtitleOverlay({
   selectedTarget,
   onSelectTarget
 }: SubtitleOverlayProps): ReactElement | null {
-  const [hovered, setHovered] = useState(false);
-  const [livePosition, setLivePosition] = useState<SubtitlePosition | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [bottomOffset, setBottomOffset] = useState<number>(() => {
     if (typeof document === 'undefined') return 68;
@@ -94,6 +138,7 @@ export function SubtitleOverlay({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const isDraggingRef = useRef(false);
   const justFinishedDragRef = useRef(false);
+  const currentDragPosRef = useRef<SubtitlePosition | null>(null);
   const dragStartRef = useRef<{
     pointerX: number;
     pointerY: number;
@@ -105,9 +150,8 @@ export function SubtitleOverlay({
     boxHeight: number;
   } | null>(null);
 
-  // Sync external position changes (e.g. reset) to livePosition and reset coordinates
+  // Sync external position changes (e.g. reset) to container styling
   useEffect(() => {
-    setLivePosition(null);
     if (!position && containerRef.current) {
       containerRef.current.style.top = 'auto';
       containerRef.current.style.left = '50%';
@@ -115,14 +159,19 @@ export function SubtitleOverlay({
     }
   }, [position]);
 
-  // Dynamically track YouTube controls autohide and bottom bar height
+  // Dynamically track YouTube controls autohide and bottom bar height with RAF throttle
   useEffect(() => {
     const playerEl = getPlayerContainer(containerRef.current);
     if (!playerEl) return;
 
+    let rafId: number | null = null;
     const updateBottomOffset = (): void => {
-      const nextOffset = getDefaultSubtitleBottom(playerEl);
-      setBottomOffset(nextOffset);
+      if (rafId !== null) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        const nextOffset = getDefaultSubtitleBottom(playerEl);
+        setBottomOffset((prev) => (prev !== nextOffset ? nextOffset : prev));
+      });
     };
 
     updateBottomOffset();
@@ -139,12 +188,11 @@ export function SubtitleOverlay({
     window.addEventListener('resize', updateBottomOffset);
 
     return () => {
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
       observer.disconnect();
       window.removeEventListener('resize', updateBottomOffset);
     };
   }, []);
-
-  const effectivePosition = livePosition ?? position;
 
   const isHiddenMode = activeListeningMode === 'hidden';
   const isBlurMode = activeListeningMode === 'blur';
@@ -152,9 +200,6 @@ export function SubtitleOverlay({
   // In 'hidden' mode, mouse hover intentionally does NOT reveal subtitles; only Alt or active selection does.
   const isRevealedInHidden = altPressed || Boolean(selectedTarget);
   const isCardVisible = !isHiddenMode || isRevealedInHidden;
-
-  const isRevealedInBlur = hovered || altPressed || Boolean(selectedTarget);
-  const isBlurred = isBlurMode && !isRevealedInBlur;
 
   const effectiveFontSize = fontSize ?? 20;
   const fontSizes = getSubtitleFontSizes(effectiveFontSize, scale);
@@ -275,7 +320,16 @@ export function SubtitleOverlay({
         const xPercent = (clampedX / start.playerWidth) * 100;
         const yPercent = (clampedY / start.playerHeight) * 100;
 
-        setLivePosition({ xPercent, yPercent });
+        currentDragPosRef.current = { xPercent, yPercent };
+
+        // Zero-rerender direct DOM update during drag
+        if (containerRef.current) {
+          containerRef.current.style.left = `${xPercent}%`;
+          containerRef.current.style.top = `${yPercent}%`;
+          containerRef.current.style.bottom = 'auto';
+          containerRef.current.style.right = 'auto';
+          containerRef.current.style.transform = 'translate3d(-50%, -50%, 0)';
+        }
       }
     },
     []
@@ -293,8 +347,8 @@ export function SubtitleOverlay({
           justFinishedDragRef.current = false;
         }, 100);
 
-        if (livePosition) {
-          onUpdatePosition(livePosition);
+        if (currentDragPosRef.current) {
+          onUpdatePosition(currentDragPosRef.current);
         }
         try {
           e.currentTarget.releasePointerCapture(e.pointerId);
@@ -303,47 +357,75 @@ export function SubtitleOverlay({
         }
       }
 
+      currentDragPosRef.current = null;
       dragStartRef.current = null;
       isDraggingRef.current = false;
       setIsDragging(false);
     },
-    [livePosition, onUpdatePosition]
+    [onUpdatePosition]
   );
 
   const handleResetPosition = (e: MouseEvent): void => {
     e.stopPropagation();
     e.preventDefault();
-    setLivePosition(null);
+    if (containerRef.current) {
+      containerRef.current.style.top = 'auto';
+      containerRef.current.style.left = '50%';
+      containerRef.current.style.transform = 'translateX(-50%)';
+    }
     onUpdatePosition(null);
   };
 
-  if (!primaryCue) return null;
+  const handleTokenClick = useCallback(
+    (e: MouseEvent<HTMLSpanElement>, token: WordToken): void => {
+      e.stopPropagation();
+      if (isDraggingRef.current || justFinishedDragRef.current) {
+        return;
+      }
 
-  const handleTokenClick = (e: MouseEvent<HTMLSpanElement>, token: WordToken): void => {
-    e.stopPropagation();
-    if (isDraggingRef.current || isDragging || justFinishedDragRef.current) {
-      return;
-    }
+      const selection = window.getSelection();
+      const selectedText = selection?.toString().trim() ?? '';
+      if (selectedText.length > 0 && selectedText.includes(' ')) {
+        return;
+      }
 
-    const selection = window.getSelection();
-    const selectedText = selection?.toString().trim() ?? '';
-    if (selectedText.length > 0 && selectedText.includes(' ')) {
-      return;
-    }
+      if (!primaryCue) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      onSelectTarget({
+        target: token.text,
+        cue: primaryCue,
+        anchorRect: {
+          left: rect.left + rect.width / 2,
+          top: rect.top,
+          bottom: rect.bottom,
+          width: rect.width
+        },
+        isPhrase: false
+      });
+    },
+    [primaryCue, onSelectTarget]
+  );
 
-    const rect = e.currentTarget.getBoundingClientRect();
-    onSelectTarget({
-      target: token.text,
-      cue: primaryCue,
-      anchorRect: {
-        left: rect.left + rect.width / 2,
-        top: rect.top,
-        bottom: rect.bottom,
-        width: rect.width
-      },
-      isPhrase: false
-    });
-  };
+  const handleTokenEnter = useCallback(
+    (e: React.KeyboardEvent<HTMLSpanElement>, token: WordToken): void => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!primaryCue) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      onSelectTarget({
+        target: token.text,
+        cue: primaryCue,
+        anchorRect: {
+          left: rect.left + rect.width / 2,
+          top: rect.top,
+          bottom: rect.bottom,
+          width: rect.width
+        },
+        isPhrase: false
+      });
+    },
+    [primaryCue, onSelectTarget]
+  );
 
   const handleMouseUp = (e: MouseEvent<HTMLDivElement>): void => {
     e.stopPropagation();
@@ -366,7 +448,7 @@ export function SubtitleOverlay({
     }
 
     const selectedText = selection?.toString().replace(/\s+/g, ' ').trim() ?? '';
-    if (!selectedText || !selectedText.includes(' ')) return;
+    if (!selectedText || !selectedText.includes(' ') || !primaryCue) return;
 
     const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
     const rect = range?.getBoundingClientRect() ?? e.currentTarget.getBoundingClientRect();
@@ -384,11 +466,32 @@ export function SubtitleOverlay({
     });
   };
 
-  const positionStyle: React.CSSProperties = effectivePosition
+  const renderedTokens = useMemo(() => {
+    if (!primaryCue) return null;
+    return primaryCue.tokens.map((token) => {
+      const isSelected =
+        Boolean(selectedTarget) &&
+        selectedTarget?.toLowerCase() === token.text.toLowerCase();
+
+      return (
+        <WordTokenItem
+          key={token.id}
+          token={token}
+          isSelected={isSelected}
+          onSelect={handleTokenClick}
+          onEnter={handleTokenEnter}
+        />
+      );
+    });
+  }, [primaryCue, selectedTarget, handleTokenClick, handleTokenEnter]);
+
+  if (!primaryCue) return null;
+
+  const positionStyle: React.CSSProperties = position
     ? {
         position: 'absolute',
-        left: `${effectivePosition.xPercent}%`,
-        top: `${effectivePosition.yPercent}%`,
+        left: `${position.xPercent}%`,
+        top: `${position.yPercent}%`,
         bottom: 'auto',
         right: 'auto',
         transform: 'translate(-50%, -50%)',
@@ -408,7 +511,10 @@ export function SubtitleOverlay({
     <div className="pointer-events-none absolute inset-0 z-10 overflow-visible">
       <div
         ref={containerRef}
-        className={`text-center shadow-2xl select-none ${
+        data-mode={activeListeningMode}
+        data-alt-pressed={altPressed ? 'true' : 'false'}
+        data-has-selection={Boolean(selectedTarget) ? 'true' : 'false'}
+        className={`ytai-subtitle-overlay text-center shadow-2xl select-none ${
           isDragging ? '' : 'transition-[bottom,opacity] duration-200 ease-out'
         } ${
           isCardVisible ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
@@ -432,8 +538,6 @@ export function SubtitleOverlay({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
         onMouseUp={handleMouseUp}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
@@ -451,9 +555,11 @@ export function SubtitleOverlay({
             <GripHorizontal className="h-3.5 w-3.5" />
           </button>
 
-          {isBlurMode && isBlurred && (
+          {isBlurMode && (
             <div
-              className="text-[11px] leading-tight tracking-wide font-medium select-none transition-colors"
+              className={`ytai-blur-hint text-[11px] leading-tight tracking-wide font-medium select-none transition-colors ${
+                altPressed || Boolean(selectedTarget) ? 'hidden' : ''
+              }`}
               style={{ color: 'var(--ytai-accent)' }}
             >
               Active Listening · Hover or hold Alt to reveal
@@ -474,74 +580,24 @@ export function SubtitleOverlay({
 
         {/* Primary Subtitle Line */}
         <div
-          className="leading-snug font-medium transition-[filter] duration-150 select-text"
+          className="ytai-blur-target leading-snug font-medium select-text"
           style={{
             color: 'var(--ytai-text-primary)',
             fontSize: `${fontSizes.primary}px`,
-            textShadow: 'var(--ytai-text-shadow)',
-            filter: isBlurred ? 'blur(6px)' : 'blur(0px)'
+            textShadow: 'var(--ytai-text-shadow)'
           }}
         >
-          {primaryCue.tokens.map((token) => {
-            const isSelected =
-              Boolean(selectedTarget) &&
-              selectedTarget?.toLowerCase() === token.text.toLowerCase();
-
-            return token.isWord ? (
-              <span
-                key={token.id}
-                role="button"
-                tabIndex={0}
-                onClick={(e) => handleTokenClick(e, token)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    onSelectTarget({
-                      target: token.text,
-                      cue: primaryCue,
-                      anchorRect: {
-                        left: rect.left + rect.width / 2,
-                        top: rect.top,
-                        bottom: rect.bottom,
-                        width: rect.width
-                      },
-                      isPhrase: false
-                    });
-                  }
-                }}
-                style={
-                  isSelected
-                    ? {
-                        backgroundColor: 'rgba(var(--ytai-accent-rgb), 0.75)',
-                        color: '#ffffff'
-                      }
-                    : undefined
-                }
-                className={`inline rounded px-0.5 transition-colors cursor-pointer ${
-                  isSelected ? '' : 'hover:bg-[rgba(var(--ytai-accent-rgb),0.35)]'
-                }`}
-              >
-                {token.text}
-              </span>
-            ) : (
-              <span key={token.id} className="whitespace-pre-wrap">
-                {token.text}
-              </span>
-            );
-          })}
+          {renderedTokens}
         </div>
 
         {/* Translated Subtitle Line */}
         {showDualSubtitles && translatedCue && (
           <div
-            className="mt-1 leading-snug transition-[filter] duration-150 select-none"
+            className="ytai-blur-target mt-1 leading-snug select-none"
             style={{
               color: 'var(--ytai-text-secondary)',
               fontSize: `${fontSizes.translated}px`,
-              textShadow: 'var(--ytai-text-shadow)',
-              filter: isBlurred ? 'blur(5px)' : 'blur(0px)'
+              textShadow: 'var(--ytai-text-shadow)'
             }}
           >
             {translatedCue.text}

@@ -38,6 +38,8 @@ function contentScriptsBundlePlugin(): Plugin {
         bundle: true,
         format: 'iife',
         target: 'es2022',
+        minify: true,
+        pure: ['console.debug'],
         outfile: resolve(assetsDir, 'interceptor-main.js')
       });
 
@@ -49,7 +51,12 @@ function contentScriptsBundlePlugin(): Plugin {
         define: {
           'process.env.NODE_ENV': JSON.stringify('production')
         },
+        esbuild: {
+          minify: true,
+          pure: ['console.debug']
+        },
         build: {
+          minify: 'esbuild',
           outDir: assetsDir,
           emptyOutDir: false,
           lib: {
@@ -102,9 +109,13 @@ function contentScriptsBundlePlugin(): Plugin {
 
 export default defineConfig({
   plugins: [react(), crx({ manifest }), contentScriptsBundlePlugin()],
+  esbuild: {
+    pure: ['console.debug']
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    sourcemap: false
+    sourcemap: false,
+    minify: 'esbuild'
   }
 });

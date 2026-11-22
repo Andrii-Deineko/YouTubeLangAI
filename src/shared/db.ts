@@ -103,12 +103,20 @@ export async function setCachedSubtitles(
   });
 }
 
+export const TRANSLATION_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+export const TRANSLATION_CACHE_MAX_ENTRIES = 500;
+
 export async function getCachedTranslation(
   key: string
 ): Promise<QuickTranslationResult | null> {
   const db = await getDB();
   const entry = await db.get('translations', key);
-  return entry ? entry.result : null;
+  if (!entry) return null;
+  if (Date.now() - entry.updatedAt > TRANSLATION_CACHE_TTL_MS) {
+    void db.delete('translations', key);
+    return null;
+  }
+  return entry.result;
 }
 
 export async function setCachedTranslation(
@@ -116,11 +124,44 @@ export async function setCachedTranslation(
   result: QuickTranslationResult
 ): Promise<void> {
   const db = await getDB();
+  const now = Date.now();
   await db.put('translations', {
     key,
     result,
-    updatedAt: Date.now()
+    updatedAt: now
   });
+
+  // Evict expired entries and enforce 500 entries LRU limit
+  try {
+    const tx = db.transaction('translations', 'readwrite');
+    const store = tx.objectStore('translations');
+    const all = await store.getAll();
+    const expiredKeys: string[] = [];
+    const validEntries: CachedTranslationEntry[] = [];
+
+    for (const item of all) {
+      if (now - item.updatedAt > TRANSLATION_CACHE_TTL_MS) {
+        expiredKeys.push(item.key);
+      } else {
+        validEntries.push(item);
+      }
+    }
+
+    for (const expKey of expiredKeys) {
+      void store.delete(expKey);
+    }
+
+    if (validEntries.length > TRANSLATION_CACHE_MAX_ENTRIES) {
+      validEntries.sort((a, b) => a.updatedAt - b.updatedAt);
+      const toEvict = validEntries.slice(0, validEntries.length - TRANSLATION_CACHE_MAX_ENTRIES);
+      for (const item of toEvict) {
+        void store.delete(item.key);
+      }
+    }
+    await tx.done;
+  } catch {
+    // Ignore eviction errors
+  }
 }
 
 export async function getCachedAIExplanation(key: string): Promise<AIExplanation | null> {

@@ -1,5 +1,4 @@
 import {
-  createEmptyCard,
   fsrs,
   generatorParameters,
   Rating,
@@ -7,7 +6,7 @@ import {
   type Card,
   type Grade
 } from 'ts-fsrs';
-import type { AIExplanation, FSRSState, VocabularyCard } from '../types/vocabulary';
+import type { FSRSState, VocabularyCard } from '../types/vocabulary';
 
 const scheduler = fsrs(
   generatorParameters({
@@ -46,47 +45,11 @@ export function fromFsrsCard(card: Card): FSRSState {
   };
 }
 
-export interface CreateCardInput {
-  word: string;
-  lemma?: string;
-  translation: string;
-  aiExplanation?: AIExplanation | null;
-  contextSentence: string;
-  contextTranslation: string;
-  videoId: string;
-  videoTitle: string;
-  timestampSec: number;
-  screenshotBase64: string | null;
-  sourceLang: string;
-  nativeLang: string;
-}
-
-export function createNewCard(input: CreateCardInput, now: Date = new Date()): VocabularyCard {
-  const emptyCard = createEmptyCard(now);
-  const cleanWord = input.word.trim();
-  const id =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `card-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-
-  return {
-    id,
-    word: cleanWord,
-    lemma: (input.lemma ?? input.aiExplanation?.lemma ?? cleanWord).trim(),
-    translation: input.translation.trim(),
-    aiExplanation: input.aiExplanation ?? null,
-    contextSentence: input.contextSentence.trim(),
-    contextTranslation: input.contextTranslation.trim(),
-    videoId: input.videoId,
-    videoTitle: input.videoTitle,
-    timestampSec: Math.max(0, Math.floor(input.timestampSec)),
-    screenshotBase64: input.screenshotBase64,
-    sourceLang: input.sourceLang,
-    nativeLang: input.nativeLang,
-    createdAt: now.toISOString(),
-    fsrsState: fromFsrsCard(emptyCard)
-  };
-}
+export {
+  createNewCard,
+  createInitialFSRSState,
+  type CreateCardInput
+} from './cardFactory';
 
 export function reviewCard(
   card: VocabularyCard,

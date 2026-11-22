@@ -101,6 +101,7 @@ export async function getCachedCaptionTrack(
     // Check TTL
     if (now - match.savedAt > CAPTION_CACHE_TTL_MS) {
       await evictCacheEntries([match.storageKey]);
+      void evictExpiredCaptionCache();
       return null;
     }
 
@@ -226,6 +227,29 @@ export async function saveCachedCaptionTrack(track: TrackCapturedPayload): Promi
     }
   } catch (err) {
     console.warn('[YT-Lang-AI] Error saving caption track to cache:', err);
+  }
+}
+
+export async function evictExpiredCaptionCache(): Promise<void> {
+  if (!isStorageAvailable()) return;
+  try {
+    const now = Date.now();
+    const index = await getCaptionCacheIndex();
+    const expiredKeys: string[] = [];
+    const valid = index.filter((item) => {
+      if (now - item.savedAt > CAPTION_CACHE_TTL_MS) {
+        expiredKeys.push(item.storageKey);
+        return false;
+      }
+      return true;
+    });
+
+    if (expiredKeys.length > 0) {
+      await chrome.storage.local.set({ [CAPTION_CACHE_INDEX_KEY]: valid });
+      await chrome.storage.local.remove(expiredKeys);
+    }
+  } catch (err) {
+    console.warn('[YT-Lang-AI] Error evicting expired caption cache:', err);
   }
 }
 

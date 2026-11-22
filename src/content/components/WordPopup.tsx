@@ -85,6 +85,51 @@ function sendRuntimeMessage<TRes>(message: RuntimeRequest): Promise<TRes> {
   });
 }
 
+const contentQuickTranslateCache = new Map<string, QuickTranslationResult>();
+const contentInFlight = new Map<string, Promise<QuickTranslateResponse>>();
+
+function fetchQuickTranslate(
+  text: string,
+  sourceLang: string,
+  nativeLang: string
+): Promise<QuickTranslateResponse> {
+  const cacheKey = `${sourceLang}:${nativeLang}:${text.trim().toLowerCase()}`;
+  const cached = contentQuickTranslateCache.get(cacheKey);
+  if (cached) {
+    return Promise.resolve({ ok: true, data: cached });
+  }
+
+  const inFlight = contentInFlight.get(cacheKey);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const promise = sendRuntimeMessage<QuickTranslateResponse>({
+    type: 'QUICK_TRANSLATE',
+    payload: {
+      text,
+      sourceLang,
+      nativeLang
+    }
+  })
+    .then((res) => {
+      if (res.ok) {
+        if (contentQuickTranslateCache.size > 200) {
+          const firstKey = contentQuickTranslateCache.keys().next().value;
+          if (firstKey) contentQuickTranslateCache.delete(firstKey);
+        }
+        contentQuickTranslateCache.set(cacheKey, res.data);
+      }
+      return res;
+    })
+    .finally(() => {
+      contentInFlight.delete(cacheKey);
+    });
+
+  contentInFlight.set(cacheKey, promise);
+  return promise;
+}
+
 export function speakText(text: string, langCode: string): void {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
   try {
@@ -200,14 +245,7 @@ export function WordPopup({
     }
 
     // 1. Fetch word translation
-    void sendRuntimeMessage<QuickTranslateResponse>({
-      type: 'QUICK_TRANSLATE',
-      payload: {
-        text: selection.target,
-        sourceLang,
-        nativeLang: settings.nativeLang
-      }
-    })
+    void fetchQuickTranslate(selection.target, sourceLang, settings.nativeLang)
       .then((res) => {
         if (activeRequestKeyRef.current !== requestKey) return;
         if (res.ok) {
@@ -233,14 +271,7 @@ export function WordPopup({
       if (cleanCueText.toLowerCase() === cleanWord.toLowerCase()) {
         setSentenceLoading(false);
       } else {
-        void sendRuntimeMessage<QuickTranslateResponse>({
-          type: 'QUICK_TRANSLATE',
-          payload: {
-            text: cleanCueText,
-            sourceLang,
-            nativeLang: settings.nativeLang
-          }
-        })
+        void fetchQuickTranslate(cleanCueText, sourceLang, settings.nativeLang)
           .then((res) => {
             if (activeRequestKeyRef.current !== requestKey) return;
             if (res.ok && res.data.translation) {

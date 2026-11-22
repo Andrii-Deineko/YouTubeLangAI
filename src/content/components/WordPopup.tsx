@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode
+} from 'react';
 import {
   Bookmark,
   BookmarkCheck,
@@ -27,13 +34,39 @@ interface WordPopupProps {
   settings: UserSettings;
   prevSentence: string;
   nextSentence: string;
+  contextTranslation?: string;
   isSaved: boolean;
   onSaveCard: (params: {
     word: string;
     translation: string;
     aiExplanation: AIExplanation | null;
+    contextTranslation?: string;
   }) => Promise<void>;
   onClose: (allowAutoResume?: boolean) => void;
+}
+
+function renderHighlightedSentence(sentence: string, targetWord: string): ReactNode {
+  const cleanTarget = targetWord.trim();
+  if (!cleanTarget) return sentence;
+
+  const escaped = cleanTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`(${escaped})`, 'gi');
+  const parts = sentence.split(regex);
+
+  return parts.map((part, index) => {
+    if (part.toLowerCase() === cleanTarget.toLowerCase()) {
+      return (
+        <span
+          key={index}
+          className="font-semibold underline decoration-2 underline-offset-2"
+          style={{ color: 'var(--ytai-accent)' }}
+        >
+          {part}
+        </span>
+      );
+    }
+    return part;
+  });
 }
 
 function sendRuntimeMessage<TRes>(message: RuntimeRequest): Promise<TRes> {
@@ -84,6 +117,7 @@ export function WordPopup({
   settings,
   prevSentence,
   nextSentence,
+  contextTranslation: initialContextTranslation,
   isSaved,
   onSaveCard,
   onClose
@@ -91,6 +125,13 @@ export function WordPopup({
   const [quickLoading, setQuickLoading] = useState(true);
   const [quickError, setQuickError] = useState<string | null>(null);
   const [quickResult, setQuickResult] = useState<QuickTranslationResult | null>(null);
+
+  const [sentenceTranslation, setSentenceTranslation] = useState<string>(
+    initialContextTranslation || ''
+  );
+  const [sentenceLoading, setSentenceLoading] = useState<boolean>(
+    !initialContextTranslation
+  );
 
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -150,6 +191,15 @@ export function WordPopup({
     setAiResult(null);
     setShowExamples(false);
 
+    if (initialContextTranslation) {
+      setSentenceTranslation(initialContextTranslation);
+      setSentenceLoading(false);
+    } else {
+      setSentenceTranslation('');
+      setSentenceLoading(true);
+    }
+
+    // 1. Fetch word translation
     void sendRuntimeMessage<QuickTranslateResponse>({
       type: 'QUICK_TRANSLATE',
       payload: {
@@ -175,7 +225,44 @@ export function WordPopup({
           setQuickLoading(false);
         }
       });
-  }, [requestKey, selection.target, sourceLang, settings.nativeLang]);
+
+    // 2. Fetch sentence translation if not provided via props and cue text differs from word
+    if (!initialContextTranslation && selection.cue.text) {
+      const cleanCueText = selection.cue.text.trim();
+      const cleanWord = selection.target.trim();
+      if (cleanCueText.toLowerCase() === cleanWord.toLowerCase()) {
+        setSentenceLoading(false);
+      } else {
+        void sendRuntimeMessage<QuickTranslateResponse>({
+          type: 'QUICK_TRANSLATE',
+          payload: {
+            text: cleanCueText,
+            sourceLang,
+            nativeLang: settings.nativeLang
+          }
+        })
+          .then((res) => {
+            if (activeRequestKeyRef.current !== requestKey) return;
+            if (res.ok && res.data.translation) {
+              setSentenceTranslation(res.data.translation);
+            }
+          })
+          .catch(() => undefined)
+          .finally(() => {
+            if (activeRequestKeyRef.current === requestKey) {
+              setSentenceLoading(false);
+            }
+          });
+      }
+    }
+  }, [
+    requestKey,
+    selection.target,
+    selection.cue.text,
+    sourceLang,
+    settings.nativeLang,
+    initialContextTranslation
+  ]);
 
   const isLlmConfigured = Boolean(
     (settings.llm?.baseUrl && /localhost|127\.0\.0\.1|::1/i.test(settings.llm.baseUrl)) ||
@@ -246,6 +333,8 @@ export function WordPopup({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestKey, selection.isPhrase]);
 
+  const effectiveSentenceTranslation = initialContextTranslation || sentenceTranslation;
+
   const handleSave = async (): Promise<void> => {
     if (saving) return;
     setSaving(true);
@@ -255,7 +344,8 @@ export function WordPopup({
       await onSaveCard({
         word: selection.target,
         translation: bestTranslation,
-        aiExplanation: aiResult
+        aiExplanation: aiResult,
+        contextTranslation: effectiveSentenceTranslation || undefined
       });
     } finally {
       setSaving(false);
@@ -420,6 +510,62 @@ export function WordPopup({
             </div>
           ) : null}
         </div>
+
+        {/* Full Context Subtitle Block */}
+        {selection.cue.text && (
+          <div
+            className="rounded-xl border p-2.5 text-xs transition-all duration-200"
+            style={{
+              backgroundColor: 'rgba(var(--ytai-bg-rgb), 0.55)',
+              borderColor: 'var(--ytai-border)'
+            }}
+          >
+            <div className="flex items-center justify-between gap-1.5">
+              <span
+                className="text-[10px] font-semibold uppercase tracking-wider select-none"
+                style={{ color: 'var(--ytai-text-secondary)' }}
+              >
+                Контекст субтитра
+              </span>
+              <button
+                type="button"
+                title="Озвучить предложение целиком"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  speakText(selection.cue.text, quickResult?.detectedLang || sourceLang);
+                }}
+                style={{ color: 'var(--ytai-accent)' }}
+                className="shrink-0 p-1 transition hover:opacity-80 rounded-md hover:bg-white/10"
+              >
+                <Volume2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            <div className="mt-1 text-xs text-white leading-relaxed">
+              &ldquo;{renderHighlightedSentence(selection.cue.text, selection.target)}&rdquo;
+            </div>
+
+            {effectiveSentenceTranslation ? (
+              <div
+                className="mt-1.5 border-t pt-1.5 text-xs italic leading-relaxed animate-in fade-in duration-200"
+                style={{
+                  borderColor: 'rgba(255, 255, 255, 0.08)',
+                  color: 'var(--ytai-text-secondary)'
+                }}
+              >
+                {effectiveSentenceTranslation}
+              </div>
+            ) : sentenceLoading ? (
+              <div
+                className="mt-1.5 flex items-center gap-1.5 text-[11px]"
+                style={{ color: 'var(--ytai-text-secondary)' }}
+              >
+                <Loader2 className="h-3 w-3 animate-spin" style={{ color: 'var(--ytai-accent)' }} />
+                <span>Загрузка перевода контекста...</span>
+              </div>
+            ) : null}
+          </div>
+        )}
 
         {/* AI Breakdown Button & Container */}
         <div>

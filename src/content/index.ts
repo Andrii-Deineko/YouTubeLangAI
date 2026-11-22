@@ -117,15 +117,17 @@ async function handleSaveVocabulary(params: {
   translation: string;
   aiExplanation: AIExplanation | null;
   cue: SubtitleCue;
+  contextTranslation?: string;
 }): Promise<void> {
   const vid = currentVideoId || getVideoIdFromUrl() || 'unknown';
   const screenshotBase64 = videoController?.captureFrame() ?? null;
   const translatedMatch =
-    activeTranslatedCue &&
+    params.contextTranslation ||
+    (activeTranslatedCue &&
     Math.abs(activeTranslatedCue.startTime - params.cue.startTime) < 2
       ? activeTranslatedCue.text
       : translatedEngine.findActiveCue((params.cue.startTime + params.cue.endTime) / 2)?.text ??
-        '';
+        '');
 
   const card = createNewCard({
     word: params.word,
@@ -181,6 +183,13 @@ function renderUI(): void {
     const vid = currentVideoId || getVideoIdFromUrl();
     const isSaved = savedWordKeys.has(buildSavedKey(sel.target, vid, sel.cue.startTime));
 
+    const initialContextTranslation =
+      activeTranslatedCue &&
+      Math.abs(activeTranslatedCue.startTime - sel.cue.startTime) < 2
+        ? activeTranslatedCue.text
+        : translatedEngine.findActiveCue((sel.cue.startTime + sel.cue.endTime) / 2)?.text ??
+          '';
+
     popupElement = createElement(WordPopup, {
       selection: sel,
       playerRect: currentPlayerEl?.getBoundingClientRect() ?? null,
@@ -190,13 +199,15 @@ function renderUI(): void {
       settings,
       prevSentence: context.prevSentence,
       nextSentence: context.nextSentence,
+      contextTranslation: initialContextTranslation,
       isSaved,
-      onSaveCard: async ({ word, translation, aiExplanation }) => {
+      onSaveCard: async ({ word, translation, aiExplanation, contextTranslation }) => {
         await handleSaveVocabulary({
           word,
           translation,
           aiExplanation,
-          cue: sel.cue
+          cue: sel.cue,
+          contextTranslation
         });
       },
       onClose: (allowAutoResume = true) => closePopupAndResume(allowAutoResume)

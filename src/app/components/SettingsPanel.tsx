@@ -547,6 +547,46 @@ export function SettingsPanel({
           </div>
         </div>
 
+        {/* Controls Scale Segmented Control */}
+        <div>
+          <div className="mb-1.5 flex items-center justify-between text-[11px] text-slate-400">
+            <span>Размер верхней панели (Player Controls)</span>
+            <span className="font-semibold text-slate-200">
+              {settings.controlsScale === 'sm' && 'Компактный (S · 85%)'}
+              {(!settings.controlsScale || settings.controlsScale === 'md') &&
+                'Стандартный (M · 100%)'}
+              {settings.controlsScale === 'lg' && 'Крупный (L · 125%)'}
+              {settings.controlsScale === 'xl' && 'Максимальный (XL · 150%)'}
+            </span>
+          </div>
+          <div className="grid grid-cols-4 gap-1.5 rounded-xl border border-white/10 bg-slate-950/70 p-1">
+            {[
+              { id: 'sm' as const, label: 'S', desc: '85%' },
+              { id: 'md' as const, label: 'M', desc: '100%' },
+              { id: 'lg' as const, label: 'L', desc: '125%' },
+              { id: 'xl' as const, label: 'XL', desc: '150%' }
+            ].map((item) => {
+              const active = (settings.controlsScale || 'md') === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => void onUpdateSettings({ controlsScale: item.id })}
+                  className={`flex flex-col items-center justify-center rounded-lg py-1.5 transition ${
+                    active
+                      ? 'bg-white/15 font-semibold text-white shadow-sm'
+                      : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                  }`}
+                  style={active ? { color: 'var(--ytai-accent)' } : undefined}
+                >
+                  <span className="text-xs font-semibold">{item.label}</span>
+                  <span className="text-[10px] opacity-75">{item.desc}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Subtitle Position Reset */}
         <div className="flex items-center justify-between rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-xs">
           <div>

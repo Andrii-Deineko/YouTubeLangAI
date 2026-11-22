@@ -1,6 +1,7 @@
 import {
   DEFAULT_SETTINGS,
   type ActiveListeningMode,
+  type ControlsScale,
   type SubtitlePosition,
   type SubtitleScale,
   type UserSettings
@@ -45,6 +46,13 @@ function parseActiveListeningMode(rawVal: unknown): ActiveListeningMode {
     return 'off';
   }
   return DEFAULT_SETTINGS.activeListeningMode;
+}
+
+function parseControlsScale(rawVal: unknown): ControlsScale {
+  if (rawVal === 'sm' || rawVal === 'md' || rawVal === 'lg' || rawVal === 'xl') {
+    return rawVal;
+  }
+  return DEFAULT_SETTINGS.controlsScale ?? 'md';
 }
 
 function parseSubtitlePosition(rawPos: unknown): SubtitlePosition | null {
@@ -115,6 +123,7 @@ function mergeSettings(raw: Partial<UserSettings> | undefined): UserSettings {
     subtitlePosition: parseSubtitlePosition(rawRecord?.subtitlePosition),
     subtitleFontSize,
     subtitleScale,
+    controlsScale: parseControlsScale(rawRecord?.controlsScale),
     autoHideControls:
       typeof raw?.autoHideControls === 'boolean'
         ? raw.autoHideControls

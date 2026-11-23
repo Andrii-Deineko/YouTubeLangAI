@@ -4,19 +4,15 @@ import { defineConfig, build as viteBuild, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { crx, type ManifestV3Export } from '@crxjs/vite-plugin';
 import { buildSync as esbuildSync } from 'esbuild';
+import { DEFAULT_CINEMA_DOMAINS } from './src/adapters/cinema/domainUtils';
 
-const CINEMA_MATCHES = [
-  '*://*.rezka.ag/*',
-  '*://rezka.ag/*',
-  '*://*.hdrezka.*/*',
-  '*://hdrezka.*/*',
-  '*://*.9anime.*/*',
-  '*://*.hianime.to/*',
-  '*://*.megacloud.tv/*',
-  '*://*.vidplay.online/*',
-  '*://*.filemoon.sx/*',
-  '*://*.rabbitstream.net/*'
-];
+const CINEMA_MATCHES = DEFAULT_CINEMA_DOMAINS.flatMap((d) =>
+  d === 'localhost' || d === '127.0.0.1'
+    ? [`*://${d}/*`]
+    : [`*://*.${d}/*`, `*://${d}/*`]
+);
+
+const YOUTUBE_MATCHES = ['*://*.youtube.com/*', '*://youtube.com/*'];
 
 function getTargetConfig(mode: string) {
   if (mode === 'cinema') {
@@ -44,17 +40,7 @@ function getTargetConfig(mode: string) {
         }
       ],
       permissions: ['storage', 'unlimitedStorage', 'activeTab', 'scripting'],
-      hostPermissions: [
-        'https://translate.googleapis.com/*',
-        '*://*.rezka.ag/*',
-        '*://*.hdrezka.*/*',
-        '*://*.9anime.*/*',
-        '*://*.hianime.to/*',
-        '*://*.megacloud.tv/*',
-        '*://*.vidplay.online/*',
-        '*://*.filemoon.sx/*',
-        '*://*.rabbitstream.net/*'
-      ],
+      hostPermissions: ['https://translate.googleapis.com/*', ...CINEMA_MATCHES],
       webAccessibleMatches: ['<all_urls>']
     };
   }
@@ -69,14 +55,14 @@ function getTargetConfig(mode: string) {
       manifestDesc: 'Universal language learning tool with dual subtitles, Active Listening, FSRS flashcards, and Anki export for YouTube and online cinema streaming platforms.',
       contentScripts: [
         {
-          matches: ['*://*.youtube.com/*'],
+          matches: YOUTUBE_MATCHES,
           js: ['src/entries/interceptor-all.ts'],
           world: 'MAIN' as const,
           run_at: 'document_start' as const,
           all_frames: false
         },
         {
-          matches: ['*://*.youtube.com/*'],
+          matches: YOUTUBE_MATCHES,
           js: ['src/entries/content-all.ts'],
           world: 'ISOLATED' as const,
           run_at: 'document_idle' as const,
@@ -99,16 +85,9 @@ function getTargetConfig(mode: string) {
       ],
       permissions: ['storage', 'unlimitedStorage', 'activeTab', 'scripting'],
       hostPermissions: [
-        '*://*.youtube.com/*',
+        ...YOUTUBE_MATCHES,
         'https://translate.googleapis.com/*',
-        '*://*.rezka.ag/*',
-        '*://*.hdrezka.*/*',
-        '*://*.9anime.*/*',
-        '*://*.hianime.to/*',
-        '*://*.megacloud.tv/*',
-        '*://*.vidplay.online/*',
-        '*://*.filemoon.sx/*',
-        '*://*.rabbitstream.net/*'
+        ...CINEMA_MATCHES
       ],
       webAccessibleMatches: ['<all_urls>']
     };
@@ -124,14 +103,14 @@ function getTargetConfig(mode: string) {
     manifestDesc: 'Learn foreign languages on YouTube with dual subtitles, Active Listening mode, contextual AI breakdown, FSRS flashcards, and Anki export.',
     contentScripts: [
       {
-        matches: ['*://*.youtube.com/*'],
+        matches: YOUTUBE_MATCHES,
         js: ['src/entries/interceptor-yt.ts'],
         world: 'MAIN' as const,
         run_at: 'document_start' as const,
         all_frames: false
       },
       {
-        matches: ['*://*.youtube.com/*'],
+        matches: YOUTUBE_MATCHES,
         js: ['src/entries/content-yt.ts'],
         world: 'ISOLATED' as const,
         run_at: 'document_idle' as const,
@@ -139,11 +118,8 @@ function getTargetConfig(mode: string) {
       }
     ],
     permissions: ['storage', 'unlimitedStorage'],
-    hostPermissions: [
-      '*://*.youtube.com/*',
-      'https://translate.googleapis.com/*'
-    ],
-    webAccessibleMatches: ['*://*.youtube.com/*']
+    hostPermissions: [...YOUTUBE_MATCHES, 'https://translate.googleapis.com/*'],
+    webAccessibleMatches: YOUTUBE_MATCHES
   };
 }
 

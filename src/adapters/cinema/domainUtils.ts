@@ -2,22 +2,51 @@
  * Domain normalization and chain-matching utilities for Cinema targets.
  */
 
-export const DEFAULT_CINEMA_DOMAINS = [
+export const DEFAULT_CINEMA_DOMAINS: readonly string[] = [
+  'localhost',
+  '127.0.0.1',
   'rezka.ag',
   'hdrezka.ag',
   'hdrezka.me',
+  'hdrezka.ac',
   'hdrezka.cm',
+  'hdrezka.co',
+  'hdrezka.tv',
   'hdrezka.app',
   'hdrezka.re',
   'hdrezka-ag.com',
   '9anime.to',
   '9animetv.to',
+  '9anime.pl',
   'hianime.to',
   'megacloud.tv',
   'vidplay.online',
   'filemoon.sx',
-  'rabbitstream.net'
+  'rabbitstream.net',
+  'streamguard.cc',
+  'voidboost.net',
+  'voidboost.cc'
 ];
+
+/**
+ * Builds Chrome Match Patterns compliant with MV3 specification.
+ * Never uses invalid wildcards in TLD (*.hdrezka.* is strictly forbidden in Chrome).
+ */
+export function buildCinemaMatchPatterns(
+  domains: readonly string[] = DEFAULT_CINEMA_DOMAINS
+): string[] {
+  const patterns: string[] = [];
+  for (const domain of domains) {
+    const clean = domain.trim().toLowerCase();
+    if (!clean) continue;
+    if (clean === 'localhost' || clean === '127.0.0.1') {
+      patterns.push(`*://${clean}/*`);
+    } else {
+      patterns.push(`*://*.${clean}/*`, `*://${clean}/*`);
+    }
+  }
+  return Array.from(new Set(patterns));
+}
 
 /**
  * Normalizes a domain/URL string into a clean lowercase hostname without protocol, www., path, query, or port.
@@ -52,7 +81,7 @@ export function normalizeDomain(input: string): string {
  * Checks whether a given hostname matches any domain in the list,
  * supporting exact match and subdomain match (e.g. m.hdrezka.me matches hdrezka.me).
  */
-export function matchesDomainList(hostname: string, list: string[]): boolean {
+export function matchesDomainList(hostname: string, list: readonly string[]): boolean {
   if (!hostname || !list || list.length === 0) return false;
   const cleanHost = normalizeDomain(hostname);
   if (!cleanHost) return false;
@@ -109,8 +138,8 @@ export function getFrameChainHosts(): string[] {
 }
 
 export function shouldActivateCinema(options: {
-  allowedDomains?: string[];
-  blacklistedDomains?: string[];
+  allowedDomains?: readonly string[];
+  blacklistedDomains?: readonly string[];
   hasLongVideo?: boolean;
   currentHost?: string;
   chainHosts?: string[];

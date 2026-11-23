@@ -62,6 +62,11 @@ export const DEFAULT_CINEMA_SITES: readonly string[] = [
   'hdrezka.me',
   'hdrezka.ac',
   'hdrezka.cm',
+  'hdrezka.co',
+  'hdrezka.tv',
+  'hdrezka.app',
+  'hdrezka.re',
+  'hdrezka-ag.com',
   '9animetv.to',
   '9anime.to',
   '9anime.pl',
@@ -69,7 +74,10 @@ export const DEFAULT_CINEMA_SITES: readonly string[] = [
   'megacloud.tv',
   'vidplay.online',
   'filemoon.sx',
-  'rabbitstream.net'
+  'rabbitstream.net',
+  'streamguard.cc',
+  'voidboost.net',
+  'voidboost.cc'
 ];
 
 export const DEFAULT_SETTINGS: UserSettings = {

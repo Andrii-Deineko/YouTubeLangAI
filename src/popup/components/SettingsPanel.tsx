@@ -646,7 +646,7 @@ export function SettingsPanel({
               label: 'Enable YouTube overlay'
             },
             {
-              key: 'showDualSubtitles' as const,
+              key: 'showTranslation' as const,
               label: 'Show dual (translated) subtitles'
             },
             {

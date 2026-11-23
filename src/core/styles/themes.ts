@@ -145,12 +145,14 @@ export function getSubtitleFontSizes(
   let primary = baseSize || 20;
 
   if (scale === 'tv') {
-    primary = Math.max(primary, 36);
+    primary = Math.max(primary, 40);
   } else if (scale === 'xl') {
     primary = Math.max(primary, 28);
   }
 
-  const translatedRatio = primary >= 32 ? 0.72 : 0.78;
+  primary = Math.min(56, Math.max(12, primary));
+
+  const translatedRatio = primary >= 32 ? 0.75 : 0.8;
   const translated = Math.max(12, Math.round(primary * translatedRatio));
 
   return { primary, translated };

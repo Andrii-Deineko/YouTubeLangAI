@@ -76,7 +76,7 @@ export function App(): ReactElement {
   };
 
   const openFullscreenTrainer = (): void => {
-    const url = chrome.runtime.getURL('src/app/index.html?mode=full');
+    const url = chrome.runtime.getURL('src/popup/index.html?mode=full');
     if (chrome.tabs?.create) {
       void chrome.tabs.create({ url });
     } else {

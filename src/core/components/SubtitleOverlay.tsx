@@ -593,18 +593,19 @@ export function SubtitleOverlay({
         </div>
 
         {/* Translated Subtitle Line */}
-        {(showTranslation ?? showDualSubtitles ?? true) && Boolean(primaryCue?.translation || translatedCue?.text) && (
-          <div
-            className="ytai-blur-target mt-1 leading-snug select-none"
-            style={{
-              color: 'var(--ytai-text-secondary)',
-              fontSize: `${fontSizes.translated}px`,
-              textShadow: 'var(--ytai-text-shadow)'
-            }}
-          >
-            {primaryCue?.translation || translatedCue?.text}
-          </div>
-        )}
+        {(showTranslation ?? showDualSubtitles ?? true) &&
+          Boolean(primaryCue?.translation || translatedCue?.translation || translatedCue?.text) && (
+            <div
+              className="ytai-blur-target mt-1 leading-snug select-none"
+              style={{
+                color: 'var(--ytai-text-secondary)',
+                fontSize: `${fontSizes.translated}px`,
+                textShadow: 'var(--ytai-text-shadow)'
+              }}
+            >
+              {primaryCue?.translation || translatedCue?.translation || translatedCue?.text}
+            </div>
+          )}
       </div>
     </div>
   );

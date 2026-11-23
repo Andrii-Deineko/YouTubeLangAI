@@ -30,6 +30,8 @@ export interface UserSettings {
   showTranslation: boolean;
   activeListeningMode: ActiveListeningMode;
   pauseOnAltReveal: boolean;
+  pauseOnAltHold: boolean;
+  pauseTimerSeconds: number;
   autoPauseAfterCue: boolean;
   autoPauseOnWordClick: boolean;
   autoHideControls: boolean;
@@ -90,6 +92,8 @@ export const DEFAULT_SETTINGS: UserSettings = {
   showTranslation: true,
   activeListeningMode: 'off',
   pauseOnAltReveal: false,
+  pauseOnAltHold: true,
+  pauseTimerSeconds: 0,
   autoPauseAfterCue: false,
   autoPauseOnWordClick: true,
   autoHideControls: true,

@@ -8,7 +8,8 @@ import {
   PauseCircle,
   Power,
   RotateCcw,
-  Sparkles
+  Sparkles,
+  Timer
 } from 'lucide-react';
 import type { ActiveListeningMode, ControlsScale, UserSettings } from '../types/settings';
 import type { TrackMetadata } from '../types/subtitles';
@@ -118,8 +119,70 @@ export function PlayerControls({
   const [isPaused, setIsPaused] = useState(false);
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
   const [hoveredModeId, setHoveredModeId] = useState<ActiveListeningMode | null>(null);
+  const [isTimerMenuOpen, setIsTimerMenuOpen] = useState(false);
+  const [customTimerInput, setCustomTimerInput] = useState('');
 
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
+  const timerMenuRef = useRef<HTMLDivElement | null>(null);
+  const modeLeaveTimeoutRef = useRef<number | null>(null);
+  const timerLeaveTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (modeLeaveTimeoutRef.current !== null) {
+        window.clearTimeout(modeLeaveTimeoutRef.current);
+      }
+      if (timerLeaveTimeoutRef.current !== null) {
+        window.clearTimeout(timerLeaveTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleModeMouseEnter = (): void => {
+    if (modeLeaveTimeoutRef.current !== null) {
+      window.clearTimeout(modeLeaveTimeoutRef.current);
+      modeLeaveTimeoutRef.current = null;
+    }
+    setIsModeMenuOpen(true);
+  };
+
+  const handleModeMouseLeave = (): void => {
+    if (modeLeaveTimeoutRef.current !== null) {
+      window.clearTimeout(modeLeaveTimeoutRef.current);
+    }
+    modeLeaveTimeoutRef.current = window.setTimeout(() => {
+      setIsModeMenuOpen(false);
+      setHoveredModeId(null);
+      modeLeaveTimeoutRef.current = null;
+    }, 150);
+  };
+
+  const handleTimerMouseEnter = (): void => {
+    if (timerLeaveTimeoutRef.current !== null) {
+      window.clearTimeout(timerLeaveTimeoutRef.current);
+      timerLeaveTimeoutRef.current = null;
+    }
+    setIsTimerMenuOpen(true);
+  };
+
+  const handleTimerMouseLeave = (): void => {
+    if (timerLeaveTimeoutRef.current !== null) {
+      window.clearTimeout(timerLeaveTimeoutRef.current);
+    }
+    timerLeaveTimeoutRef.current = window.setTimeout(() => {
+      setIsTimerMenuOpen(false);
+      timerLeaveTimeoutRef.current = null;
+    }, 150);
+  };
+
+  const handleCustomTimerSubmit = (): void => {
+    const val = parseInt(customTimerInput.trim(), 10);
+    if (!isNaN(val) && val >= 1 && val <= 300) {
+      onUpdateSettings({ pauseTimerSeconds: val, autoPauseAfterCue: true });
+      setIsTimerMenuOpen(false);
+      setCustomTimerInput('');
+    }
+  };
 
   useEffect(() => {
     const playerEl =
@@ -167,7 +230,7 @@ export function PlayerControls({
   }, []);
 
   useEffect(() => {
-    if (!isModeMenuOpen) return;
+    if (!isModeMenuOpen && !isTimerMenuOpen) return;
 
     const handleDocumentClick = (e: MouseEvent): void => {
       const path = e.composedPath();
@@ -175,11 +238,15 @@ export function PlayerControls({
         setIsModeMenuOpen(false);
         setHoveredModeId(null);
       }
+      if (timerMenuRef.current && !path.includes(timerMenuRef.current)) {
+        setIsTimerMenuOpen(false);
+      }
     };
 
     const handleDocumentKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
         setIsModeMenuOpen(false);
+        setIsTimerMenuOpen(false);
         setHoveredModeId(null);
       }
     };
@@ -190,7 +257,7 @@ export function PlayerControls({
       document.removeEventListener('mousedown', handleDocumentClick);
       document.removeEventListener('keydown', handleDocumentKeyDown);
     };
-  }, [isModeMenuOpen]);
+  }, [isModeMenuOpen, isTimerMenuOpen]);
 
   const shouldAutoHide = settings.autoHideControls ?? true;
   const isVisible =
@@ -199,6 +266,7 @@ export function PlayerControls({
     !isYtAutohide ||
     isHovered ||
     isModeMenuOpen ||
+    isTimerMenuOpen ||
     Boolean(altPressed) ||
     Boolean(hasActivePopup);
 
@@ -309,8 +377,13 @@ export function PlayerControls({
             <Languages size={scale.iconSize} />
           </button>
 
-          {/* Split-button: Subtitle Perception Mode (Icon click = cycle, Chevron click = dropdown) */}
-          <div className="relative" ref={modeMenuRef}>
+          {/* Split-button: Subtitle Perception Mode (Icon click = cycle, Hover = dropdown) */}
+          <div
+            className="relative"
+            ref={modeMenuRef}
+            onMouseEnter={handleModeMouseEnter}
+            onMouseLeave={handleModeMouseLeave}
+          >
             <div
               className="flex items-center rounded-full transition"
               style={
@@ -409,7 +482,7 @@ export function PlayerControls({
                   if (!hoveredMode) return null;
                   return (
                     <div
-                      className="absolute right-0 top-full mt-2 w-64 rounded-xl border p-2.5 text-xs shadow-2xl backdrop-blur-md pointer-events-none z-40 select-none animate-in fade-in duration-150"
+                      className="absolute right-0 top-full mt-2 w-64 rounded-xl border p-2.5 text-xs shadow-2xl backdrop-blur-md pointer-events-none z-50 select-none animate-in fade-in duration-150"
                       style={{
                         backgroundColor: 'rgba(15, 17, 23, 0.96)',
                         borderColor: 'rgba(255, 255, 255, 0.16)',
@@ -440,6 +513,121 @@ export function PlayerControls({
           >
             <PauseCircle size={scale.iconSize} />
           </button>
+
+          {/* Pause Timer Control (Hover dropdown) */}
+          <div
+            className="relative"
+            ref={timerMenuRef}
+            onMouseEnter={handleTimerMouseEnter}
+            onMouseLeave={handleTimerMouseLeave}
+          >
+            <button
+              type="button"
+              title={
+                settings.pauseTimerSeconds > 0
+                  ? `Таймер автопаузы: ${settings.pauseTimerSeconds}с (наведите для выбора)`
+                  : 'Таймер автопаузы (наведите для выбора)'
+              }
+              onClick={() => {
+                if (settings.pauseTimerSeconds > 0) {
+                  onUpdateSettings({ pauseTimerSeconds: 0 });
+                } else {
+                  onUpdateSettings({ pauseTimerSeconds: 3, autoPauseAfterCue: true });
+                }
+              }}
+              style={settings.pauseTimerSeconds > 0 ? activeStyle : inactiveStyle}
+              className={`flex items-center gap-1 rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)]`}
+            >
+              <Timer size={scale.iconSize} />
+              {settings.pauseTimerSeconds > 0 && (
+                <span className="font-mono text-[10px] font-bold leading-none tracking-tight pr-0.5">
+                  {settings.pauseTimerSeconds}с
+                </span>
+              )}
+            </button>
+
+            {isTimerMenuOpen && (
+              <div
+                className={`absolute right-0 top-full mt-1.5 z-30 w-44 rounded-2xl border ${scale.dropdownPadClass} p-2 shadow-2xl backdrop-blur-md select-none`}
+                style={{
+                  backgroundColor: 'rgba(15, 17, 23, 0.96)',
+                  borderColor: 'rgba(255, 255, 255, 0.16)',
+                  color: 'var(--ytai-text-primary)'
+                }}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  Снятие автопаузы
+                </div>
+
+                <div className="space-y-0.5">
+                  {[
+                    { label: 'Выкл', sec: 0 },
+                    { label: '3 сек', sec: 3 },
+                    { label: '5 сек', sec: 5 },
+                    { label: '10 сек', sec: 10 }
+                  ].map((opt) => {
+                    const isSelected = (settings.pauseTimerSeconds ?? 0) === opt.sec;
+                    return (
+                      <button
+                        key={opt.label}
+                        type="button"
+                        onClick={() => {
+                          onUpdateSettings({
+                            pauseTimerSeconds: opt.sec,
+                            ...(opt.sec > 0 ? { autoPauseAfterCue: true } : {})
+                          });
+                          setIsTimerMenuOpen(false);
+                        }}
+                        className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-xs transition hover:bg-white/10"
+                        style={
+                          isSelected
+                            ? { color: 'var(--ytai-accent)', fontWeight: 600 }
+                            : { color: 'var(--ytai-text-primary)' }
+                        }
+                      >
+                        <span>{opt.label}</span>
+                        {isSelected && <span className="text-[10px] font-bold">✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Custom duration option */}
+                <div className="mt-1.5 border-t border-white/10 pt-1.5">
+                  <div className="mb-1 px-2 text-[10px] text-slate-400">Свой вариант:</div>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleCustomTimerSubmit();
+                    }}
+                    className="flex items-center gap-1 px-1"
+                  >
+                    <input
+                      type="number"
+                      min={1}
+                      max={300}
+                      placeholder="сек"
+                      value={customTimerInput}
+                      onChange={(e) => setCustomTimerInput(e.target.value)}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      onKeyUp={(e) => e.stopPropagation()}
+                      onKeyPress={(e) => e.stopPropagation()}
+                      className="w-16 rounded-lg border border-white/10 bg-slate-900/90 px-2 py-1 text-xs text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
+                    />
+                    <button
+                      type="submit"
+                      className="rounded-lg px-2.5 py-1 text-xs font-semibold text-white transition hover:opacity-90"
+                      style={{ backgroundColor: 'var(--ytai-accent)' }}
+                    >
+                      OK
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
+          </div>
 
           <button
             type="button"

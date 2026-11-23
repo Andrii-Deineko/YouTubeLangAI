@@ -45,6 +45,7 @@ export class ContentRunner {
   private unsubscribeSettings: (() => void) | null = null;
   private domObserver: MutationObserver | null = null;
   private runtimeMessageListener: ((message: unknown) => void) | null = null;
+  private navFinishListener: (() => void) | null = null;
   private isDestroyed = false;
 
   constructor(adapter: PlatformAdapter) {
@@ -161,10 +162,20 @@ export class ContentRunner {
 
     this.attachToPlayer();
     this.setupDomObserver();
+
+    this.navFinishListener = () => {
+      this.videoController?.clearPauseTimer();
+      this.closePopupAndResume(false);
+    };
+    window.addEventListener('yt-navigate-finish', this.navFinishListener);
   }
 
   destroy(): void {
     this.isDestroyed = true;
+    if (this.navFinishListener) {
+      window.removeEventListener('yt-navigate-finish', this.navFinishListener);
+      this.navFinishListener = null;
+    }
     if (this.runtimeMessageListener && typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
       chrome.runtime.onMessage.removeListener(this.runtimeMessageListener);
       this.runtimeMessageListener = null;
@@ -223,6 +234,10 @@ export class ContentRunner {
         ) {
           this.lastAutoPausedCueId = this.activePrimaryCue.id;
           this.videoController.pauseVideo();
+          const timerSec = this.settings.pauseTimerSeconds ?? 0;
+          if (timerSec > 0) {
+            this.videoController.schedulePauseTimer(timerSec);
+          }
         }
 
         if (
@@ -260,6 +275,8 @@ export class ContentRunner {
           this.renderUI();
         }
       },
+      shouldPauseOnAltHold: () => this.settings.pauseOnAltHold ?? true,
+      getPauseTimerSeconds: () => this.settings.pauseTimerSeconds ?? 0,
       isPopupOpen: () => this.selectedSelection !== null,
       hasCues: () => this.primaryEngine.getCues().length > 0,
       isOverlayEnabled: () => this.settings.enabled,
@@ -392,6 +409,7 @@ export class ContentRunner {
   }
 
   private handleSelectTarget(selection: WordSelectionPayload): void {
+    this.videoController?.clearPauseTimer();
     this.videoController?.pauseOnInspect();
     this.selectedSelection = selection;
     this.renderUI();

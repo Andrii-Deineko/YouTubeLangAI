@@ -198,6 +198,16 @@ export function mergeSettings(
     showTranslation,
     activeListeningMode,
     pauseOnAltReveal: raw?.pauseOnAltReveal ?? DEFAULT_SETTINGS.pauseOnAltReveal,
+    pauseOnAltHold:
+      typeof raw?.pauseOnAltHold === 'boolean'
+        ? raw.pauseOnAltHold
+        : DEFAULT_SETTINGS.pauseOnAltHold,
+    pauseTimerSeconds:
+      typeof raw?.pauseTimerSeconds === 'number'
+        ? Math.max(0, Math.min(300, raw.pauseTimerSeconds))
+        : typeof (raw as { autoPauseResumeDelaySec?: number })?.autoPauseResumeDelaySec === 'number'
+          ? Math.max(0, Math.min(300, (raw as { autoPauseResumeDelaySec?: number }).autoPauseResumeDelaySec!))
+          : DEFAULT_SETTINGS.pauseTimerSeconds,
     autoPauseAfterCue,
     autoPauseOnWordClick:
       raw?.autoPauseOnWordClick ?? DEFAULT_SETTINGS.autoPauseOnWordClick,

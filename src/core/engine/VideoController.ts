@@ -10,6 +10,8 @@ export interface VideoControllerCallbacks {
   onClosePopup: () => void;
   onAltKeyChange: (pressed: boolean) => void;
   onAdjustFontSize?: (delta: number) => void;
+  shouldPauseOnAltHold?: () => boolean;
+  getPauseTimerSeconds?: () => number;
   isPopupOpen: () => boolean;
   hasCues: () => boolean;
   isOverlayEnabled: () => boolean;
@@ -22,6 +24,9 @@ export class VideoController {
   private wasPlayingBeforePopup = false;
   private inspecting = false;
   private resumingProgrammatically = false;
+  private pausedByAlt = false;
+  private pauseTimerTimeoutId: number | null = null;
+  private programmaticPause = false;
   private callbacks: VideoControllerCallbacks;
   private windowAbortController: AbortController | null = null;
   private videoAbortController: AbortController | null = null;
@@ -48,7 +53,10 @@ export class VideoController {
     );
     window.addEventListener(
       'blur',
-      () => this.callbacks.onAltKeyChange(false),
+      () => {
+        this.callbacks.onAltKeyChange(false);
+        this.handleAltRelease();
+      },
       { signal: controller.signal }
     );
   }
@@ -57,6 +65,7 @@ export class VideoController {
     if (this.video === videoElement && this.rafId !== null) return;
 
     this.stopLoop();
+    this.clearPauseTimer();
     this.videoAbortController?.abort();
     this.videoAbortController = null;
     this.video = videoElement;
@@ -69,9 +78,28 @@ export class VideoController {
       this.video.addEventListener(
         'play',
         () => {
+          this.clearPauseTimer();
           if (this.inspecting && !this.resumingProgrammatically) {
             this.wasPlayingBeforePopup = false;
           }
+        },
+        { signal: videoCtrl.signal }
+      );
+
+      this.video.addEventListener(
+        'pause',
+        () => {
+          if (!this.programmaticPause) {
+            this.clearPauseTimer();
+          }
+        },
+        { signal: videoCtrl.signal }
+      );
+
+      this.video.addEventListener(
+        'seeking',
+        () => {
+          this.clearPauseTimer();
         },
         { signal: videoCtrl.signal }
       );
@@ -101,13 +129,19 @@ export class VideoController {
   }
 
   public pauseForInspection(): void {
+    this.pausedByAlt = false;
+    this.clearPauseTimer();
     if (!this.video) return;
     if (!this.inspecting) {
       this.wasPlayingBeforePopup = !this.video.paused;
       this.inspecting = true;
     }
     if (!this.video.paused) {
+      this.programmaticPause = true;
       this.video.pause();
+      window.setTimeout(() => {
+        this.programmaticPause = false;
+      }, 50);
     }
   }
 
@@ -116,6 +150,7 @@ export class VideoController {
       allowAutoResume && this.inspecting && this.wasPlayingBeforePopup;
     this.inspecting = false;
     this.wasPlayingBeforePopup = false;
+    this.pausedByAlt = false;
 
     if (shouldResume && this.video && this.video.paused) {
       this.resumingProgrammatically = true;
@@ -132,6 +167,8 @@ export class VideoController {
     this.inspecting = false;
     this.wasPlayingBeforePopup = false;
     this.resumingProgrammatically = false;
+    this.pausedByAlt = false;
+    this.clearPauseTimer();
   }
 
   public pauseOnInspect(): void {
@@ -148,15 +185,54 @@ export class VideoController {
 
   public seekToAndPlay(timeSec: number): void {
     if (!this.video) return;
+    this.clearPauseTimer();
     this.video.currentTime = Math.max(0, timeSec);
     if (this.video.paused) {
       void this.video.play().catch(() => undefined);
     }
   }
 
-  public pauseVideo(): void {
+  public pauseVideo(isProgrammatic = true): void {
     if (this.video && !this.video.paused) {
+      if (isProgrammatic) {
+        this.programmaticPause = true;
+      }
       this.video.pause();
+      if (isProgrammatic) {
+        window.setTimeout(() => {
+          this.programmaticPause = false;
+        }, 50);
+      }
+    }
+  }
+
+  public schedulePauseTimer(seconds: number): void {
+    this.clearPauseTimer();
+    if (seconds <= 0 || !this.video) return;
+    this.pauseTimerTimeoutId = window.setTimeout(() => {
+      this.pauseTimerTimeoutId = null;
+      if (
+        this.video &&
+        this.video.paused &&
+        !this.inspecting &&
+        !this.pausedByAlt &&
+        !this.callbacks.isPopupOpen()
+      ) {
+        this.resumingProgrammatically = true;
+        void this.video
+          .play()
+          .catch(() => undefined)
+          .finally(() => {
+            this.resumingProgrammatically = false;
+          });
+      }
+    }, seconds * 1000);
+  }
+
+  public clearPauseTimer(): void {
+    if (this.pauseTimerTimeoutId !== null) {
+      window.clearTimeout(this.pauseTimerTimeoutId);
+      this.pauseTimerTimeoutId = null;
     }
   }
 
@@ -276,7 +352,8 @@ export class VideoController {
   }
 
   private handleKeyDown(e: KeyboardEvent): void {
-    // 1. If focus is inside input, textarea, or contentEditable -> do not intercept
+    // 1. If key is repeating or focus is inside input, textarea, or contentEditable -> do not intercept
+    if (e.repeat) return;
     if (this.isEditableEvent(e)) return;
 
     // 2. Allow Escape to close WordPopup even if subtitles are inactive
@@ -287,13 +364,35 @@ export class VideoController {
       return;
     }
 
-    // 3. If overlay is disabled, video has no loaded subtitles (cues.length === 0), or an ad is showing -> return
-    if (!this.hasActiveSubtitles()) {
+    // 3. Alt key handling: prevent system menu focus and manage Alt-hold auto-pause
+    if (e.key === 'Alt') {
+      e.preventDefault();
+      this.callbacks.onAltKeyChange(true);
+
+      const isOverlay = this.callbacks.isOverlayEnabled ? this.callbacks.isOverlayEnabled() : true;
+      if (!isOverlay || this.isAdPlaying()) {
+        return;
+      }
+
+      const shouldPause = this.callbacks.shouldPauseOnAltHold
+        ? this.callbacks.shouldPauseOnAltHold()
+        : true;
+
+      if (shouldPause && this.video && !this.video.paused && !this.video.ended) {
+        this.pausedByAlt = true;
+        this.programmaticPause = true;
+        this.video.pause();
+        window.setTimeout(() => {
+          this.programmaticPause = false;
+        }, 50);
+      } else {
+        this.pausedByAlt = false;
+      }
       return;
     }
 
-    if (e.key === 'Alt') {
-      this.callbacks.onAltKeyChange(true);
+    // 4. If overlay is disabled, video has no loaded subtitles (cues.length === 0), or an ad is showing -> return
+    if (!this.hasActiveSubtitles()) {
       return;
     }
 
@@ -365,6 +464,23 @@ export class VideoController {
   private handleKeyUp(e: KeyboardEvent): void {
     if (e.key === 'Alt') {
       this.callbacks.onAltKeyChange(false);
+      this.handleAltRelease();
+    }
+  }
+
+  private handleAltRelease(): void {
+    if (this.pausedByAlt) {
+      const isPopupOpen = this.inspecting || this.callbacks.isPopupOpen();
+      if (!isPopupOpen && this.video && this.video.paused) {
+        this.resumingProgrammatically = true;
+        void this.video
+          .play()
+          .catch(() => undefined)
+          .finally(() => {
+            this.resumingProgrammatically = false;
+          });
+      }
+      this.pausedByAlt = false;
     }
   }
 }

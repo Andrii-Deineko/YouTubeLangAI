@@ -957,6 +957,10 @@ export function SettingsPanel({
               label: 'Auto-hide top control bar on inactivity'
             },
             {
+              key: 'pauseOnAltHold' as const,
+              label: 'Автопауза при удержании Alt (продолжение при отпускании)'
+            },
+            {
               key: 'autoPauseAfterCue' as const,
               label: 'Auto-pause after each subtitle cue'
             },
@@ -981,6 +985,46 @@ export function SettingsPanel({
               />
             </label>
           ))}
+        </div>
+
+        {/* Pause Timer Selector */}
+        <div className="pt-1">
+          <div className="mb-1.5 flex items-center justify-between text-[11px] text-slate-400">
+            <span>Таймер автопаузы / автопродолжения</span>
+            <span className="font-semibold text-slate-200">
+              {settings.pauseTimerSeconds > 0 ? `${settings.pauseTimerSeconds}с` : 'Выкл'}
+            </span>
+          </div>
+          <div className="grid grid-cols-4 gap-1.5 rounded-xl border border-white/10 bg-slate-950/70 p-1">
+            {[
+              { label: 'Выкл', val: 0 },
+              { label: '3 сек', val: 3 },
+              { label: '5 сек', val: 5 },
+              { label: '10 сек', val: 10 }
+            ].map((opt) => {
+              const active = (settings.pauseTimerSeconds ?? 0) === opt.val;
+              return (
+                <button
+                  key={opt.val}
+                  type="button"
+                  onClick={() =>
+                    void onUpdateSettings({
+                      pauseTimerSeconds: opt.val,
+                      ...(opt.val > 0 ? { autoPauseAfterCue: true } : {})
+                    })
+                  }
+                  className={`flex items-center justify-center rounded-lg py-1.5 text-xs transition ${
+                    active
+                      ? 'bg-white/15 font-semibold text-white shadow-sm'
+                      : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                  }`}
+                  style={active ? { color: 'var(--ytai-accent)' } : undefined}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </section>
 

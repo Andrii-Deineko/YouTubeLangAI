@@ -2,13 +2,13 @@ import { useEffect, useRef, useState, type ReactElement } from 'react';
 import {
   ChevronDown,
   Eye,
-  EyeOff,
   Ghost,
   Languages,
   Move,
   PauseCircle,
   Power,
-  RotateCcw
+  RotateCcw,
+  Sparkles
 } from 'lucide-react';
 import type { ActiveListeningMode, ControlsScale, UserSettings } from '../../types/settings';
 import type { TrackMetadata } from '../../types/subtitles';
@@ -91,7 +91,7 @@ const LISTENING_MODES: Array<{
     label: 'Active Listening (Размытие)',
     description:
       'Текст размыт для тренировки слуха; проявляется при наведении мыши или удержании Alt.',
-    icon: EyeOff
+    icon: Sparkles
   },
   {
     id: 'hidden',
@@ -240,12 +240,12 @@ export function PlayerControls({
   };
 
   const activeStyle: React.CSSProperties = {
-    backgroundColor: 'var(--ai-accent, var(--ytai-accent))',
-    color: 'var(--ai-accent-fg, var(--ytai-accent-fg, #ffffff))'
+    backgroundColor: 'var(--ytai-accent)',
+    color: 'var(--ytai-accent-fg, #ffffff)'
   };
 
   const inactiveStyle: React.CSSProperties = {
-    color: 'var(--ai-text-secondary, var(--ytai-text-secondary))'
+    color: 'var(--ytai-text-secondary)'
   };
 
   return (
@@ -254,13 +254,13 @@ export function PlayerControls({
         isVisible ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
       }`}
       style={{
-        backgroundColor: `rgba(var(--ai-bg-rgb, var(--ytai-bg-rgb, 15, 17, 23)), 0.88)`,
-        borderColor: 'var(--ai-border, var(--ytai-border))',
+        backgroundColor: `rgba(var(--ytai-bg-rgb), 0.88)`,
+        borderColor: 'var(--ytai-border)',
         borderWidth: '1px',
         borderStyle: 'solid',
-        backdropFilter: 'var(--ai-backdrop, blur(var(--ytai-backdrop-blur, 12px)))',
-        WebkitBackdropFilter: 'var(--ai-backdrop, blur(var(--ytai-backdrop-blur, 12px)))',
-        color: 'var(--ai-text-primary, var(--ytai-text-primary))'
+        backdropFilter: 'blur(var(--ytai-backdrop-blur, 12px))',
+        WebkitBackdropFilter: 'blur(var(--ytai-backdrop-blur, 12px))',
+        color: 'var(--ytai-text-primary)'
       }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -275,8 +275,8 @@ export function PlayerControls({
           settings.enabled
             ? activeStyle
             : {
-                backgroundColor: 'var(--ai-surface, var(--ytai-surface))',
-                color: 'var(--ai-text-secondary, var(--ytai-text-secondary))'
+                backgroundColor: 'var(--ytai-surface)',
+                color: 'var(--ytai-text-secondary)'
               }
         }
         className={`flex items-center gap-1 rounded-full ${scale.powerBtnPadClass} font-medium transition hover:opacity-90 shadow-sm`}
@@ -317,7 +317,7 @@ export function PlayerControls({
                   ? activeStyle
                   : {
                       backgroundColor: 'transparent',
-                      color: 'var(--ai-text-secondary, var(--ytai-text-secondary))'
+                      color: 'var(--ytai-text-secondary)'
                     }
               }
             >
@@ -331,7 +331,7 @@ export function PlayerControls({
                 {settings.activeListeningMode === 'hidden' ? (
                   <Ghost size={scale.iconSize} />
                 ) : settings.activeListeningMode === 'blur' ? (
-                  <EyeOff size={scale.iconSize} />
+                  <Sparkles size={scale.iconSize} />
                 ) : (
                   <Eye size={scale.iconSize} />
                 )}
@@ -343,7 +343,7 @@ export function PlayerControls({
                   backgroundColor:
                     settings.activeListeningMode !== 'off'
                       ? 'currentColor'
-                      : 'var(--ai-border, var(--ytai-border, rgba(255,255,255,0.2)))'
+                      : 'var(--ytai-border, rgba(255,255,255,0.2))'
                 }}
               />
 
@@ -372,8 +372,8 @@ export function PlayerControls({
               <div
                 className={`absolute right-0 top-full mt-1.5 z-30 flex items-center gap-1.5 rounded-2xl border ${scale.dropdownPadClass} shadow-2xl backdrop-blur-md select-none`}
                 style={{
-                  backgroundColor: 'var(--ai-surface, var(--ytai-surface, rgba(15, 17, 23, 0.95)))',
-                  borderColor: 'var(--ai-border, var(--ytai-border, rgba(255, 255, 255, 0.16)))'
+                  backgroundColor: 'rgba(15, 17, 23, 0.95)',
+                  borderColor: 'rgba(255, 255, 255, 0.16)'
                 }}
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
@@ -410,9 +410,9 @@ export function PlayerControls({
                     <div
                       className="absolute right-0 top-full mt-2 w-64 rounded-xl border p-2.5 text-xs shadow-2xl backdrop-blur-md pointer-events-none z-40 select-none animate-in fade-in duration-150"
                       style={{
-                        backgroundColor: 'var(--ai-surface, var(--ytai-surface, rgba(15, 17, 23, 0.96)))',
-                        borderColor: 'var(--ai-border, var(--ytai-border, rgba(255, 255, 255, 0.16)))',
-                        color: 'var(--ai-text-primary, var(--ytai-text-primary))'
+                        backgroundColor: 'rgba(15, 17, 23, 0.96)',
+                        borderColor: 'rgba(255, 255, 255, 0.16)',
+                        color: 'var(--ytai-text-primary)'
                       }}
                     >
                       <div className="font-semibold text-white">
@@ -454,8 +454,8 @@ export function PlayerControls({
           <div
             className="flex items-center rounded-full border px-1 py-0.5"
             style={{
-              backgroundColor: 'var(--ai-surface, var(--ytai-surface))',
-              borderColor: 'var(--ai-border, var(--ytai-border))'
+              backgroundColor: 'var(--ytai-surface)',
+              borderColor: 'var(--ytai-border)'
             }}
           >
             <button
@@ -472,7 +472,7 @@ export function PlayerControls({
               type="button"
               onClick={handleToggleTvPreset}
               className={`px-1 ${scale.textClass} font-bold tracking-tight transition hover:opacity-80`}
-              style={{ color: 'var(--ai-accent, var(--ytai-accent))' }}
+              style={{ color: 'var(--ytai-accent)' }}
               title={`Размер шрифта: ${currentFontSize}px (кликните для переключения Standard / TV)`}
             >
               {currentFontSize}
@@ -495,7 +495,7 @@ export function PlayerControls({
               type="button"
               title="Reset subtitle position to default (center bottom)"
               onClick={onResetPosition}
-              style={{ color: 'var(--ai-accent, var(--ytai-accent))' }}
+              style={{ color: 'var(--ytai-accent)' }}
               className={`rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)] hover:text-white`}
             >
               <Move size={scale.iconSize} />
@@ -506,9 +506,9 @@ export function PlayerControls({
             <span
               className={`ml-0.5 rounded-full ${scale.badgeClass} font-medium uppercase tracking-wide border`}
               style={{
-                backgroundColor: 'var(--ai-surface, var(--ytai-surface))',
-                borderColor: 'var(--ai-border, var(--ytai-border))',
-                color: 'var(--ai-text-secondary, var(--ytai-text-secondary))'
+                backgroundColor: 'var(--ytai-surface)',
+                borderColor: 'var(--ytai-border)',
+                color: 'var(--ytai-text-secondary)'
               }}
             >
               {trackMeta.lang}

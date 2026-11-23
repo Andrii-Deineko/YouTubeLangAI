@@ -81,9 +81,9 @@ export const THEMES: Record<ThemeId, ThemeDefinition> = {
     accentRgb: '249, 115, 22',
     accentFg: '#FFFFFF',
     border: 'rgba(245, 245, 244, 0.12)',
-    surface: 'rgba(38, 33, 30, 0.96)',
-    textShadow: 'none',
-    backdropBlur: '12px',
+    surface: 'rgba(41, 37, 36, 0.85)',
+    textShadow: '0 1px 3px rgba(0, 0, 0, 0.6)',
+    backdropBlur: '10px',
     previewOriginal: 'Comfort for your eyes',
     previewTranslation: 'Комфорт для вечерних глаз'
   },
@@ -114,46 +114,46 @@ export const THEME_LIST: ThemeDefinition[] = [
   THEMES['emerald-noir']
 ];
 
-export const SUBTITLE_SCALES: ReadonlyArray<{
+export interface SubtitleScaleOption {
   id: SubtitleScale;
   label: string;
   name: string;
   primary: number;
   translated: number;
-}> = [
-  { id: 'sm', label: 'S', name: 'Маленький (16px)', primary: 16, translated: 12 },
-  { id: 'md', label: 'M', name: 'Средний (20px)', primary: 20, translated: 15 },
-  { id: 'lg', label: 'L', name: 'Большой (28px)', primary: 28, translated: 21 },
-  { id: 'xl', label: 'XL', name: 'Крупный (36px)', primary: 36, translated: 27 },
-  { id: 'tv', label: 'TV', name: 'Телевизор (48px)', primary: 48, translated: 36 }
+}
+
+export const SUBTITLE_SCALES: SubtitleScaleOption[] = [
+  { id: 'sm', label: 'S · 16px', name: 'Компактный', primary: 16, translated: 12 },
+  { id: 'md', label: 'M · 20px', name: 'Стандартный', primary: 20, translated: 15 },
+  { id: 'lg', label: 'L · 24px', name: 'Крупный', primary: 24, translated: 18 },
+  { id: 'xl', label: 'XL · 32px', name: 'Большой экран', primary: 32, translated: 23 },
+  { id: 'tv', label: 'TV · 40px', name: 'TV / Диван', primary: 40, translated: 28 }
 ];
 
-export function getSubtitleFontSizes(
-  fontSizeOrScale?: number | SubtitleScale,
-  scaleOrFallback?: SubtitleScale | number
-): { primary: number; translated: number } {
-  let primary = 20;
+export const SCALE_FONT_SIZE_MAP: Record<SubtitleScale, number> = {
+  sm: 16,
+  md: 20,
+  lg: 24,
+  xl: 32,
+  tv: 40
+};
 
-  if (typeof fontSizeOrScale === 'number' && fontSizeOrScale > 0) {
-    primary = Math.min(56, Math.max(14, fontSizeOrScale));
-  } else if (typeof scaleOrFallback === 'number' && scaleOrFallback > 0) {
-    primary = Math.min(56, Math.max(14, scaleOrFallback));
-  } else if (typeof fontSizeOrScale === 'string') {
-    const match = SUBTITLE_SCALES.find((s) => s.id === fontSizeOrScale);
-    if (match) {
-      primary = match.primary;
-    }
-  } else if (typeof scaleOrFallback === 'string') {
-    const match = SUBTITLE_SCALES.find((s) => s.id === scaleOrFallback);
-    if (match) {
-      primary = match.primary;
-    }
+export function getSubtitleFontSizes(
+  baseSize: number,
+  scale: SubtitleScale = 'md'
+): { primary: number; translated: number } {
+  let primary = baseSize || 20;
+
+  if (scale === 'tv') {
+    primary = Math.max(primary, 36);
+  } else if (scale === 'xl') {
+    primary = Math.max(primary, 28);
   }
 
-  return {
-    primary,
-    translated: Math.max(12, Math.round(primary * 0.75))
-  };
+  const translatedRatio = primary >= 32 ? 0.72 : 0.78;
+  const translated = Math.max(12, Math.round(primary * translatedRatio));
+
+  return { primary, translated };
 }
 
 export function getThemeCssVariables(
@@ -175,7 +175,6 @@ export function getThemeCssVariables(
     '--ytai-text-shadow': theme.textShadow,
     '--ytai-backdrop-blur': theme.backdropBlur,
 
-    // Aliases for --ai-*
     '--ai-bg-rgb': theme.bgRgb,
     '--ai-bg-opacity': String(overlayOpacity),
     '--ai-text-primary': theme.textPrimary,

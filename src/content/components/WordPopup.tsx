@@ -22,7 +22,7 @@ import type {
   RuntimeRequest
 } from '../../types/messages';
 import type { UserSettings } from '../../types/settings';
-import type { AIExplanation, QuickTranslationResult } from '../../types/vocabulary';
+import type { AIExample, AIExplanation, QuickTranslationResult } from '../../types/vocabulary';
 import type { WordSelectionPayload } from './SubtitleOverlay';
 
 interface WordPopupProps {
@@ -59,7 +59,7 @@ function renderHighlightedSentence(sentence: string, targetWord: string): ReactN
         <span
           key={index}
           className="font-semibold underline decoration-2 underline-offset-2"
-          style={{ color: 'var(--ai-accent, var(--ytai-accent))' }}
+          style={{ color: 'var(--ytai-accent)' }}
         >
           {part}
         </span>
@@ -183,32 +183,11 @@ export function WordPopup({
   const [aiResult, setAiResult] = useState<AIExplanation | null>(null);
   const [saving, setSaving] = useState(false);
   const [showExamples, setShowExamples] = useState(false);
-  const [popupHintVisible, setPopupHintVisible] = useState(false);
 
   const activeRequestKeyRef = useRef('');
   const popupRef = useRef<HTMLDivElement | null>(null);
-  const popupHintTimerRef = useRef<number | null>(null);
-
-  const showPopupHint = useCallback((): void => {
-    setPopupHintVisible(true);
-    if (popupHintTimerRef.current !== null) {
-      window.clearTimeout(popupHintTimerRef.current);
-    }
-    popupHintTimerRef.current = window.setTimeout(() => {
-      setPopupHintVisible(false);
-      popupHintTimerRef.current = null;
-    }, 4000);
-  }, []);
 
   const requestKey = `${videoId}:${selection.cue.id}:${selection.target}`;
-
-  useEffect(() => {
-    return () => {
-      if (popupHintTimerRef.current !== null) {
-        window.clearTimeout(popupHintTimerRef.current);
-      }
-    };
-  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -321,16 +300,13 @@ export function WordPopup({
       (settings.llm?.apiKey && settings.llm.apiKey.trim().length > 0)
   );
 
-  const handleOpenPopup = useCallback(async (): Promise<void> => {
+  const handleOpenPopup = async (): Promise<void> => {
     try {
-      const res = await sendRuntimeMessage<{ ok: boolean }>({ type: 'OPEN_EXTENSION_POPUP' });
-      if (!res || !res.ok) {
-        showPopupHint();
-      }
+      await sendRuntimeMessage({ type: 'OPEN_EXTENSION_POPUP' });
     } catch {
-      showPopupHint();
+      // Ignore
     }
-  }, [showPopupHint]);
+  };
 
   const handleRequestAI = useCallback(async (): Promise<void> => {
     if (aiLoading) return;
@@ -454,15 +430,15 @@ export function WordPopup({
   return (
     <div
       ref={popupRef}
-      className="pointer-events-auto absolute z-30 flex flex-col overflow-hidden w-[380px] sm:w-[420px] max-w-[calc(100%-24px)] rounded-2xl p-3 sm:p-3.5 shadow-2xl animate-pop-in transition-all"
+      className="pointer-events-auto absolute z-30 flex flex-col overflow-hidden w-[380px] sm:w-[420px] max-w-[calc(100%-24px)] rounded-2xl p-3 sm:p-3.5 shadow-2xl transition-all"
       style={{
-        backgroundColor: 'var(--ai-surface, var(--ytai-surface, rgba(var(--ai-bg-rgb, var(--ytai-bg-rgb, 15, 17, 23)), 0.96)))',
-        borderColor: 'var(--ai-border, var(--ytai-border))',
+        backgroundColor: 'rgba(var(--ytai-bg-rgb), 0.96)',
+        borderColor: 'var(--ytai-border)',
         borderWidth: '1px',
         borderStyle: 'solid',
-        backdropFilter: 'var(--ai-backdrop, blur(var(--ytai-backdrop-blur, 16px)))',
-        WebkitBackdropFilter: 'var(--ai-backdrop, blur(var(--ytai-backdrop-blur, 16px)))',
-        color: 'var(--ai-text-primary, var(--ytai-text-primary))',
+        backdropFilter: 'blur(var(--ytai-backdrop-blur, 16px))',
+        WebkitBackdropFilter: 'blur(var(--ytai-backdrop-blur, 16px))',
+        color: 'var(--ytai-text-primary)',
         left: `${clampedLeft}px`,
         ...verticalPositionStyle
       }}
@@ -472,12 +448,12 @@ export function WordPopup({
       {/* 1. Pinned Header (shrink-0) */}
       <div
         className="shrink-0 flex items-center justify-between gap-2 border-b pb-2"
-        style={{ borderColor: 'var(--ai-border, var(--ytai-border))' }}
+        style={{ borderColor: 'var(--ytai-border)' }}
       >
         <div className="flex items-center gap-2 min-w-0">
           <h3
             className="truncate text-base sm:text-lg font-bold"
-            style={{ color: 'var(--ai-text-primary, var(--ytai-text-primary))' }}
+            style={{ color: 'var(--ytai-text-primary)' }}
           >
             {selection.target}
           </h3>
@@ -485,7 +461,7 @@ export function WordPopup({
             type="button"
             title="Pronounce"
             onClick={() => speakText(selection.target, quickResult?.detectedLang || sourceLang)}
-            style={{ color: 'var(--ai-accent, var(--ytai-accent))' }}
+            style={{ color: 'var(--ytai-accent)' }}
             className="rounded-lg p-1 transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)] shrink-0"
           >
             <Volume2 className="h-4 w-4" />
@@ -494,9 +470,9 @@ export function WordPopup({
             <span
               className="truncate rounded border px-1.5 py-0.5 text-[10px] font-medium shrink-0"
               style={{
-                backgroundColor: 'var(--ai-surface, var(--ytai-surface))',
-                borderColor: 'var(--ai-border, var(--ytai-border))',
-                color: 'var(--ai-text-secondary, var(--ytai-text-secondary))'
+                backgroundColor: 'var(--ytai-surface)',
+                borderColor: 'var(--ytai-border)',
+                color: 'var(--ytai-text-secondary)'
               }}
             >
               {aiResult?.partOfSpeech || quickResult?.partOfSpeech}
@@ -508,7 +484,7 @@ export function WordPopup({
           type="button"
           title="Close (Esc)"
           onClick={() => onClose(true)}
-          style={{ color: 'var(--ai-text-secondary, var(--ytai-text-secondary))' }}
+          style={{ color: 'var(--ytai-text-secondary)' }}
           className="rounded-lg p-1 transition hover:bg-[rgba(var(--ytai-accent-rgb),0.15)] hover:text-white shrink-0"
         >
           <X className="h-4 w-4" />
@@ -521,32 +497,32 @@ export function WordPopup({
         <div
           className="rounded-xl border p-2.5 text-xs"
           style={{
-            backgroundColor: 'var(--ai-surface, var(--ytai-surface))',
-            borderColor: 'var(--ai-border, var(--ytai-border))'
+            backgroundColor: 'var(--ytai-surface)',
+            borderColor: 'var(--ytai-border)'
           }}
         >
           {quickLoading ? (
-            <div className="flex items-center gap-2" style={{ color: 'var(--ai-text-secondary, var(--ytai-text-secondary))' }}>
-              <Loader2 className="h-3.5 w-3.5 animate-spin" style={{ color: 'var(--ai-accent, var(--ytai-accent))' }} />
+            <div className="flex items-center gap-2" style={{ color: 'var(--ytai-text-secondary)' }}>
+              <Loader2 className="h-3.5 w-3.5 animate-spin" style={{ color: 'var(--ytai-accent)' }} />
               <span>Translating...</span>
             </div>
           ) : quickError ? (
             <div className="text-xs text-rose-400">{quickError}</div>
           ) : quickResult ? (
             <div>
-              <div className="text-sm font-semibold" style={{ color: 'var(--ai-accent, var(--ytai-accent))' }}>
+              <div className="text-sm font-semibold" style={{ color: 'var(--ytai-accent)' }}>
                 {quickResult.translation}
               </div>
               {quickResult.alternatives.length > 0 && (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                  {quickResult.alternatives.slice(0, 4).map((alt) => (
+                  {quickResult.alternatives.slice(0, 4).map((alt: string) => (
                     <span
                       key={alt}
                       className="rounded-md border px-1.5 py-0.5 text-[11px]"
                       style={{
-                        backgroundColor: 'rgba(var(--ai-bg-rgb, var(--ytai-bg-rgb, 15, 17, 23)), 0.75)',
-                        borderColor: 'var(--ai-border, var(--ytai-border))',
-                        color: 'var(--ai-text-secondary, var(--ytai-text-secondary))'
+                        backgroundColor: 'rgba(var(--ytai-bg-rgb), 0.75)',
+                        borderColor: 'var(--ytai-border)',
+                        color: 'var(--ytai-text-secondary)'
                       }}
                     >
                       {alt}
@@ -555,7 +531,7 @@ export function WordPopup({
                   {quickResult.alternatives.length > 4 && (
                     <span
                       className="text-[10px] opacity-75"
-                      style={{ color: 'var(--ai-text-secondary, var(--ytai-text-secondary))' }}
+                      style={{ color: 'var(--ytai-text-secondary)' }}
                     >
                       +{quickResult.alternatives.length - 4}
                     </span>
@@ -571,14 +547,14 @@ export function WordPopup({
           <div
             className="rounded-xl border p-2.5 text-xs transition-all duration-200"
             style={{
-              backgroundColor: 'rgba(var(--ai-bg-rgb, var(--ytai-bg-rgb, 15, 17, 23)), 0.55)',
-              borderColor: 'var(--ai-border, var(--ytai-border))'
+              backgroundColor: 'rgba(var(--ytai-bg-rgb), 0.55)',
+              borderColor: 'var(--ytai-border)'
             }}
           >
             <div className="flex items-center justify-between gap-1.5">
               <span
                 className="text-[10px] font-semibold uppercase tracking-wider select-none"
-                style={{ color: 'var(--ai-text-secondary, var(--ytai-text-secondary))' }}
+                style={{ color: 'var(--ytai-text-secondary)' }}
               >
                 Контекст субтитра
               </span>
@@ -589,7 +565,7 @@ export function WordPopup({
                   e.stopPropagation();
                   speakText(selection.cue.text, quickResult?.detectedLang || sourceLang);
                 }}
-                style={{ color: 'var(--ai-accent, var(--ytai-accent))' }}
+                style={{ color: 'var(--ytai-accent)' }}
                 className="shrink-0 p-1 transition hover:opacity-80 rounded-md hover:bg-white/10"
               >
                 <Volume2 className="h-3.5 w-3.5" />
@@ -605,7 +581,7 @@ export function WordPopup({
                 className="mt-1.5 border-t pt-1.5 text-xs italic leading-relaxed animate-in fade-in duration-200"
                 style={{
                   borderColor: 'rgba(255, 255, 255, 0.08)',
-                  color: 'var(--ai-text-secondary, var(--ytai-text-secondary))'
+                  color: 'var(--ytai-text-secondary)'
                 }}
               >
                 {effectiveSentenceTranslation}
@@ -613,67 +589,94 @@ export function WordPopup({
             ) : sentenceLoading ? (
               <div
                 className="mt-1.5 flex items-center gap-1.5 text-[11px]"
-                style={{ color: 'var(--ai-text-secondary, var(--ytai-text-secondary))' }}
+                style={{ color: 'var(--ytai-text-secondary)' }}
               >
-                <Loader2 className="h-3 w-3 animate-spin" style={{ color: 'var(--ai-accent, var(--ytai-accent))' }} />
+                <Loader2 className="h-3 w-3 animate-spin" style={{ color: 'var(--ytai-accent)' }} />
                 <span>Загрузка перевода контекста...</span>
               </div>
             ) : null}
           </div>
         )}
 
-        {/* AI Breakdown or Zero-Config Promotion Banner */}
-        {isLlmConfigured ? (
-          <div>
-            {!aiResult && !aiLoading && (
+        {/* AI Breakdown Button & Container */}
+        <div>
+          {!aiResult && !aiLoading && (
+            isLlmConfigured ? (
               <button
                 type="button"
                 onClick={() => void handleRequestAI()}
                 style={{
-                  backgroundColor: 'var(--ai-accent, var(--ytai-accent))',
-                  color: 'var(--ai-accent-fg, var(--ytai-accent-fg, #ffffff))'
+                  backgroundColor: 'var(--ytai-accent)',
+                  color: 'var(--ytai-accent-fg, #ffffff)'
                 }}
                 className="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow transition hover:opacity-90"
               >
                 <Sparkles className="h-3.5 w-3.5" />
                 <span>AI Контекстный разбор</span>
               </button>
-            )}
-
-            {aiLoading && (
-              <div
-                className="flex items-center justify-center gap-2 rounded-xl border p-2.5 text-xs"
+            ) : (
+              <button
+                type="button"
+                onClick={() => void handleOpenPopup()}
                 style={{
-                  backgroundColor: 'rgba(var(--ytai-accent-rgb), 0.1)',
-                  borderColor: 'rgba(var(--ytai-accent-rgb), 0.3)',
-                  color: 'var(--ai-accent, var(--ytai-accent))'
+                  backgroundColor: 'var(--ytai-surface)',
+                  borderColor: 'var(--ytai-border)',
+                  borderWidth: '1px',
+                  borderStyle: 'solid',
+                  color: 'var(--ytai-accent)'
                 }}
+                className="flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow transition hover:opacity-90"
               >
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>Analyzing scene context with AI...</span>
-              </div>
-            )}
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>Подключить AI (Gemini / Ollama)</span>
+              </button>
+            )
+          )}
 
-            {aiError && (
-              <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-200">
-                <div className="break-words">
-                  {aiError.includes('API key is missing') ? (
-                    <span>
-                      <strong>Не настроен API-ключ.</strong> Подключите AI в настройках расширения.
-                    </span>
-                  ) : aiError.includes('503') ? (
-                    <span>
-                      <strong>Сервер модели перегружен (503).</strong> Попробуйте ещё раз через несколько секунд.
-                    </span>
-                  ) : aiError.includes('429') ? (
-                    <span>
-                      <strong>Превышен лимит запросов (429).</strong> Подождите немного и повторите попытку.
-                    </span>
-                  ) : (
-                    aiError
-                  )}
-                </div>
-                <div className="mt-2 flex items-center gap-2">
+          {aiLoading && (
+            <div
+              className="flex items-center justify-center gap-2 rounded-xl border p-2.5 text-xs"
+              style={{
+                backgroundColor: 'rgba(var(--ytai-accent-rgb), 0.1)',
+                borderColor: 'rgba(var(--ytai-accent-rgb), 0.3)',
+                color: 'var(--ytai-accent)'
+              }}
+            >
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <span>Analyzing scene context with AI...</span>
+            </div>
+          )}
+
+          {aiError && (
+            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-200">
+              <div className="break-words">
+                {aiError.includes('API key is missing') ? (
+                  <span>
+                    <strong>Не настроен API-ключ.</strong> Подключите AI в настройках расширения.
+                  </span>
+                ) : aiError.includes('503') ? (
+                  <span>
+                    <strong>Сервер модели временно перегружен (503).</strong> Попробуйте ещё раз через несколько секунд.
+                  </span>
+                ) : aiError.includes('429') ? (
+                  <span>
+                    <strong>Превышен лимит запросов (429).</strong> Подождите немного и повторите попытку.
+                  </span>
+                ) : (
+                  aiError
+                )}
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                {aiError.includes('API key is missing') ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleOpenPopup()}
+                    className="flex items-center gap-1.5 rounded-lg bg-indigo-500/30 px-2.5 py-1 text-[11px] font-semibold text-indigo-100 transition hover:bg-indigo-500/50"
+                  >
+                    <Sparkles className="h-3 w-3" />
+                    <span>Настроить AI</span>
+                  </button>
+                ) : (
                   <button
                     type="button"
                     onClick={() => void handleRequestAI()}
@@ -682,166 +685,125 @@ export function WordPopup({
                     <RotateCcw className="h-3 w-3" />
                     <span>Повторить</span>
                   </button>
-                </div>
-              </div>
-            )}
-
-            {aiResult && (
-              <div
-                className="space-y-2 rounded-xl border p-2.5 text-xs"
-                style={{
-                  backgroundColor: 'var(--ai-surface, var(--ytai-surface))',
-                  borderColor: 'var(--ai-border, var(--ytai-border))'
-                }}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-xs" style={{ color: 'var(--ai-accent, var(--ytai-accent))' }}>
-                    AI Разбор · {aiResult.lemma}
-                  </span>
-                  <span
-                    className="rounded px-1.5 py-0.5 text-[10px]"
-                    style={{
-                      backgroundColor: 'rgba(var(--ytai-accent-rgb), 0.2)',
-                      color: 'var(--ai-accent, var(--ytai-accent))'
-                    }}
-                  >
-                    {aiResult.partOfSpeech}
-                  </span>
-                </div>
-
-                <div className="text-sm font-semibold text-white">
-                  {aiResult.contextualTranslation}
-                </div>
-
-                {aiResult.literalTranslation && (
-                  <div style={{ color: 'var(--ai-text-secondary, var(--ytai-text-secondary))' }}>
-                    <span className="font-medium text-white">Дословно: </span>
-                    {aiResult.literalTranslation}
-                  </div>
-                )}
-
-                {aiResult.grammarNote && (
-                  <div style={{ color: 'var(--ai-text-secondary, var(--ytai-text-secondary))' }}>
-                    <span className="font-medium" style={{ color: 'var(--ai-accent, var(--ytai-accent))' }}>
-                      Грамматика:{' '}
-                    </span>
-                    {aiResult.grammarNote}
-                  </div>
-                )}
-
-                {aiResult.nuanceExplanation && (
-                  <div style={{ color: 'var(--ai-text-secondary, var(--ytai-text-secondary))' }}>
-                    <span className="font-medium" style={{ color: 'var(--ai-accent, var(--ytai-accent))' }}>
-                      Нюанс:{' '}
-                    </span>
-                    {aiResult.nuanceExplanation}
-                  </div>
-                )}
-
-                {/* Collapsible Examples Accordion */}
-                {aiResult.examples.length > 0 && (
-                  <div
-                    className="border-t pt-1.5"
-                    style={{ borderColor: 'var(--ai-border, var(--ytai-border))' }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setShowExamples((prev) => !prev)}
-                      className="flex w-full items-center justify-between py-1 text-left font-medium transition hover:opacity-80"
-                      style={{ color: 'var(--ai-text-secondary, var(--ytai-text-secondary))' }}
-                    >
-                      <span>Примеры ({aiResult.examples.length})</span>
-                      <ChevronDown
-                        className={`h-3.5 w-3.5 transition-transform duration-200 ${
-                          showExamples ? 'rotate-180' : ''
-                        }`}
-                      />
-                    </button>
-
-                    {showExamples && (
-                      <div className="mt-1.5 space-y-1.5">
-                        {aiResult.examples.map((ex, idx) => (
-                          <div
-                            key={idx}
-                            className="rounded-lg border p-2"
-                            style={{
-                              backgroundColor: 'rgba(var(--ai-bg-rgb, var(--ytai-bg-rgb, 15, 17, 23)), 0.65)',
-                              borderColor: 'var(--ai-border, var(--ytai-border))'
-                            }}
-                          >
-                            <div className="flex items-start justify-between gap-1.5 text-white">
-                              <span>{ex.source}</span>
-                              <button
-                                type="button"
-                                onClick={() => speakText(ex.source, quickResult?.detectedLang || sourceLang)}
-                                style={{ color: 'var(--ai-accent, var(--ytai-accent))' }}
-                                className="shrink-0 transition hover:opacity-80"
-                              >
-                                <Volume2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                            <div className="mt-0.5 text-[11px]" style={{ color: 'var(--ai-text-secondary, var(--ytai-text-secondary))' }}>
-                              {ex.translation}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        ) : (
-          /* Zero-Config Mode Banner */
-          <div
-            className="rounded-xl border p-2.5 text-xs shadow-sm"
-            style={{
-              backgroundColor: 'var(--ai-surface, var(--ytai-surface))',
-              borderColor: 'var(--ai-border, var(--ytai-border))'
-            }}
-          >
-            <div className="flex items-start gap-2.5">
-              <Sparkles className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
-              <div className="flex-1 min-w-0">
-                <div className="font-semibold text-white/95 text-xs">
-                  ✨ Хотите разбор грамматики и нюансов контекста?
-                </div>
-                <div
-                  className="mt-0.5 text-[11px] leading-relaxed"
-                  style={{ color: 'var(--ai-text-secondary, var(--ytai-text-secondary))' }}
-                >
-                  Подключите бесплатный ключ Gemini или локальную Ollama без лимитов
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void handleOpenPopup()}
-                  className="mt-2 flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition hover:opacity-90 shadow-sm"
-                  style={{
-                    backgroundColor: 'var(--ai-accent, var(--ytai-accent))',
-                    color: 'var(--ai-accent-fg, var(--ytai-accent-fg, #ffffff))'
-                  }}
-                >
-                  <Sparkles className="h-3 w-3" />
-                  <span>Подключить AI (Gemini / Ollama)</span>
-                </button>
-                {popupHintVisible && (
-                  <div className="mt-1.5 text-[11px] font-medium text-amber-300">
-                    Нажмите на иконку расширения на панели браузера
-                  </div>
                 )}
               </div>
             </div>
-          </div>
-        )}
+          )}
+
+          {aiResult && (
+            <div
+              className="space-y-2 rounded-xl border p-2.5 text-xs"
+              style={{
+                backgroundColor: 'var(--ytai-surface)',
+                borderColor: 'var(--ytai-border)'
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-xs" style={{ color: 'var(--ytai-accent)' }}>
+                  AI Разбор · {aiResult.lemma}
+                </span>
+                <span
+                  className="rounded px-1.5 py-0.5 text-[10px]"
+                  style={{
+                    backgroundColor: 'rgba(var(--ytai-accent-rgb), 0.2)',
+                    color: 'var(--ytai-accent)'
+                  }}
+                >
+                  {aiResult.partOfSpeech}
+                </span>
+              </div>
+
+              <div className="text-sm font-semibold text-white">
+                {aiResult.contextualTranslation}
+              </div>
+
+              {aiResult.literalTranslation && (
+                <div style={{ color: 'var(--ytai-text-secondary)' }}>
+                  <span className="font-medium text-white">Дословно: </span>
+                  {aiResult.literalTranslation}
+                </div>
+              )}
+
+              {aiResult.grammarNote && (
+                <div style={{ color: 'var(--ytai-text-secondary)' }}>
+                  <span className="font-medium" style={{ color: 'var(--ytai-accent)' }}>
+                    Грамматика:{' '}
+                  </span>
+                  {aiResult.grammarNote}
+                </div>
+              )}
+
+              {aiResult.nuanceExplanation && (
+                <div style={{ color: 'var(--ytai-text-secondary)' }}>
+                  <span className="font-medium" style={{ color: 'var(--ytai-accent)' }}>
+                    Нюанс:{' '}
+                  </span>
+                  {aiResult.nuanceExplanation}
+                </div>
+              )}
+
+              {/* Collapsible Examples Accordion */}
+              {Boolean(aiResult.examples && aiResult.examples.length > 0) && (
+                <div
+                  className="border-t pt-1.5"
+                  style={{ borderColor: 'var(--ytai-border)' }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setShowExamples((prev) => !prev)}
+                    className="flex w-full items-center justify-between py-1 text-left font-medium transition hover:opacity-80"
+                    style={{ color: 'var(--ytai-text-secondary)' }}
+                  >
+                    <span>Примеры ({aiResult.examples?.length ?? 0})</span>
+                    <ChevronDown
+                      className={`h-3.5 w-3.5 transition-transform duration-200 ${
+                        showExamples ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
+
+                  {showExamples && (
+                    <div className="mt-1.5 space-y-1.5">
+                      {aiResult.examples?.map((ex: AIExample, idx: number) => (
+                        <div
+                          key={idx}
+                          className="rounded-lg border p-2"
+                          style={{
+                            backgroundColor: 'rgba(var(--ytai-bg-rgb), 0.65)',
+                            borderColor: 'var(--ytai-border)'
+                          }}
+                        >
+                          <div className="flex items-start justify-between gap-1.5 text-white">
+                            <span>{ex.source}</span>
+                            <button
+                              type="button"
+                              onClick={() => speakText(ex.source, quickResult?.detectedLang || sourceLang)}
+                              style={{ color: 'var(--ytai-accent)' }}
+                              className="shrink-0 transition hover:opacity-80"
+                            >
+                              <Volume2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <div className="mt-0.5 text-[11px]" style={{ color: 'var(--ytai-text-secondary)' }}>
+                            {ex.translation}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 3. Pinned Footer (shrink-0) */}
       <div
         className="shrink-0 flex items-center justify-between gap-2 border-t pt-2"
-        style={{ borderColor: 'var(--ai-border, var(--ytai-border))' }}
+        style={{ borderColor: 'var(--ytai-border)' }}
       >
-        <span className="text-[10px] truncate" style={{ color: 'var(--ai-text-secondary, var(--ytai-text-secondary))' }}>
+        <span className="text-[10px] truncate" style={{ color: 'var(--ytai-text-secondary)' }}>
           S сохранить · R повтор · Esc
         </span>
 
@@ -852,12 +814,12 @@ export function WordPopup({
           style={
             isSaved
               ? {
-                  backgroundColor: 'var(--ai-accent, var(--ytai-accent))',
-                  color: 'var(--ai-accent-fg, var(--ytai-accent-fg, #ffffff))'
+                  backgroundColor: 'var(--ytai-accent)',
+                  color: '#ffffff'
                 }
               : {
-                  backgroundColor: 'var(--ai-text-primary, var(--ytai-text-primary))',
-                  color: 'rgb(var(--ai-bg-rgb, var(--ytai-bg-rgb, 15, 17, 23)))'
+                  backgroundColor: 'var(--ytai-text-primary)',
+                  color: 'rgb(var(--ytai-bg-rgb))'
                 }
           }
           className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition hover:opacity-90 disabled:opacity-50 shrink-0 shadow-sm"

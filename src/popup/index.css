@@ -1,0 +1,161 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:host {
+  all: initial;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Default / Midnight Glass Theme */
+:host,
+:root,
+[data-theme='midnight-glass'] {
+  --ytai-bg-rgb: 15, 17, 23;
+  --ytai-bg-opacity: 0.85;
+  --ytai-surface: rgba(30, 41, 59, 0.75);
+  --ytai-surface-hover: rgba(51, 65, 85, 0.85);
+  --ytai-text-primary: #f8fafc;
+  --ytai-text-secondary: #94a3b8;
+  --ytai-accent: #818cf8;
+  --ytai-accent-fg: #ffffff;
+  --ytai-accent-rgb: 129, 140, 248;
+  --ytai-border: rgba(255, 255, 255, 0.12);
+  --ytai-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  --ytai-backdrop-blur: 12px;
+}
+
+/* Cinema Minimal Theme (Ultra transparent with yellow subtitles and high text-shadow) */
+:host([data-theme='cinema-transparent']),
+[data-theme='cinema-transparent'] {
+  --ytai-bg-rgb: 0, 0, 0;
+  --ytai-bg-opacity: 0.45;
+  --ytai-surface: rgba(20, 20, 20, 0.8);
+  --ytai-surface-hover: rgba(35, 35, 35, 0.9);
+  --ytai-text-primary: #ffffff;
+  --ytai-text-secondary: #fde047;
+  --ytai-accent: #f59e0b;
+  --ytai-accent-fg: #111827;
+  --ytai-accent-rgb: 245, 158, 11;
+  --ytai-border: rgba(255, 255, 255, 0.1);
+  --ytai-text-shadow: 0 2px 6px rgba(0, 0, 0, 0.95);
+  --ytai-backdrop-blur: 4px;
+}
+
+/* Nordic Frost Theme (Cool slate with arctic cyan/ice accents) */
+:host([data-theme='nordic-frost']),
+[data-theme='nordic-frost'] {
+  --ytai-bg-rgb: 30, 36, 48;
+  --ytai-bg-opacity: 0.85;
+  --ytai-surface: rgba(46, 52, 64, 0.8);
+  --ytai-surface-hover: rgba(67, 76, 94, 0.9);
+  --ytai-text-primary: #eceff4;
+  --ytai-text-secondary: #88c0d0;
+  --ytai-accent: #5e81ac;
+  --ytai-accent-fg: #ffffff;
+  --ytai-accent-rgb: 94, 129, 172;
+  --ytai-border: rgba(136, 192, 208, 0.2);
+  --ytai-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --ytai-backdrop-blur: 10px;
+}
+
+/* Warm Espresso Theme (Warm dark chocolate with amber accent) */
+:host([data-theme='warm-espresso']),
+[data-theme='warm-espresso'] {
+  --ytai-bg-rgb: 28, 25, 23;
+  --ytai-bg-opacity: 0.85;
+  --ytai-surface: rgba(41, 37, 36, 0.85);
+  --ytai-surface-hover: rgba(68, 64, 60, 0.9);
+  --ytai-text-primary: #f5f5f4;
+  --ytai-text-secondary: #d6d3d1;
+  --ytai-accent: #f97316;
+  --ytai-accent-fg: #111827;
+  --ytai-accent-rgb: 249, 115, 22;
+  --ytai-border: rgba(245, 245, 244, 0.12);
+  --ytai-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  --ytai-backdrop-blur: 10px;
+}
+
+/* Emerald Noir Theme (Deep black with high contrast neon emerald) */
+:host([data-theme='emerald-noir']),
+[data-theme='emerald-noir'] {
+  --ytai-bg-rgb: 10, 14, 12;
+  --ytai-bg-opacity: 0.85;
+  --ytai-surface: rgba(6, 78, 59, 0.4);
+  --ytai-surface-hover: rgba(6, 95, 70, 0.55);
+  --ytai-text-primary: #ecfdf5;
+  --ytai-text-secondary: #6ee7b7;
+  --ytai-accent: #10b981;
+  --ytai-accent-fg: #042f2e;
+  --ytai-accent-rgb: 16, 185, 129;
+  --ytai-border: rgba(16, 185, 129, 0.2);
+  --ytai-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+  --ytai-backdrop-blur: 10px;
+}
+
+/* ==========================================================================
+   Custom Scrollbars (Cross-platform Windows & Chrome styling)
+   ========================================================================== */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ytai-border) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--ytai-border);
+  border-radius: 9999px;
+  transition: background-color 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--ytai-text-secondary);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ==========================================================================
+   Active Listening Modes (Zero-rerender CSS transitions)
+   ========================================================================== */
+.ytai-subtitle-overlay[data-mode='blur']:not([data-alt-pressed='true']):not([data-has-selection='true']) .ytai-blur-target {
+  filter: blur(6px);
+  transition: filter 150ms ease;
+}
+
+.ytai-subtitle-overlay[data-mode='blur']:not([data-alt-pressed='true']):not([data-has-selection='true']):hover .ytai-blur-target {
+  filter: blur(0px);
+}
+
+.ytai-subtitle-overlay[data-mode='blur']:not([data-alt-pressed='true']):not([data-has-selection='true']) .ytai-blur-hint {
+  opacity: 1;
+  transition: opacity 150ms ease;
+}
+
+.ytai-subtitle-overlay[data-mode='blur']:not([data-alt-pressed='true']):not([data-has-selection='true']):hover .ytai-blur-hint {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ytai-subtitle-overlay[data-mode='hidden']:not([data-alt-pressed='true']):not([data-has-selection='true']) {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 150ms ease;
+}
+
+.ytai-subtitle-overlay[data-mode='hidden'][data-alt-pressed='true'],
+.ytai-subtitle-overlay[data-mode='hidden'][data-has-selection='true'] {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+

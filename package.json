@@ -6,8 +6,11 @@
   "description": "YouTube Language Learning Chrome Extension (MV3) with AI Context Analysis, Active Listening, FSRS & Anki Export",
   "scripts": {
     "dev": "vite",
-    "build": "npm run clean && tsc --noEmit && vite build",
-    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build:yt": "vite build --mode youtube",
+    "build:cinema": "vite build --mode cinema",
+    "build:all": "vite build --mode all",
+    "build": "npm run clean && tsc --noEmit && npm run build:yt && npm run build:cinema && npm run build:all",
+    "clean": "node -e \"const fs = require('node:fs'); ['dist', 'dist-youtube', 'dist-cinema', 'dist-all'].forEach(d => fs.rmSync(d, { recursive: true, force: true }));\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

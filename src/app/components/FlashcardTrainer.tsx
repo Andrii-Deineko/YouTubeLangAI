@@ -193,16 +193,17 @@ export function FlashcardTrainer({
       <div
         className="flex flex-col items-center justify-center rounded-2xl border p-8 text-center"
         style={{
-          backgroundColor: 'var(--ytai-surface, var(--ai-surface))',
-          borderColor: 'var(--ytai-border, var(--ai-border))'
+          backgroundColor: 'var(--ytai-surface)',
+          borderColor: 'var(--ytai-border)'
         }}
       >
-        <Sparkles className="h-10 w-10" style={{ color: 'var(--ai-accent, var(--ytai-accent))' }} />
+        <Sparkles className="h-10 w-10" style={{ color: 'var(--ytai-accent)' }} />
         <h2 className="mt-3 text-base font-semibold text-white">
-          Словарь пока пуст
+          Your vocabulary is empty
         </h2>
         <p className="mt-1 max-w-xs text-xs text-slate-400">
-          Кликайте на слова в субтитрах во время просмотра видео, чтобы добавить их в тренажёр (хоткей{' '}
+          Open any YouTube video with subtitles, click on unfamiliar words, and press{' '}
+          <span className="font-semibold text-slate-200">«В словарь»</span> (or press{' '}
           <kbd className="rounded bg-slate-800 px-1.5 py-0.5 text-[11px]">S</kbd>).
         </p>
       </div>
@@ -212,32 +213,30 @@ export function FlashcardTrainer({
   if (!activeCard) {
     return (
       <div
-        className="flex flex-col items-center justify-center rounded-2xl border p-8 text-center text-slate-200"
+        className="flex flex-col items-center justify-center rounded-2xl border p-8 text-center"
         style={{
-          backgroundColor: 'var(--ytai-surface, var(--ai-surface))',
-          borderColor: 'var(--ytai-border, var(--ai-border))'
+          backgroundColor: 'var(--ytai-surface)',
+          borderColor: 'var(--ytai-border)'
         }}
       >
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/20 text-emerald-400 shadow-inner">
-          <CheckCircle2 className="h-8 w-8" />
-        </div>
-        <h2 className="mt-4 text-base font-bold text-white">
-          Все запланированные карточки повторены!
+        <CheckCircle2 className="h-11 w-11 text-emerald-400" />
+        <h2 className="mt-3 text-lg font-semibold text-white">
+          All caught up!
         </h2>
-        <p className="mt-1 max-w-xs text-xs text-slate-400">
-          Отличная работа! Повторено за сессию: {reviewedCount} карточек.
+        <p className="mt-1 text-xs text-slate-400">
+          {reviewedCount > 0
+            ? `Completed ${reviewedCount} review${reviewedCount === 1 ? '' : 's'} this session. `
+            : ''}
+          You have {cards.length} saved card{cards.length === 1 ? '' : 's'} total.
         </p>
         <button
           type="button"
           onClick={startPracticeAll}
-          style={{
-            backgroundColor: 'var(--ai-accent, var(--ytai-accent))',
-            color: 'var(--ai-accent-fg, var(--ytai-accent-fg, #ffffff))'
-          }}
-          className="mt-5 flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-semibold shadow transition hover:opacity-90"
+          style={{ backgroundColor: 'var(--ytai-accent)' }}
+          className="mt-4 flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold text-white shadow transition hover:opacity-90"
         >
           <RotateCcw className="h-3.5 w-3.5" />
-          <span>Тренировать все слова вне очереди ({cards.length})</span>
+          <span>Practice all cards anyway</span>
         </button>
       </div>
     );
@@ -247,10 +246,10 @@ export function FlashcardTrainer({
   const ytUrl = buildYouTubeTimestampUrl(activeCard.videoId, activeCard.timestampSec);
 
   const buttonStyleByLabel: Record<'Again' | 'Hard' | 'Good' | 'Easy', string> = {
-    Again: 'bg-rose-950/40 border-rose-600/40 text-rose-300 hover:bg-rose-900/50',
-    Hard: 'bg-amber-950/40 border-amber-600/40 text-amber-300 hover:bg-amber-900/50',
-    Good: 'bg-emerald-950/40 border-emerald-600/40 text-emerald-300 hover:bg-emerald-900/50',
-    Easy: 'bg-sky-950/40 border-sky-600/40 text-sky-300 hover:bg-sky-900/50'
+    Again: 'border-rose-500/30 bg-rose-500/15 text-rose-200 hover:bg-rose-500/25',
+    Hard: 'border-amber-500/30 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25',
+    Good: 'border-emerald-500/30 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25',
+    Easy: 'border-sky-500/30 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25'
   };
 
   return (
@@ -258,40 +257,33 @@ export function FlashcardTrainer({
       {/* Progress Bar */}
       <div className="flex items-center justify-between text-xs text-slate-400">
         <div className="flex items-center gap-2">
-          <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-medium text-slate-300">
-            {practiceAllMode ? 'Вне очереди' : 'FSRS повторение'}
+          <span className="rounded-full bg-indigo-500/20 px-2 py-0.5 font-medium text-indigo-300">
+            {practiceAllMode ? 'Free Practice' : 'Due Queue'}: {remainingCount}
           </span>
-          <span>
-            Осталось:{' '}
-            <strong className="text-white">{remainingCount}</strong>
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          {practiceAllMode && (
-            <button
-              type="button"
-              onClick={() => {
-                setPracticeAllMode(false);
-                setRevealed(false);
-              }}
-              className="text-xs transition hover:underline"
-              style={{ color: 'var(--ai-accent, var(--ytai-accent))' }}
-            >
-              Вернуться к очереди
-            </button>
-          )}
-          <span className="rounded-md border border-white/10 px-2 py-0.5 text-[11px]">
+          <span className="rounded-full bg-slate-800 px-2 py-0.5 text-slate-300">
             {getCardStateLabel(activeCard.fsrsState.state)}
           </span>
         </div>
+        {practiceAllMode && (
+          <button
+            type="button"
+            onClick={() => {
+              setPracticeAllMode(false);
+              setRevealed(false);
+            }}
+            className="text-indigo-400 hover:text-indigo-300"
+          >
+            Exit Free Practice
+          </button>
+        )}
       </div>
 
       {/* Card Surface */}
       <div
         className="overflow-hidden rounded-2xl border shadow-xl transition-colors"
         style={{
-          backgroundColor: 'var(--ytai-surface, var(--ai-surface))',
-          borderColor: 'var(--ytai-border, var(--ai-border))'
+          backgroundColor: 'var(--ytai-surface)',
+          borderColor: 'var(--ytai-border)'
         }}
       >
         {activeCard.screenshotBase64 && (
@@ -324,8 +316,8 @@ export function FlashcardTrainer({
                 href={ytUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="flex shrink-0 items-center gap-1 hover:opacity-80"
-                style={{ color: 'var(--ai-accent, var(--ytai-accent))' }}
+                className="flex shrink-0 items-center gap-1 text-indigo-400 hover:text-indigo-300"
+                style={{ color: 'var(--ytai-accent)' }}
               >
                 <ExternalLink className="h-3 w-3" />
                 <span>YouTube ({Math.floor(activeCard.timestampSec)}s)</span>
@@ -346,11 +338,8 @@ export function FlashcardTrainer({
             <button
               type="button"
               onClick={() => setRevealed(true)}
-              style={{
-                backgroundColor: 'var(--ai-accent, var(--ytai-accent))',
-                color: 'var(--ai-accent-fg, var(--ytai-accent-fg, #ffffff))'
-              }}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold shadow transition hover:opacity-90"
+              style={{ backgroundColor: 'var(--ytai-accent)' }}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow transition hover:opacity-90"
             >
               <Eye className="h-4 w-4" />
               <span>Показать ответ (Space)</span>

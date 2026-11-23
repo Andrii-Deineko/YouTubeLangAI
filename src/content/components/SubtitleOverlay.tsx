@@ -526,13 +526,13 @@ export function SubtitleOverlay({
             : 'bottom 200ms cubic-bezier(0, 0, 0.2, 1), opacity 150ms ease-out',
           padding: `${dynamicPadY}px ${dynamicPadX}px`,
           borderRadius: `${dynamicRadius}px`,
-          backgroundColor: `rgba(var(--ai-bg-rgb, var(--ytai-bg-rgb, 15, 17, 23)), var(--ai-bg-opacity, var(--ytai-bg-opacity, ${overlayOpacity ?? 0.85})))`,
-          borderColor: 'var(--ai-border, var(--ytai-border))',
+          backgroundColor: `rgba(var(--ytai-bg-rgb), var(--ytai-bg-opacity, ${overlayOpacity ?? 0.85}))`,
+          borderColor: 'var(--ytai-border)',
           borderWidth: '1px',
           borderStyle: 'solid',
-          backdropFilter: 'var(--ai-backdrop, blur(var(--ytai-backdrop-blur, 12px)))',
-          WebkitBackdropFilter: 'var(--ai-backdrop, blur(var(--ytai-backdrop-blur, 12px)))',
-          textShadow: 'var(--ai-text-shadow, var(--ytai-text-shadow))'
+          backdropFilter: 'blur(var(--ytai-backdrop-blur, 12px))',
+          WebkitBackdropFilter: 'blur(var(--ytai-backdrop-blur, 12px))',
+          textShadow: 'var(--ytai-text-shadow)'
         }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -543,13 +543,13 @@ export function SubtitleOverlay({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top bar: Drag grip handle + Mode hint */}
-        <div className="mb-1 flex items-center justify-between gap-2 select-none h-4 min-h-[16px]">
+        <div className="mb-1 flex items-center justify-between gap-2 select-none">
           <button
             type="button"
             onDoubleClick={handleResetPosition}
             title="Перетащите для смещения · Двойной клик для сброса по центру"
-            className="flex items-center gap-1 rounded px-1 py-0.5 opacity-60 transition hover:bg-white/10 hover:text-white hover:opacity-100 cursor-grab active:cursor-grabbing"
-            style={{ color: 'var(--ai-text-secondary, var(--ytai-text-secondary))' }}
+            className="flex items-center gap-1 rounded px-1 py-0.5 text-slate-400 opacity-60 transition hover:bg-white/10 hover:text-white hover:opacity-100 cursor-grab active:cursor-grabbing"
+            style={{ color: 'var(--ytai-text-secondary)' }}
             onClick={(e) => e.stopPropagation()}
           >
             <GripHorizontal className="h-3.5 w-3.5" />
@@ -560,7 +560,7 @@ export function SubtitleOverlay({
               className={`ytai-blur-hint text-[11px] leading-tight tracking-wide font-medium select-none transition-colors ${
                 altPressed || Boolean(selectedTarget) ? 'hidden' : ''
               }`}
-              style={{ color: 'var(--ai-accent, var(--ytai-accent))' }}
+              style={{ color: 'var(--ytai-accent)' }}
             >
               Active Listening · Hover or hold Alt to reveal
             </div>
@@ -569,7 +569,7 @@ export function SubtitleOverlay({
           {isHiddenMode && isRevealedInHidden && (
             <div
               className="text-[11px] leading-tight tracking-wide font-medium select-none transition-colors"
-              style={{ color: 'var(--ai-accent, var(--ytai-accent))' }}
+              style={{ color: 'var(--ytai-accent)' }}
             >
               Stealth Mode · Alt held
             </div>
@@ -582,9 +582,9 @@ export function SubtitleOverlay({
         <div
           className="ytai-blur-target leading-snug font-medium select-text"
           style={{
-            color: 'var(--ai-text-primary, var(--ytai-text-primary))',
+            color: 'var(--ytai-text-primary)',
             fontSize: `${fontSizes.primary}px`,
-            textShadow: 'var(--ai-text-shadow, var(--ytai-text-shadow))'
+            textShadow: 'var(--ytai-text-shadow)'
           }}
         >
           {renderedTokens}
@@ -595,9 +595,9 @@ export function SubtitleOverlay({
           <div
             className="ytai-blur-target mt-1 leading-snug select-none"
             style={{
-              color: 'var(--ai-text-secondary, var(--ytai-text-secondary))',
+              color: 'var(--ytai-text-secondary)',
               fontSize: `${fontSizes.translated}px`,
-              textShadow: 'var(--ai-text-shadow, var(--ytai-text-shadow))'
+              textShadow: 'var(--ytai-text-shadow)'
             }}
           >
             {translatedCue.text}

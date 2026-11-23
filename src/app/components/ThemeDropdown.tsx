@@ -75,10 +75,10 @@ export function ThemeDropdown({
         aria-expanded={isOpen}
         onClick={() => setIsOpen((prev) => !prev)}
         style={{
-          backgroundColor: 'var(--ytai-surface, var(--ai-surface))',
-          borderColor: isOpen ? 'var(--ytai-accent, var(--ai-accent))' : 'var(--ytai-border, var(--ai-border))',
+          backgroundColor: 'var(--ytai-surface)',
+          borderColor: isOpen ? 'var(--ytai-accent)' : 'var(--ytai-border)',
           boxShadow: isOpen
-            ? '0 0 0 1px var(--ytai-accent, var(--ai-accent)), 0 4px 12px rgba(0, 0, 0, 0.25)'
+            ? '0 0 0 1px var(--ytai-accent), 0 4px 12px rgba(0, 0, 0, 0.25)'
             : undefined
         }}
         className="flex w-full items-center justify-between gap-2.5 rounded-xl border px-3 py-2 text-left transition-all duration-150 focus:outline-none"
@@ -93,7 +93,7 @@ export function ThemeDropdown({
           </span>
           <span
             className="truncate text-[11px] opacity-75 hidden sm:inline"
-            style={{ color: 'var(--ytai-text-secondary, var(--ai-text-secondary))' }}
+            style={{ color: 'var(--ytai-text-secondary)' }}
           >
             · {currentTheme.tagline}
           </span>
@@ -103,7 +103,7 @@ export function ThemeDropdown({
           className={`h-4 w-4 shrink-0 transition-transform duration-200 ${
             isOpen ? 'rotate-180' : ''
           }`}
-          style={{ color: 'var(--ytai-text-secondary, var(--ai-text-secondary))' }}
+          style={{ color: 'var(--ytai-text-secondary)' }}
         />
       </button>
 
@@ -113,8 +113,8 @@ export function ThemeDropdown({
           role="listbox"
           aria-label="Выбор цветовой темы"
           style={{
-            backgroundColor: 'rgb(var(--ytai-bg-rgb, var(--ai-bg-rgb, 15, 17, 23)))',
-            borderColor: 'var(--ytai-border, var(--ai-border))',
+            backgroundColor: 'rgb(var(--ytai-bg-rgb))',
+            borderColor: 'var(--ytai-border)',
             boxShadow:
               '0 12px 32px -4px rgba(0, 0, 0, 0.75), 0 4px 12px rgba(0, 0, 0, 0.4)'
           }}

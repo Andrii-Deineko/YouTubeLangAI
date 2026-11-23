@@ -5,11 +5,11 @@ export default {
     extend: {
       colors: {
         ai: {
-          surface: 'var(--ai-surface)',
-          primary: 'var(--ai-text-primary)',
-          secondary: 'var(--ai-text-secondary)',
-          accent: 'var(--ai-accent)',
-          border: 'var(--ai-border)'
+          surface: 'var(--ytai-surface, var(--ai-surface))',
+          primary: 'var(--ytai-text-primary, var(--ai-text-primary))',
+          secondary: 'var(--ytai-text-secondary, var(--ai-text-secondary))',
+          accent: 'var(--ytai-accent, var(--ai-accent))',
+          border: 'var(--ytai-border, var(--ai-border))'
         }
       }
     }

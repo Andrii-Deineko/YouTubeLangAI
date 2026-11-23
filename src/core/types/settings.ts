@@ -27,6 +27,7 @@ export interface UserSettings {
   nativeLang: string;
   videoLang: string;
   showDualSubtitles: boolean;
+  showTranslation: boolean;
   activeListeningMode: ActiveListeningMode;
   pauseOnAltReveal: boolean;
   autoPauseAfterCue: boolean;
@@ -85,6 +86,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   nativeLang: 'ru',
   videoLang: 'en',
   showDualSubtitles: true,
+  showTranslation: true,
   activeListeningMode: 'off',
   pauseOnAltReveal: false,
   autoPauseAfterCue: false,

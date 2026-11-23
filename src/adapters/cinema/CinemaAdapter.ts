@@ -170,6 +170,8 @@ export class CinemaAdapter implements PlatformAdapter {
           const detectedLang = detectLanguageFromLabelAndCues(trackLabel, cues);
           const meta: TrackMetadata = {
             id: 'cinema-track-' + Date.now(),
+            videoId: window.location.hostname + window.location.pathname,
+            lang: detectedLang,
             language: detectedLang,
             label: trackLabel,
             source: 'native'

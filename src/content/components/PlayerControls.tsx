@@ -299,10 +299,11 @@ export function PlayerControls({
           <button
             type="button"
             title="Toggle Dual Subtitles"
-            onClick={() =>
-              onUpdateSettings({ showDualSubtitles: !settings.showDualSubtitles })
-            }
-            style={settings.showDualSubtitles ? activeStyle : inactiveStyle}
+            onClick={() => {
+              const nextVal = !(settings.showTranslation ?? settings.showDualSubtitles);
+              onUpdateSettings({ showDualSubtitles: nextVal, showTranslation: nextVal });
+            }}
+            style={(settings.showTranslation ?? settings.showDualSubtitles) ? activeStyle : inactiveStyle}
             className={`rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)]`}
           >
             <Languages size={scale.iconSize} />

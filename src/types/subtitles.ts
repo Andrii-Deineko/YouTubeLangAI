@@ -36,6 +36,7 @@ export interface SubtitleCue {
   endTime: number;
   text: string;
   tokens: WordToken[];
+  translation?: string;
 }
 
 export interface TrackMetadata {

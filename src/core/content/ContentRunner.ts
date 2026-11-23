@@ -14,7 +14,11 @@ import type { UserSettings } from '../types/settings';
 import { DEFAULT_SETTINGS } from '../types/settings';
 import type { SubtitleCue, TrackMetadata } from '../types/subtitles';
 import type { AIExplanation } from '../types/vocabulary';
-import type { QuickTranslateResponse, RuntimeRequest } from '../types/messages';
+import type {
+  FreeTranslateCuesResponse,
+  QuickTranslateResponse,
+  RuntimeRequest
+} from '../types/messages';
 import { mountShadowUI, type MountedShadowUI } from './mountShadowUI';
 import { WordPopup } from '../components/WordPopup';
 import type { WordSelectionPayload } from '../components/SubtitleOverlay';
@@ -40,6 +44,7 @@ export class ContentRunner {
   private adapterTeardown: (() => void) | null = null;
   private unsubscribeSettings: (() => void) | null = null;
   private domObserver: MutationObserver | null = null;
+  private runtimeMessageListener: ((message: unknown) => void) | null = null;
   private isDestroyed = false;
 
   constructor(adapter: PlatformAdapter) {
@@ -61,10 +66,61 @@ export class ContentRunner {
     }
 
     this.unsubscribeSettings = onSettingsChanged((newSettings) => {
+      const prevNativeLang = this.settings.nativeLang;
+      const prevShowTrans =
+        this.settings.showTranslation ?? this.settings.showDualSubtitles;
       this.settings = newSettings;
+      const nextShowTrans =
+        newSettings.showTranslation ?? newSettings.showDualSubtitles;
+
+      if (newSettings.nativeLang !== prevNativeLang) {
+        this.primaryEngine.clearTranslations();
+        this.translatedEngine.clear();
+        this.triggerSubtitleTranslation();
+      } else if (!prevShowTrans && nextShowTrans) {
+        this.triggerSubtitleTranslation();
+      }
+
       this.syncNativeCaptions();
       this.renderUI();
     });
+
+    this.runtimeMessageListener = (message: unknown) => {
+      if (!message || typeof message !== 'object') return;
+      const msg = message as {
+        type?: string;
+        payload?: {
+          videoId?: string;
+          batchTranslations?: Array<{ id: string; text: string }>;
+        };
+      };
+      if (msg.type === 'FREE_TRANSLATE_CUES_BATCH' && msg.payload) {
+        const vid = this.trackMeta?.videoId || window.location.hostname;
+        const targetVid = msg.payload.videoId;
+        if (
+          targetVid === vid ||
+          (vid && targetVid && (targetVid.includes(vid) || vid.includes(targetVid)))
+        ) {
+          if (
+            Array.isArray(msg.payload.batchTranslations) &&
+            msg.payload.batchTranslations.length > 0
+          ) {
+            this.primaryEngine.applyTranslations(msg.payload.batchTranslations);
+            this.translatedEngine.setTranslatedCuesFromBatch(
+              msg.payload.batchTranslations,
+              this.primaryEngine.getCues()
+            );
+            const curTime = this.videoController?.getCurrentTime() ?? 0;
+            this.activePrimaryCue = this.primaryEngine.findActiveCue(curTime);
+            this.activeTranslatedCue = this.translatedEngine.findActiveCue(curTime);
+            this.renderUI();
+          }
+        }
+      }
+    };
+    if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
+      chrome.runtime.onMessage.addListener(this.runtimeMessageListener);
+    }
 
     this.adapterTeardown = this.adapter.init({
       onTracksLoaded: (data) => {
@@ -88,6 +144,8 @@ export class ContentRunner {
         this.syncNativeCaptions();
         this.attachToPlayer();
         this.renderUI();
+
+        this.triggerSubtitleTranslation();
       },
       onAdStateChange: (isAd) => {
         this.isAdShowing = isAd;
@@ -107,6 +165,10 @@ export class ContentRunner {
 
   destroy(): void {
     this.isDestroyed = true;
+    if (this.runtimeMessageListener && typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
+      chrome.runtime.onMessage.removeListener(this.runtimeMessageListener);
+      this.runtimeMessageListener = null;
+    }
     this.adapterTeardown?.();
     this.unsubscribeSettings?.();
     this.domObserver?.disconnect();
@@ -145,8 +207,10 @@ export class ContentRunner {
       onTimeUpdate: (timeSec: number) => {
         if (!this.settings.enabled || this.isAdShowing || !this.videoController) return;
 
+        const isTranslationVisible =
+          this.settings.showTranslation ?? this.settings.showDualSubtitles ?? true;
         const nextPrimary = this.primaryEngine.findActiveCue(timeSec);
-        const nextTranslated = this.settings.showDualSubtitles
+        const nextTranslated = isTranslationVisible
           ? this.translatedEngine.findActiveCue(timeSec)
           : null;
 
@@ -163,7 +227,9 @@ export class ContentRunner {
 
         if (
           nextPrimary?.id !== this.activePrimaryCue?.id ||
-          nextTranslated?.id !== this.activeTranslatedCue?.id
+          nextPrimary?.translation !== this.activePrimaryCue?.translation ||
+          nextTranslated?.id !== this.activeTranslatedCue?.id ||
+          nextTranslated?.text !== this.activeTranslatedCue?.text
         ) {
           this.activePrimaryCue = nextPrimary;
           this.activeTranslatedCue = nextTranslated;
@@ -341,13 +407,18 @@ export class ContentRunner {
 
   private async handleUpdateSettings(partial: Partial<UserSettings>): Promise<void> {
     this.settings = await saveSettings(partial);
+    const isTransEnabled =
+      this.settings.showTranslation ?? this.settings.showDualSubtitles;
     if (
-      partial.showDualSubtitles &&
+      isTransEnabled &&
       this.trackMeta &&
       this.translatedEngine.getCues().length === 0 &&
       this.trackMeta.lang !== this.settings.nativeLang
     ) {
       this.adapter.requestTranslatedTrack?.(this.settings.nativeLang);
+    }
+    if (isTransEnabled) {
+      this.triggerSubtitleTranslation();
     }
     this.syncNativeCaptions();
     this.renderUI();
@@ -372,6 +443,7 @@ export class ContentRunner {
 
     const translatedMatch =
       params.contextTranslation ||
+      params.cue.translation ||
       (this.activeTranslatedCue &&
       Math.abs(this.activeTranslatedCue.startTime - params.cue.startTime) < 2
         ? this.activeTranslatedCue.text
@@ -433,11 +505,12 @@ export class ContentRunner {
       const isSaved = this.savedWordKeys.has(this.buildSavedKey(sel.target, vid, sel.cue.startTime));
 
       const initialContextTranslation =
-        this.activeTranslatedCue &&
+        sel.cue.translation ||
+        (this.activeTranslatedCue &&
         Math.abs(this.activeTranslatedCue.startTime - sel.cue.startTime) < 2
           ? this.activeTranslatedCue.text
           : this.translatedEngine.findActiveCue((sel.cue.startTime + sel.cue.endTime) / 2)?.text ??
-            '';
+            '');
 
       popupElement = createElement(WordPopup, {
         selection: sel,
@@ -482,6 +555,96 @@ export class ContentRunner {
         void this.handleUpdateSettings({ subtitlePosition: null });
       },
       onSelectTarget: (sel) => this.handleSelectTarget(sel)
+    });
+  }
+
+  private triggerSubtitleTranslation(): void {
+    const isTranslationEnabled =
+      this.settings.showTranslation ?? this.settings.showDualSubtitles ?? true;
+    if (!isTranslationEnabled) return;
+
+    const primaryCues = this.primaryEngine.getCues();
+    if (primaryCues.length === 0) return;
+
+    // If native translated track has cues, machine translation is not needed
+    if (this.translatedEngine.getCues().length > 0) return;
+
+    // If all primary cues already have translation, nothing to do
+    const needsTranslation = primaryCues.some((c) => !c.translation);
+    if (!needsTranslation) return;
+
+    const videoId = this.trackMeta?.videoId || window.location.hostname;
+    const targetLang = this.settings.nativeLang || 'ru';
+    const sourceLang = this.trackMeta?.lang ?? 'auto';
+
+    // 1. Check local cache first: free_sub_tr:${videoId}:${targetLang}
+    const cacheKey = `free_sub_tr:${videoId}:${targetLang}`;
+    if (typeof chrome !== 'undefined' && chrome.storage?.local && videoId && videoId !== 'unknown') {
+      chrome.storage.local.get(cacheKey, (res) => {
+        if (this.isDestroyed) return;
+        const cached = res?.[cacheKey] as
+          | { savedAt?: number; translations?: Record<string, string> }
+          | undefined;
+
+        if (cached && cached.translations) {
+          const batch = Object.entries(cached.translations).map(([id, text]) => ({ id, text }));
+          if (batch.length > 0) {
+            this.primaryEngine.applyTranslations(batch);
+            this.translatedEngine.setTranslatedCuesFromBatch(batch, this.primaryEngine.getCues());
+            const curTime = this.videoController?.getCurrentTime() ?? 0;
+            this.activePrimaryCue = this.primaryEngine.findActiveCue(curTime);
+            this.activeTranslatedCue = this.translatedEngine.findActiveCue(curTime);
+            this.renderUI();
+          }
+
+          const allCovered = primaryCues.every((c) => cached.translations?.[c.id]);
+          if (allCovered) return;
+        }
+
+        // 2. Request background translation for missing cues
+        this.requestBackgroundTranslation(videoId, sourceLang, targetLang);
+      });
+    } else {
+      this.requestBackgroundTranslation(videoId, sourceLang, targetLang);
+    }
+  }
+
+  private requestBackgroundTranslation(
+    videoId: string,
+    sourceLang: string,
+    targetLang: string
+  ): void {
+    const primaryCues = this.primaryEngine.getCues();
+    const untranslated = primaryCues.filter((c) => !c.translation);
+    if (untranslated.length === 0) return;
+
+    const curTime = this.videoController?.getCurrentTime() ?? 0;
+    const request: RuntimeRequest = {
+      type: 'FREE_TRANSLATE_CUES',
+      payload: {
+        videoId,
+        cues: primaryCues.map((c) => ({
+          id: c.id,
+          text: c.text,
+          startTime: c.startTime,
+          endTime: c.endTime
+        })),
+        sourceLang,
+        targetLang,
+        priorityTime: curTime
+      }
+    };
+
+    chrome.runtime.sendMessage(request, (response: FreeTranslateCuesResponse | undefined) => {
+      if (this.isDestroyed || chrome.runtime.lastError || !response || !response.ok) return;
+      if (Array.isArray(response.data) && response.data.length > 0) {
+        this.primaryEngine.applyTranslations(response.data);
+        this.translatedEngine.setTranslatedCuesFromBatch(response.data, this.primaryEngine.getCues());
+        const t = this.videoController?.getCurrentTime() ?? 0;
+        this.activePrimaryCue = this.primaryEngine.findActiveCue(t);
+        this.activeTranslatedCue = this.translatedEngine.findActiveCue(t);
+        this.renderUI();
+      }
     });
   }
 }

@@ -26,6 +26,7 @@ export interface UserSettings {
   enabled: boolean;
   nativeLang: string;
   showDualSubtitles: boolean;
+  showTranslation: boolean;
   activeListeningMode: ActiveListeningMode;
   autoPauseAfterCue: boolean;
   autoPauseOnWordClick: boolean;
@@ -48,6 +49,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   enabled: true,
   nativeLang: 'ru',
   showDualSubtitles: true,
+  showTranslation: true,
   activeListeningMode: 'off',
   autoPauseAfterCue: false,
   autoPauseOnWordClick: true,

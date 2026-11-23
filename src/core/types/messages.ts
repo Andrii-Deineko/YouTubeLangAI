@@ -117,8 +117,53 @@ export type RuntimeRequest =
       payload: { rect?: { x: number; y: number; width: number; height: number } };
     }
   | {
+      type: 'FREE_TRANSLATE_CUES';
+      payload: {
+        videoId: string;
+        cues: Array<{ id: string; text: string; startTime?: number; endTime?: number }>;
+        sourceLang?: string;
+        targetLang: string;
+        priorityTime?: number;
+      };
+    }
+  | {
+      type: 'FREE_TRANSLATE_WORD';
+      payload: {
+        word: string;
+        sentence?: string;
+        sourceLang?: string;
+        targetLang: string;
+      };
+    }
+  | {
       type: 'INJECT_MAIN_INTERCEPTOR';
     };
+
+export interface FreeTranslateWordResult {
+  word: string;
+  translation: string;
+  sentenceTranslation: string;
+  alternatives: string[];
+  partOfSpeech?: string;
+  detectedLang?: string;
+  fromCache?: boolean;
+  isZeroConfigMode?: boolean;
+  transcription?: string;
+  sourceLang?: string;
+  targetLang?: string;
+  rawText?: string;
+  synonyms?: string[];
+  contextSentence?: string;
+  contextSentenceTranslation?: string;
+}
+
+export interface FreeTranslateCuesBatchMessage {
+  type: 'FREE_TRANSLATE_CUES_BATCH';
+  payload: {
+    videoId: string;
+    batchTranslations: Array<{ id: string; text: string }>;
+  };
+}
 
 export interface RuntimeResponseSuccess<T> {
   ok: true;
@@ -150,3 +195,5 @@ export type FetchModelsResponse = RuntimeResponse<string[]>;
 export type FetchSubtitleTextResponse = { text?: string; error?: string };
 export type ScreenshotResponse = { dataUrl?: string; error?: string };
 export type InjectMainInterceptorResponse = { ok: boolean; data?: boolean; error?: string };
+export type FreeTranslateWordResponse = RuntimeResponse<FreeTranslateWordResult>;
+export type FreeTranslateCuesResponse = RuntimeResponse<Array<{ id: string; text: string }>>;

@@ -7,6 +7,7 @@ import {
   setCachedTranslation
 } from '../storage/db';
 import { exportCardsToAnki, testAnkiConnection } from './export';
+import { freeTranslateWord, translateCueBatch } from './freeTranslate';
 import {
   fetchAvailableModels,
   requestAIExplanation,
@@ -203,6 +204,33 @@ async function processMessage(
 ): Promise<RuntimeResponse<unknown>> {
   try {
     switch (message.type) {
+      case 'FREE_TRANSLATE_CUES': {
+        const result = await translateCueBatch({
+          videoId: message.payload.videoId,
+          cues: message.payload.cues,
+          sourceLang: message.payload.sourceLang,
+          targetLang: message.payload.targetLang,
+          priorityTime: message.payload.priorityTime,
+          onBatchProgress: (batchTranslations) => {
+            if (sender.tab?.id) {
+              chrome.tabs
+                .sendMessage(sender.tab.id, {
+                  type: 'FREE_TRANSLATE_CUES_BATCH',
+                  payload: {
+                    videoId: message.payload.videoId,
+                    batchTranslations
+                  }
+                })
+                .catch(() => undefined);
+            }
+          }
+        });
+        return { ok: true, data: result };
+      }
+      case 'FREE_TRANSLATE_WORD': {
+        const result = await freeTranslateWord(message.payload);
+        return { ok: true, data: result };
+      }
       case 'QUICK_TRANSLATE': {
         const result = await handleQuickTranslate(
           message.payload.text,

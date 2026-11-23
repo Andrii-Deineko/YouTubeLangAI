@@ -23,7 +23,8 @@ export interface WordSelectionPayload {
 interface SubtitleOverlayProps {
   primaryCue: SubtitleCue | null;
   translatedCue: SubtitleCue | null;
-  showDualSubtitles: boolean;
+  showDualSubtitles?: boolean;
+  showTranslation?: boolean;
   activeListeningMode: ActiveListeningMode;
   altPressed: boolean;
   fontSize?: number;
@@ -119,6 +120,7 @@ export function SubtitleOverlay({
   primaryCue,
   translatedCue,
   showDualSubtitles,
+  showTranslation,
   activeListeningMode,
   altPressed,
   fontSize,
@@ -591,7 +593,7 @@ export function SubtitleOverlay({
         </div>
 
         {/* Translated Subtitle Line */}
-        {showDualSubtitles && translatedCue && (
+        {(showTranslation ?? showDualSubtitles ?? true) && Boolean(primaryCue?.translation || translatedCue?.text) && (
           <div
             className="ytai-blur-target mt-1 leading-snug select-none"
             style={{
@@ -600,7 +602,7 @@ export function SubtitleOverlay({
               textShadow: 'var(--ytai-text-shadow)'
             }}
           >
-            {translatedCue.text}
+            {primaryCue?.translation || translatedCue?.text}
           </div>
         )}
       </div>

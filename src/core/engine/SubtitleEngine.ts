@@ -62,12 +62,85 @@ export class SubtitleEngine {
     this.isAsrTrack = false;
   }
 
+  public clearTranslations(): void {
+    this.cues = this.cues.map((cue) => {
+      if (cue.translation) {
+        const { translation: _, ...rest } = cue;
+        return rest;
+      }
+      return cue;
+    });
+  }
+
   public getCues(): SubtitleCue[] {
     return this.cues;
   }
 
   public getIsAsr(): boolean {
     return this.isAsrTrack;
+  }
+
+  public applyTranslations(batch: Array<{ id: string; text: string }>): boolean {
+    if (!batch || batch.length === 0) return false;
+    const map = new Map<string, string>();
+    for (const item of batch) {
+      if (item && item.id && item.text) {
+        map.set(item.id, item.text);
+      }
+    }
+    let changed = false;
+    this.cues = this.cues.map((cue) => {
+      const tr = map.get(cue.id);
+      if (tr !== undefined && cue.translation !== tr) {
+        changed = true;
+        return {
+          ...cue,
+          translation: tr
+        };
+      }
+      return cue;
+    });
+    return changed;
+  }
+
+  public setTranslatedCuesFromBatch(
+    batch: Array<{ id: string; text: string }>,
+    primaryCues: SubtitleCue[]
+  ): void {
+    if (!batch || batch.length === 0) return;
+    const map = new Map<string, string>();
+    for (const item of batch) {
+      if (item && item.id && item.text) {
+        map.set(item.id, item.text);
+      }
+    }
+
+    const primaryMap = new Map<string, SubtitleCue>();
+    for (const c of primaryCues) {
+      primaryMap.set(c.id, c);
+    }
+
+    const existingMap = new Map<string, SubtitleCue>();
+    for (const c of this.cues) {
+      existingMap.set(c.id, c);
+    }
+
+    for (const item of batch) {
+      const orig = primaryMap.get(item.id);
+      if (orig) {
+        const cleanText = cleanSubtitleText(item.text);
+        existingMap.set(item.id, {
+          id: `tr-${item.id}`,
+          startTime: orig.startTime,
+          endTime: orig.endTime,
+          text: cleanText,
+          translation: cleanText,
+          tokens: tokenizeCueText(`tr-${item.id}`, cleanText, orig.startTime, orig.endTime)
+        });
+      }
+    }
+
+    this.cues = Array.from(existingMap.values()).sort((a, b) => a.startTime - b.startTime);
   }
 
   /**

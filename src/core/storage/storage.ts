@@ -154,7 +154,9 @@ export function mergeSettings(
 ): UserSettings {
   const enabled = raw?.enabled ?? raw?.overlayEnabled ?? DEFAULT_SETTINGS.enabled;
   const showDualSubtitles =
-    raw?.showDualSubtitles ?? raw?.secondTrackEnabled ?? DEFAULT_SETTINGS.showDualSubtitles;
+    raw?.showDualSubtitles ?? raw?.showTranslation ?? raw?.secondTrackEnabled ?? DEFAULT_SETTINGS.showDualSubtitles;
+  const showTranslation =
+    raw?.showTranslation ?? raw?.showDualSubtitles ?? raw?.secondTrackEnabled ?? DEFAULT_SETTINGS.showTranslation;
   const activeListeningMode = parseActiveListeningMode(
     raw?.activeListeningMode ?? raw?.activeListening
   );
@@ -193,6 +195,7 @@ export function mergeSettings(
     ...raw,
     enabled,
     showDualSubtitles,
+    showTranslation,
     activeListeningMode,
     pauseOnAltReveal: raw?.pauseOnAltReveal ?? DEFAULT_SETTINGS.pauseOnAltReveal,
     autoPauseAfterCue,
@@ -247,12 +250,18 @@ export async function getSettings(): Promise<UserSettings> {
 export async function saveSettings(partial: Partial<UserSettings>): Promise<UserSettings> {
   return enqueueStorageWrite(async () => {
     const current = await getSettings();
+    const syncedPartial = { ...partial };
+    if (syncedPartial.showTranslation !== undefined && syncedPartial.showDualSubtitles === undefined) {
+      syncedPartial.showDualSubtitles = syncedPartial.showTranslation;
+    } else if (syncedPartial.showDualSubtitles !== undefined && syncedPartial.showTranslation === undefined) {
+      syncedPartial.showTranslation = syncedPartial.showDualSubtitles;
+    }
     const next: UserSettings = mergeSettings({
       ...current,
-      ...partial,
+      ...syncedPartial,
       llm: {
         ...current.llm,
-        ...(partial.llm ?? {})
+        ...(syncedPartial.llm ?? {})
       }
     });
     try {

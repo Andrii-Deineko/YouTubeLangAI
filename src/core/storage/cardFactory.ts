@@ -1,4 +1,4 @@
-import type { AIExplanation, FSRSState, VocabularyCard } from '../types/vocabulary';
+import type { AIExplanation, CardSource, FSRSState, VocabularyCard } from '../types/vocabulary';
 
 export interface CreateCardInput {
   word: string;
@@ -13,6 +13,8 @@ export interface CreateCardInput {
   screenshotBase64: string | null;
   sourceLang: string;
   nativeLang: string;
+  source?: CardSource;
+  sourceTitle?: string;
 }
 
 export function createInitialFSRSState(now: Date = new Date()): FSRSState {
@@ -37,6 +39,15 @@ export function createNewCard(input: CreateCardInput, now: Date = new Date()): V
       ? crypto.randomUUID()
       : `card-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
+  const detectedSource: CardSource =
+    input.source ??
+    (input.videoId.includes('cinema') ||
+    input.videoId.includes('rezka') ||
+    input.videoId.includes('anime') ||
+    input.videoId.includes('/')
+      ? 'cinema'
+      : 'youtube');
+
   return {
     id,
     word: cleanWord,
@@ -52,6 +63,8 @@ export function createNewCard(input: CreateCardInput, now: Date = new Date()): V
     sourceLang: input.sourceLang,
     nativeLang: input.nativeLang,
     createdAt: now.toISOString(),
-    fsrsState: createInitialFSRSState(now)
+    fsrsState: createInitialFSRSState(now),
+    source: detectedSource,
+    sourceTitle: input.sourceTitle ?? input.videoTitle
   };
 }

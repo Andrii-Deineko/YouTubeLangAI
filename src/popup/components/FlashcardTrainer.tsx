@@ -103,21 +103,37 @@ export function FlashcardTrainer({
   cards,
   onUpdateCard
 }: FlashcardTrainerProps): ReactElement {
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'youtube' | 'cinema'>('all');
   const [practiceAllMode, setPracticeAllMode] = useState(false);
   const [practiceQueueIds, setPracticeQueueIds] = useState<string[]>([]);
   const [revealed, setRevealed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [reviewedCount, setReviewedCount] = useState(0);
 
-  const dueCards = useMemo(() => getDueCards(cards), [cards]);
+  const filteredCards = useMemo(() => {
+    if (sourceFilter === 'all') return cards;
+    return cards.filter((c) => {
+      const src =
+        c.source ??
+        (c.videoId.includes('cinema') ||
+        c.videoId.includes('rezka') ||
+        c.videoId.includes('anime') ||
+        c.videoId.includes('/')
+          ? 'cinema'
+          : 'youtube');
+      return src === sourceFilter;
+    });
+  }, [cards, sourceFilter]);
+
+  const dueCards = useMemo(() => getDueCards(filteredCards), [filteredCards]);
 
   const activeCard = useMemo(() => {
     if (!practiceAllMode) {
       return dueCards[0] ?? null;
     }
     const nextId = practiceQueueIds[0];
-    return cards.find((c) => c.id === nextId) ?? null;
-  }, [cards, dueCards, practiceAllMode, practiceQueueIds]);
+    return filteredCards.find((c) => c.id === nextId) ?? null;
+  }, [filteredCards, dueCards, practiceAllMode, practiceQueueIds]);
 
   const gradePreviews = useMemo(() => {
     if (!activeCard) return [];
@@ -244,7 +260,16 @@ export function FlashcardTrainer({
   }
 
   const remainingCount = practiceAllMode ? practiceQueueIds.length : dueCards.length;
-  const ytUrl = buildYouTubeTimestampUrl(activeCard.videoId, activeCard.timestampSec);
+  const isCinemaCard =
+    (activeCard.source ??
+      (activeCard.videoId.includes('cinema') ||
+      activeCard.videoId.includes('rezka') ||
+      activeCard.videoId.includes('anime') ||
+      activeCard.videoId.includes('/')
+        ? 'cinema'
+        : 'youtube')) === 'cinema';
+
+  const ytUrl = isCinemaCard ? '' : buildYouTubeTimestampUrl(activeCard.videoId, activeCard.timestampSec);
 
   const buttonStyleByLabel: Record<'Again' | 'Hard' | 'Good' | 'Easy', string> = {
     Again: 'border-rose-500/30 bg-rose-500/15 text-rose-200 hover:bg-rose-500/25',
@@ -255,6 +280,33 @@ export function FlashcardTrainer({
 
   return (
     <div className="space-y-3">
+      {/* Platform Deck Filter */}
+      <div className="flex items-center gap-1 rounded-xl bg-slate-900/90 p-1 border border-white/5 text-xs">
+        {(
+          [
+            { id: 'all', label: 'Все источники' },
+            { id: 'youtube', label: '▶ YouTube' },
+            { id: 'cinema', label: '🎬 Кино' }
+          ] as const
+        ).map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => {
+              setSourceFilter(tab.id);
+              setRevealed(false);
+            }}
+            className={`flex-1 rounded-lg py-1 text-center font-medium transition ${
+              sourceFilter === tab.id
+                ? 'bg-indigo-600 text-white shadow'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {/* Progress Bar */}
       <div className="flex items-center justify-between text-xs text-slate-400">
         <div className="flex items-center gap-2">
@@ -295,16 +347,29 @@ export function FlashcardTrainer({
               className="h-full w-full object-cover opacity-90"
             />
             <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/90 via-black/50 to-transparent px-3 py-2 text-[11px] text-slate-200">
-              <span className="truncate pr-2">{activeCard.videoTitle}</span>
-              <a
-                href={ytUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="flex shrink-0 items-center gap-1 rounded-md bg-white/15 px-2 py-0.5 font-medium text-white hover:bg-white/25"
-              >
-                <ExternalLink className="h-3 w-3" />
-                <span>{Math.floor(activeCard.timestampSec)}s</span>
-              </a>
+              <div className="flex items-center gap-1.5 truncate pr-2">
+                <span
+                  className={`inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                    isCinemaCard
+                      ? 'border border-amber-500/30 bg-amber-500/20 text-amber-300'
+                      : 'border border-rose-500/30 bg-rose-500/20 text-rose-300'
+                  }`}
+                >
+                  {isCinemaCard ? '🎬 Кино' : '▶ YouTube'}
+                </span>
+                <span className="truncate">{activeCard.sourceTitle || activeCard.videoTitle}</span>
+              </div>
+              {ytUrl && (
+                <a
+                  href={ytUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex shrink-0 items-center gap-1 rounded-md bg-white/15 px-2 py-0.5 font-medium text-white hover:bg-white/25"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  <span>{Math.floor(activeCard.timestampSec)}s</span>
+                </a>
+              )}
             </div>
           </div>
         )}
@@ -312,17 +377,30 @@ export function FlashcardTrainer({
         <div className="p-4">
           {!activeCard.screenshotBase64 && (
             <div className="mb-2 flex items-center justify-between text-[11px] text-slate-400">
-              <span className="truncate pr-2">{activeCard.videoTitle}</span>
-              <a
-                href={ytUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="flex shrink-0 items-center gap-1 text-indigo-400 hover:text-indigo-300"
-                style={{ color: 'var(--ytai-accent)' }}
-              >
-                <ExternalLink className="h-3 w-3" />
-                <span>YouTube ({Math.floor(activeCard.timestampSec)}s)</span>
-              </a>
+              <div className="flex items-center gap-1.5 truncate pr-2">
+                <span
+                  className={`inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                    isCinemaCard
+                      ? 'border border-amber-500/30 bg-amber-500/20 text-amber-300'
+                      : 'border border-rose-500/30 bg-rose-500/20 text-rose-300'
+                  }`}
+                >
+                  {isCinemaCard ? '🎬 Кино' : '▶ YouTube'}
+                </span>
+                <span className="truncate">{activeCard.sourceTitle || activeCard.videoTitle}</span>
+              </div>
+              {ytUrl && (
+                <a
+                  href={ytUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex shrink-0 items-center gap-1 text-indigo-400 hover:text-indigo-300"
+                  style={{ color: 'var(--ytai-accent)' }}
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  <span>YouTube ({Math.floor(activeCard.timestampSec)}s)</span>
+                </a>
+              )}
             </div>
           )}
 

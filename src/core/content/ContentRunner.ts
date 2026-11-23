@@ -458,11 +458,13 @@ export class ContentRunner {
       contextSentence: params.cue.text,
       contextTranslation: translatedMatch,
       videoId: vid,
-      videoTitle: document.title || 'Video',
+      videoTitle: document.title || (this.adapter.id === 'youtube' ? 'YouTube Video' : 'Cinema Stream'),
       timestampSec: params.cue.startTime,
       screenshotBase64,
       sourceLang: this.trackMeta?.lang ?? 'auto',
-      nativeLang: this.settings.nativeLang
+      nativeLang: this.settings.nativeLang,
+      source: this.adapter.id === 'youtube' ? 'youtube' : 'cinema',
+      sourceTitle: document.title || (this.adapter.id === 'youtube' ? 'YouTube' : 'Кино')
     });
 
     await saveVocabularyCard(card);

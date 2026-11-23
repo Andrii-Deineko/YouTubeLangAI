@@ -13,6 +13,13 @@ import {
   requestAIExplanation,
   testLLMConnection
 } from './llm';
+import {
+  disableCinemaModule,
+  hasCinemaPermissions,
+  isCinemaScriptRegistered,
+  registerCinemaScripts,
+  syncCinemaModuleState
+} from './moduleManager';
 import { getSettings } from '../storage/storage';
 import type { RuntimeRequest, RuntimeResponse } from '../types/messages';
 import type { AIExplanation, QuickTranslationResult } from '../types/vocabulary';
@@ -326,6 +333,30 @@ async function processMessage(
         }
         return { ok: false, error: 'chrome.scripting.executeScript not available' };
       }
+      case 'ENABLE_CINEMA_MODULE': {
+        const result = await registerCinemaScripts();
+        if (result.success) {
+          return { ok: true, data: result };
+        }
+        return { ok: false, error: result.error || 'Failed to register cinema scripts' };
+      }
+      case 'DISABLE_CINEMA_MODULE': {
+        const result = await disableCinemaModule();
+        return { ok: true, data: result };
+      }
+      case 'GET_CINEMA_MODULE_STATUS': {
+        const settings = await getSettings();
+        const hasPermission = await hasCinemaPermissions();
+        const registered = await isCinemaScriptRegistered();
+        return {
+          ok: true,
+          data: {
+            enabled: settings.cinemaModuleEnabled,
+            hasPermission,
+            registered
+          }
+        };
+      }
       default:
         return { ok: false, error: 'Unsupported message type' };
     }
@@ -335,6 +366,20 @@ async function processMessage(
       error: err instanceof Error ? err.message : 'Unexpected service worker error'
     };
   }
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  void syncCinemaModuleState();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  void syncCinemaModuleState();
+});
+
+if (chrome.permissions?.onRemoved) {
+  chrome.permissions.onRemoved.addListener(() => {
+    void syncCinemaModuleState();
+  });
 }
 
 chrome.runtime.onMessage.addListener(

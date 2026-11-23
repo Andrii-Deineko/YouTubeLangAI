@@ -137,7 +137,22 @@ export type RuntimeRequest =
     }
   | {
       type: 'INJECT_MAIN_INTERCEPTOR';
+    }
+  | {
+      type: 'ENABLE_CINEMA_MODULE';
+    }
+  | {
+      type: 'DISABLE_CINEMA_MODULE';
+    }
+  | {
+      type: 'GET_CINEMA_MODULE_STATUS';
     };
+
+export interface CinemaModuleStatus {
+  enabled: boolean;
+  hasPermission: boolean;
+  registered: boolean;
+}
 
 export interface FreeTranslateWordResult {
   word: string;
@@ -197,3 +212,4 @@ export type ScreenshotResponse = { dataUrl?: string; error?: string };
 export type InjectMainInterceptorResponse = { ok: boolean; data?: boolean; error?: string };
 export type FreeTranslateWordResponse = RuntimeResponse<FreeTranslateWordResult>;
 export type FreeTranslateCuesResponse = RuntimeResponse<Array<{ id: string; text: string }>>;
+export type CinemaModuleStatusResponse = RuntimeResponse<CinemaModuleStatus>;

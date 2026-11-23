@@ -44,6 +44,7 @@ export interface UserSettings {
   ankiDeckName: string;
   ankiConnectUrl: string;
   llm: LLMConfig;
+  cinemaModuleEnabled: boolean;
   customMirrors: string[];
   blacklistedDomains: string[];
 }
@@ -107,6 +108,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
     apiKey: '',
     model: 'gemini-1.5-flash'
   },
+  cinemaModuleEnabled: false,
   customMirrors: [],
   blacklistedDomains: [...DEFAULT_BLACKLISTED_DOMAINS]
 };

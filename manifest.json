@@ -23,22 +23,25 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://*.youtube.com/*"],
+      "matches": ["*://*.youtube.com/*", "*://youtube.com/*"],
       "js": ["src/entries/interceptor-yt.ts"],
       "world": "MAIN",
-      "run_at": "document_start"
+      "run_at": "document_start",
+      "all_frames": false
     },
     {
-      "matches": ["*://*.youtube.com/*"],
+      "matches": ["*://*.youtube.com/*", "*://youtube.com/*"],
       "js": ["src/entries/content-yt.ts"],
       "world": "ISOLATED",
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": false
     }
   ],
-  "permissions": ["storage", "unlimitedStorage"],
+  "permissions": ["storage", "unlimitedStorage", "scripting"],
   "host_permissions": [
     "*://*.youtube.com/*",
+    "*://youtube.com/*",
     "https://translate.googleapis.com/*"
   ],
-  "optional_host_permissions": ["http://127.0.0.1/*"]
+  "optional_host_permissions": ["https://*/*", "http://*/*"]
 }

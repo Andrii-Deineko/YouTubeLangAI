@@ -6,12 +6,17 @@ import {
   Database,
   Eye,
   EyeOff,
+  Film,
   Ghost,
+  Globe,
+  Layers,
   Loader2,
   Palette,
+  Play,
   PlugZap,
   RefreshCw,
   RotateCcw,
+  ShieldCheck,
   Tv
 } from 'lucide-react';
 import { clearAllCaches } from '../../core/storage/db';
@@ -20,6 +25,8 @@ import { getCachedModels, saveCachedModels } from '../../core/storage/storage';
 import { SUBTITLE_SCALES, THEMES } from '../../core/styles/themes';
 import type {
   AnkiTestResponse,
+  CinemaModuleStatus,
+  CinemaModuleStatusResponse,
   FetchModelsResponse,
   LLMTestResponse,
   RuntimeRequest
@@ -172,6 +179,13 @@ export function SettingsPanel({
   const [manualModelMode, setManualModelMode] = useState(false);
   const [cacheHydrated, setCacheHydrated] = useState(false);
   const [cacheCleared, setCacheCleared] = useState(false);
+
+  const [cinemaStatus, setCinemaStatus] = useState<CinemaModuleStatus | null>(null);
+  const [currentSiteHostname, setCurrentSiteHostname] = useState<string>('');
+  const [isCurrentSiteCinema, setIsCurrentSiteCinema] = useState(false);
+  const [hasCurrentSitePermission, setHasCurrentSitePermission] = useState(false);
+  const [enablingCinema, setEnablingCinema] = useState(false);
+  const [cinemaError, setCinemaError] = useState<string | null>(null);
 
   const lastFetchedSignatureRef = useRef<string>('');
   const latestFetchRequestIdRef = useRef(0);
@@ -332,8 +346,297 @@ export function SettingsPanel({
     window.setTimeout(() => setCacheCleared(false), 2000);
   };
 
+  // Inspect active tab & sync cinema module status
+  useEffect(() => {
+    let active = true;
+
+    if (chrome.runtime?.sendMessage) {
+      chrome.runtime.sendMessage(
+        { type: 'GET_CINEMA_MODULE_STATUS' },
+        (res: CinemaModuleStatusResponse | undefined) => {
+          if (!active) return;
+          if (res && res.ok) {
+            setCinemaStatus(res.data);
+          }
+        }
+      );
+    }
+
+    if (chrome.tabs?.query) {
+      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+        if (!active || !tabs[0]?.url) return;
+        try {
+          const urlObj = new URL(tabs[0].url);
+          if (urlObj.protocol === 'http:' || urlObj.protocol === 'https:') {
+            const host = urlObj.hostname;
+            setCurrentSiteHostname(host);
+            const isYt = host.includes('youtube.com');
+            if (!isYt) {
+              setIsCurrentSiteCinema(true);
+              if (chrome.permissions?.contains) {
+                const cleanHost = host.replace(/^www\./, '');
+                const perm = await chrome.permissions.contains({
+                  origins: [`*://*.${cleanHost}/*`, `https://*/*`]
+                });
+                if (active) setHasCurrentSitePermission(perm);
+              }
+            }
+          }
+        } catch {
+          // Ignore unsupported URL schemes
+        }
+      });
+    }
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleToggleCinema = async (checked: boolean): Promise<void> => {
+    setEnablingCinema(true);
+    setCinemaError(null);
+    try {
+      if (checked) {
+        let granted = false;
+        if (chrome.permissions?.request) {
+          granted = await chrome.permissions.request({
+            origins: ['https://*/*', 'http://*/*']
+          });
+        } else {
+          granted = true;
+        }
+
+        if (!granted) {
+          setCinemaError('Для работы кинотеатров требуется предоставить доступ к сайтам');
+          setEnablingCinema(false);
+          return;
+        }
+
+        await new Promise<void>((resolve, reject) => {
+          chrome.runtime.sendMessage({ type: 'ENABLE_CINEMA_MODULE' }, (res) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else if (res && !res.ok) {
+              reject(new Error(res.error || 'Failed to enable cinema module'));
+            } else {
+              resolve();
+            }
+          });
+        });
+
+        await onUpdateSettings({ cinemaModuleEnabled: true });
+        setCinemaStatus({ enabled: true, hasPermission: true, registered: true });
+      } else {
+        await new Promise<void>((resolve, reject) => {
+          chrome.runtime.sendMessage({ type: 'DISABLE_CINEMA_MODULE' }, () => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else {
+              resolve();
+            }
+          });
+        });
+
+        await onUpdateSettings({ cinemaModuleEnabled: false });
+        setCinemaStatus((prev) => (prev ? { ...prev, enabled: false, registered: false } : null));
+      }
+    } catch (err: unknown) {
+      setCinemaError(err instanceof Error ? err.message : 'Ошибка переключения модуля кинотеатров');
+    } finally {
+      setEnablingCinema(false);
+    }
+  };
+
+  const handleEnableCurrentSite = async (): Promise<void> => {
+    if (!currentSiteHostname) return;
+    setEnablingCinema(true);
+    setCinemaError(null);
+    try {
+      const cleanHost = currentSiteHostname.replace(/^www\./, '');
+      let granted = false;
+      if (chrome.permissions?.request) {
+        granted = await chrome.permissions.request({
+          origins: [`*://*.${cleanHost}/*`, `*://${cleanHost}/*`]
+        });
+      } else {
+        granted = true;
+      }
+
+      if (!granted) {
+        setCinemaError(`Доступ к ${currentSiteHostname} был отклонён`);
+        setEnablingCinema(false);
+        return;
+      }
+
+      setHasCurrentSitePermission(true);
+
+      // Register scripts in service worker
+      await new Promise<void>((resolve, reject) => {
+        chrome.runtime.sendMessage({ type: 'ENABLE_CINEMA_MODULE' }, () => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else {
+            resolve();
+          }
+        });
+      });
+
+      await onUpdateSettings({ cinemaModuleEnabled: true });
+      setCinemaStatus({ enabled: true, hasPermission: true, registered: true });
+
+      // Direct injection for instant zero-reload support on current tab
+      if (chrome.tabs?.query && chrome.scripting?.executeScript) {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab?.id) {
+          try {
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id, allFrames: true },
+              world: 'MAIN',
+              files: ['assets/interceptor-cinema.js']
+            });
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id, allFrames: true },
+              world: 'ISOLATED',
+              files: ['assets/content-cinema.js']
+            });
+          } catch (injectErr) {
+            console.warn('[Popup] Direct script injection notice:', injectErr);
+          }
+        }
+      }
+    } catch (err: unknown) {
+      setCinemaError(err instanceof Error ? err.message : 'Не удалось включить на текущем сайте');
+    } finally {
+      setEnablingCinema(false);
+    }
+  };
+
   return (
     <div className="max-h-[450px] space-y-4 overflow-y-auto pr-1 text-xs">
+      {/* Platform Modules (Модули платформ) */}
+      <section
+        className="space-y-3 rounded-2xl border p-3.5 transition-colors"
+        style={{
+          backgroundColor: 'var(--ytai-surface)',
+          borderColor: 'var(--ytai-border)'
+        }}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Layers className="h-4 w-4" style={{ color: 'var(--ytai-accent)' }} />
+            <h3 className="font-semibold text-white">Модули платформ</h3>
+          </div>
+          <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-400">
+            Модульная система
+          </span>
+        </div>
+
+        {/* YouTube Module Card */}
+        <div className="flex items-center justify-between rounded-xl border border-white/5 bg-slate-900/60 p-2.5">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-600/20 text-red-400 border border-red-500/30">
+              <Play className="h-4 w-4 fill-current" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-white">YouTube</span>
+                <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400 border border-emerald-500/30">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Активен
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400">
+                Встроен по умолчанию (youtube.com)
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Cinema Module Card */}
+        <div className="space-y-2 rounded-xl border border-white/5 bg-slate-900/60 p-2.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-600/20 text-amber-400 border border-amber-500/30">
+                <Film className="h-4 w-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-white">Онлайн-кинотеатры</span>
+                  {settings.cinemaModuleEnabled ? (
+                    <span
+                      title={cinemaStatus?.registered ? 'Скрипты зарегистрированы в браузере' : undefined}
+                      className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300 border border-amber-500/30"
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+                      Активен
+                    </span>
+                  ) : (
+                    <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">
+                      Выключен
+                    </span>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  Rezka, Filmix, Kinogo, AnimeGo и другие плееры
+                </p>
+              </div>
+            </div>
+
+            <label className="relative inline-flex cursor-pointer items-center">
+              <input
+                type="checkbox"
+                checked={settings.cinemaModuleEnabled ?? false}
+                disabled={enablingCinema}
+                onChange={(e) => void handleToggleCinema(e.target.checked)}
+                className="peer sr-only"
+              />
+              <div className="peer h-5 w-9 rounded-full bg-slate-700 after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:bg-white after:transition-all after:content-[''] peer-checked:bg-amber-600 peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none" />
+            </label>
+          </div>
+
+          {/* Quick Enable on Current Site button */}
+          {isCurrentSiteCinema && (
+            <div className="mt-2 flex items-center justify-between rounded-lg bg-amber-500/10 border border-amber-500/25 p-2">
+              <div className="min-w-0 pr-2">
+                <div className="flex items-center gap-1.5 text-[11px] font-medium text-amber-200">
+                  <Globe className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{currentSiteHostname}</span>
+                </div>
+                <div className="text-[9px] text-amber-300/80">
+                  {hasCurrentSitePermission
+                    ? 'Сайт разрешён расширению'
+                    : 'Требуется разрешение для текущего сайта'}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                disabled={enablingCinema}
+                onClick={() => void handleEnableCurrentSite()}
+                className="shrink-0 flex items-center gap-1 rounded-md bg-amber-600 hover:bg-amber-500 px-2.5 py-1 text-[10px] font-semibold text-white shadow transition disabled:opacity-50"
+              >
+                {enablingCinema ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <ShieldCheck className="h-3 w-3" />
+                )}
+                <span>
+                  {hasCurrentSitePermission ? 'Перезапустить скрипт' : 'Включить на этом сайте'}
+                </span>
+              </button>
+            </div>
+          )}
+
+          {cinemaError && (
+            <div className="flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-[10px] text-rose-300">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              <span>{cinemaError}</span>
+            </div>
+          )}
+        </div>
+      </section>
+
       {/* Appearance & Subtitles (Оформление и субтитры) */}
       <section
         className="space-y-3.5 rounded-2xl border p-3.5 transition-colors"

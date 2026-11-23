@@ -68,6 +68,7 @@ export function VocabularyList({
 }: VocabularyListProps): ReactElement {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<VocabFilter>('all');
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'youtube' | 'cinema'>('all');
   const [ankiLoading, setAnkiLoading] = useState(false);
   const [exportStatus, setExportStatus] = useState<{
     type: 'success' | 'error';
@@ -80,6 +81,18 @@ export function VocabularyList({
     const q = query.trim().toLowerCase();
 
     return cards.filter((card) => {
+      if (sourceFilter !== 'all') {
+        const cardSource =
+          card.source ??
+          (card.videoId.includes('cinema') ||
+          card.videoId.includes('rezka') ||
+          card.videoId.includes('anime') ||
+          card.videoId.includes('/')
+            ? 'cinema'
+            : 'youtube');
+        if (cardSource !== sourceFilter) return false;
+      }
+
       if (filter === 'due' && new Date(card.fsrsState.due).getTime() > nowMs) {
         return false;
       }
@@ -106,7 +119,7 @@ export function VocabularyList({
         card.videoTitle.toLowerCase().includes(q)
       );
     });
-  }, [cards, filter, query]);
+  }, [cards, filter, sourceFilter, query]);
 
   const handleAnkiExport = async (): Promise<void> => {
     if (filteredCards.length === 0 || ankiLoading) return;
@@ -185,6 +198,30 @@ export function VocabularyList({
             }}
             className="w-full rounded-xl border py-2 pl-9 pr-3 text-xs text-slate-100 placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
           />
+        </div>
+
+        {/* Platform Source Tabs */}
+        <div className="flex items-center gap-1 rounded-xl bg-slate-900/90 p-1 border border-white/5 text-xs">
+          {(
+            [
+              { id: 'all', label: 'Все источники' },
+              { id: 'youtube', label: '▶ YouTube' },
+              { id: 'cinema', label: '🎬 Кино' }
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setSourceFilter(tab.id)}
+              className={`flex-1 rounded-lg py-1 text-center font-medium transition ${
+                sourceFilter === tab.id
+                  ? 'bg-indigo-600 text-white shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -298,7 +335,18 @@ export function VocabularyList({
       ) : (
         <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
           {filteredCards.map((card) => {
-            const ytUrl = buildYouTubeTimestampUrl(card.videoId, card.timestampSec);
+            const isCinema =
+              (card.source ??
+                (card.videoId.includes('cinema') ||
+                card.videoId.includes('rezka') ||
+                card.videoId.includes('anime') ||
+                card.videoId.includes('/')
+                  ? 'cinema'
+                  : 'youtube')) === 'cinema';
+            const ytUrl = isCinema ? '' : buildYouTubeTimestampUrl(card.videoId, card.timestampSec);
+            const cinemaUrl = isCinema && card.videoId.startsWith('http') ? card.videoId : null;
+            const externalUrl = ytUrl || cinemaUrl;
+
             return (
               <div
                 key={card.id}
@@ -323,6 +371,15 @@ export function VocabularyList({
                         <span className="truncate text-sm font-bold text-white">
                           {card.word}
                         </span>
+                        <span
+                          className={`inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                            isCinema
+                              ? 'border border-amber-500/30 bg-amber-500/20 text-amber-300'
+                              : 'border border-rose-500/30 bg-rose-500/20 text-rose-300'
+                          }`}
+                        >
+                          {isCinema ? '🎬 Кино' : '▶ YouTube'}
+                        </span>
                         <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300">
                           {getCardStateLabel(card.fsrsState.state)}
                         </span>
@@ -333,15 +390,17 @@ export function VocabularyList({
                     </div>
 
                     <div className="flex shrink-0 items-center gap-1">
-                      <a
-                        href={ytUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="Open YouTube at timestamp"
-                        className="rounded-lg p-1 text-indigo-400 hover:bg-indigo-500/15 hover:text-indigo-300"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </a>
+                      {externalUrl && (
+                        <a
+                          href={externalUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={isCinema ? 'Open movie page' : 'Open YouTube at timestamp'}
+                          className="rounded-lg p-1 text-indigo-400 hover:bg-indigo-500/15 hover:text-indigo-300"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      )}
                       <button
                         type="button"
                         title="Delete card"
@@ -360,7 +419,7 @@ export function VocabularyList({
                   )}
 
                   <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500">
-                    <span className="truncate pr-2">{card.videoTitle}</span>
+                    <span className="truncate pr-2">{card.sourceTitle || card.videoTitle}</span>
                     <span className="shrink-0">{Math.floor(card.timestampSec)}s</span>
                   </div>
                 </div>

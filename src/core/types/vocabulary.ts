@@ -39,6 +39,8 @@ export interface QuickTranslationResult {
   fromCache?: boolean;
 }
 
+export type CardSource = 'youtube' | 'cinema';
+
 export interface VocabularyCard {
   id: string;
   word: string;
@@ -55,4 +57,6 @@ export interface VocabularyCard {
   nativeLang: string;
   createdAt: string;
   fsrsState: FSRSState;
+  source?: CardSource;
+  sourceTitle?: string;
 }

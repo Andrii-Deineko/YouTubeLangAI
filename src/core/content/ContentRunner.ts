@@ -33,6 +33,7 @@ export class ContentRunner {
   private translatedEngine = new SubtitleEngine();
   private settings: UserSettings = { ...DEFAULT_SETTINGS };
   private trackMeta: TrackMetadata | null = null;
+  private translatedVideoId = '';
   private isAdShowing = false;
   private altPressed = false;
   private activePrimaryCue: SubtitleCue | null = null;
@@ -73,6 +74,9 @@ export class ContentRunner {
 
     this.unsubscribeSettings = onSettingsChanged((newSettings) => {
       const prevNativeLang = this.settings.nativeLang;
+      const prevTranslationProvider = this.settings.translationProvider;
+      const prevMyMemoryEmail = this.settings.myMemoryEmail;
+      const prevDeepLApiKey = this.settings.deeplApiKey;
       const prevShowTrans =
         this.settings.subtitleTrackMode
           ? this.settings.subtitleTrackMode !== 'original'
@@ -83,7 +87,12 @@ export class ContentRunner {
           ? newSettings.subtitleTrackMode !== 'original'
           : (newSettings.showTranslation ?? newSettings.showDualSubtitles);
 
-      if (newSettings.nativeLang !== prevNativeLang) {
+      if (
+        newSettings.nativeLang !== prevNativeLang ||
+        newSettings.translationProvider !== prevTranslationProvider ||
+        newSettings.myMemoryEmail !== prevMyMemoryEmail ||
+        newSettings.deeplApiKey !== prevDeepLApiKey
+      ) {
         this.primaryEngine.clearTranslations();
         this.translatedEngine.clear();
         this.triggerSubtitleTranslation();
@@ -101,7 +110,7 @@ export class ContentRunner {
         type?: string;
         payload?: {
           videoId?: string;
-          batchTranslations?: Array<{ id: string; text: string }>;
+          batchTranslations?: Array<{ id: string; text: string; errorProvider?: string }>;
         };
       };
       if (msg.type === 'FREE_TRANSLATE_CUES_BATCH' && msg.payload) {
@@ -224,6 +233,13 @@ export class ContentRunner {
 
   private applyTrackData(data: CapturedTrackData): void {
     if (data.primaryCues) {
+      const nextVideoId = data.primaryMeta?.videoId ?? '';
+      if (nextVideoId && nextVideoId !== this.translatedVideoId) {
+        this.translatedVideoId = nextVideoId;
+        this.translatedEngine.clear();
+        this.activeTranslatedCue = null;
+      }
+
       const preservedTranslations = this.primaryEngine
         .getCues()
         .filter((cue) => Boolean(cue.translation))
@@ -241,6 +257,10 @@ export class ContentRunner {
         this.videoController?.getCurrentTime() ?? 0
       );
     } else if (data.primaryCues) {
+      // Netflix emits an empty caption to close the current cue. The primary cue
+      // timing changes there, but no new translation batch is produced — sync the
+      // generated translations so they disappear together with the original line.
+      this.translatedEngine.syncGeneratedCueTimings(this.primaryEngine.getCues());
       this.activeTranslatedCue = this.translatedEngine.findActiveCue(
         this.videoController?.getCurrentTime() ?? 0
       );
@@ -270,8 +290,17 @@ export class ContentRunner {
           this.settings.subtitleTrackMode !== 'original' &&
           (this.settings.showTranslation ?? this.settings.showDualSubtitles ?? true);
         const nextPrimary = this.primaryEngine.findActiveCue(timeSec);
+        // Match by cue id instead of time: a time-based search can land on the
+        // previous cue (or on a native track with slightly shifted timings) and
+        // make the translation line jump or flicker when a new replica starts.
+        const generatedCue = nextPrimary
+          ? this.translatedEngine.getGeneratedCue(nextPrimary.id)
+          : null;
         const nextTranslated = isTranslationVisible
-          ? this.translatedEngine.findActiveCue(timeSec)
+          ? generatedCue ??
+            (nextPrimary && this.translatedEngine.hasNativeCues()
+              ? this.translatedEngine.findActiveCue(timeSec)
+              : null)
           : null;
 
         if (
@@ -670,8 +699,11 @@ export class ContentRunner {
     const primaryCues = this.primaryEngine.getCues();
     if (primaryCues.length === 0) return;
 
-    // If native translated track has cues, machine translation is not needed
-    if (this.translatedEngine.getCues().length > 0) return;
+    // Only a real native translated track makes machine translation unnecessary.
+    // Generated cues use the `tr-` prefix — without this distinction Netflix stops
+    // translating after the very first batch, because translatedEngine is never
+    // empty again once those generated cues were added.
+    if (this.translatedEngine.hasNativeCues()) return;
 
     // If all primary cues already have translation, nothing to do
     const needsTranslation = primaryCues.some((c) => !c.translation);
@@ -682,7 +714,7 @@ export class ContentRunner {
     const sourceLang = this.trackMeta?.lang ?? 'auto';
 
     // 1. Check local cache first: free_sub_tr:${videoId}:${targetLang}
-    const cacheKey = `free_sub_tr:${videoId}:${targetLang}`;
+    const cacheKey = `free_sub_tr:${this.settings.translationProvider}:${videoId}:${targetLang}`;
     if (typeof chrome !== 'undefined' && chrome.storage?.local && videoId && videoId !== 'unknown') {
       chrome.storage.local.get(cacheKey, (res) => {
         if (this.isDestroyed) return;
@@ -701,7 +733,10 @@ export class ContentRunner {
             this.renderUI();
           }
 
-          const allCovered = primaryCues.every((c) => cached.translations?.[c.id]);
+          // Netflix keeps appending cues while this async storage read is pending,
+          // so check against the current cue set instead of the captured one.
+          const currentCues = this.primaryEngine.getCues();
+          const allCovered = currentCues.every((c) => cached.translations?.[c.id]);
           if (allCovered) return;
         }
 
@@ -727,7 +762,10 @@ export class ContentRunner {
       type: 'FREE_TRANSLATE_CUES',
       payload: {
         videoId,
-        cues: primaryCues.map((c) => ({
+        // Only ask for cues that still need a translation. Re-sending every cue on
+        // each Netflix caption change produced repeated progress batches and
+        // unnecessary MyMemory requests.
+        cues: untranslated.map((c) => ({
           id: c.id,
           text: c.text,
           startTime: c.startTime,

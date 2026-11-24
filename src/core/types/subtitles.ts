@@ -15,6 +15,7 @@ export interface SubtitleCue {
   text: string;
   tokens: WordToken[];
   translation?: string;
+  translationError?: string;
 }
 
 export interface SubtitleTrack {

@@ -104,7 +104,8 @@ export class NetflixAdapter implements PlatformAdapter {
           previous.startTime,
           Math.max(time - 0.02, previous.startTime + 0.2),
           previous.index ?? this.cues.length - 1,
-          previous.id
+          previous.id,
+          previous.translation
         );
       }
 
@@ -190,7 +191,8 @@ export class NetflixAdapter implements PlatformAdapter {
     startTime: number,
     endTime: number,
     index: number,
-    id?: string
+    id?: string,
+    translation?: string
   ): SubtitleCue {
     const cueId = id ?? `netflix-cue-${this.cueSequence++}-${Math.round(startTime * 1000)}`;
     const safeEnd = Math.max(endTime, startTime + 0.2);
@@ -200,6 +202,7 @@ export class NetflixAdapter implements PlatformAdapter {
       startTime,
       endTime: safeEnd,
       text,
+      ...(translation ? { translation } : {}),
       tokens: tokenizeCueText(cueId, text, startTime, safeEnd)
     };
   }

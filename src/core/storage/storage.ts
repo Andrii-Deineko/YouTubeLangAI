@@ -314,6 +314,25 @@ export function mergeSettings(
     ankiDeckName,
     ankiConnectUrl,
     llm,
+    // Keep the user's choice as-is. A failing provider (Google 429 or DeepL
+    // without a key) is handled at request time by the MyMemory fallback in
+    // freeTranslate.ts — overriding the setting here made the provider buttons
+    // in Settings appear to do nothing.
+    translationProvider:
+      raw?.translationProvider === 'mymemory' ||
+      raw?.translationProvider === 'google' ||
+      raw?.translationProvider === 'googleDict' ||
+      raw?.translationProvider === 'deepl'
+        ? raw.translationProvider
+        : DEFAULT_SETTINGS.translationProvider,
+    myMemoryEmail:
+      typeof raw?.myMemoryEmail === 'string'
+        ? raw.myMemoryEmail.trim()
+        : DEFAULT_SETTINGS.myMemoryEmail,
+    deeplApiKey:
+      typeof raw?.deeplApiKey === 'string'
+        ? raw.deeplApiKey.trim()
+        : DEFAULT_SETTINGS.deeplApiKey,
     cinemaModuleEnabled:
       typeof raw?.cinemaModuleEnabled === 'boolean'
         ? raw.cinemaModuleEnabled

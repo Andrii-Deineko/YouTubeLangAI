@@ -18,6 +18,7 @@ export type FontFamily = 'sans' | 'serif' | 'mono';
 export type FontWeight = 'normal' | 'bold';
 
 export type TextOutline = 'none' | 'shadow' | 'outline';
+export type TranslationProvider = 'mymemory' | 'deepl' | 'google' | 'googleDict';
 
 export interface SubtitlePosition {
   xPercent: number;
@@ -101,6 +102,9 @@ export interface UserSettings {
   ankiDeckName: string;
   ankiConnectUrl: string;
   llm: LLMConfig;
+  translationProvider: TranslationProvider;
+  myMemoryEmail: string;
+  deeplApiKey: string;
   cinemaModuleEnabled: boolean;
   netflixModuleEnabled: boolean;
   customMirrors: string[];
@@ -152,6 +156,9 @@ export const DEFAULT_SETTINGS: UserSettings = {
     apiKey: '',
     model: 'gemini-1.5-flash'
   },
+  translationProvider: 'mymemory',
+  myMemoryEmail: '',
+  deeplApiKey: '',
   cinemaModuleEnabled: false,
   netflixModuleEnabled: false,
   customMirrors: [],

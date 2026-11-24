@@ -37,6 +37,8 @@ export interface QuickTranslationResult {
   detectedLang?: string;
   partOfSpeech?: string;
   fromCache?: boolean;
+  translationUnavailable?: boolean;
+  errorProvider?: string;
 }
 
 export type CardSource = 'youtube' | 'cinema';

@@ -170,6 +170,8 @@ export interface FreeTranslateWordResult {
   partOfSpeech?: string;
   detectedLang?: string;
   fromCache?: boolean;
+  translationUnavailable?: boolean;
+  errorProvider?: string;
   isZeroConfigMode?: boolean;
   transcription?: string;
   sourceLang?: string;

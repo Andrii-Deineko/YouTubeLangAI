@@ -123,14 +123,24 @@ const WordTokenItem = memo(function WordTokenItem({
 });
 
 function getPlayerContainer(node: HTMLElement | null): HTMLElement | null {
-  if (!node) {
-    return document.querySelector('#movie_player') ?? document.querySelector('.html5-video-player');
-  }
+  // The HUD lives inside a shadow root. `closest()` cannot walk out of it, so on
+  // Netflix (which has no #movie_player) the old YouTube-only lookup returned null
+  // and made dragging/resizing bail out immediately. The shadow host's light-DOM
+  // parent is the real player container on every supported platform.
+  const root = node?.getRootNode();
+  const host = root instanceof ShadowRoot ? root.host : null;
+  const lightParent = host instanceof HTMLElement ? host.parentElement : null;
+  if (lightParent) return lightParent;
+
   return (
-    node.closest('#movie_player') ??
+    node?.closest('#movie_player') ??
     document.querySelector('#movie_player') ??
-    node.closest('.html5-video-player') ??
-    document.querySelector('.html5-video-player')
+    node?.closest('.html5-video-player') ??
+    document.querySelector('.html5-video-player') ??
+    node?.closest('.watch-video--player-view') ??
+    document.querySelector('.watch-video--player-view') ??
+    node?.closest('[data-uia="video-canvas"]') ??
+    document.querySelector('[data-uia="video-canvas"]')
   );
 }
 
@@ -479,11 +489,7 @@ export function SubtitleOverlay({
     if (!position || isDraggingRef.current) return;
     const boxEl = containerRef.current;
     if (!boxEl) return;
-    const playerEl =
-      boxEl.closest('#movie_player') ??
-      document.querySelector('#movie_player') ??
-      boxEl.closest('.html5-video-player') ??
-      document.querySelector('.html5-video-player');
+    const playerEl = getPlayerContainer(boxEl);
     if (!playerEl) return;
 
     const playerRect = playerEl.getBoundingClientRect();
@@ -517,11 +523,7 @@ export function SubtitleOverlay({
     const boxEl = containerRef.current;
     if (!boxEl) return;
 
-    const playerEl =
-      boxEl.closest('#movie_player') ??
-      document.querySelector('#movie_player') ??
-      boxEl.closest('.html5-video-player') ??
-      document.querySelector('.html5-video-player');
+    const playerEl = getPlayerContainer(boxEl);
     if (!playerEl) return;
 
     const playerRect = playerEl.getBoundingClientRect();
@@ -756,7 +758,10 @@ export function SubtitleOverlay({
   }, [primaryCue, selectedTarget, handleTokenClick, handleTokenEnter]);
 
   const hasCue = Boolean(primaryCue || translatedCue);
-  if (!hasCue && !boxFixed) return null;
+  // Netflix emits empty captions between lines. If the user has already chosen a
+  // custom position/size, keep the box mounted so it stays draggable/resizable
+  // during those gaps instead of disappearing from under the cursor.
+  if (!hasCue && !boxFixed && !position && !boxSize) return null;
 
   const defaultFixedSize = DEFAULT_SUBTITLE_BOX_SIZE;
   const effectiveWidth = boxSize?.width ?? defaultFixedSize.width;
@@ -933,7 +938,19 @@ export function SubtitleOverlay({
             {/* Translation Line: shown in dual mode and translation-only mode */}
             {!isOriginalOnly && (
               <>
-                {Boolean(primaryCue?.translation || translatedCue?.translation || translatedCue?.text) ? (
+                {primaryCue?.translationError || translatedCue?.translationError ? (
+                  <div
+                    className="select-none text-center text-amber-300"
+                    style={{
+                      fontSize: `${translatedFontSize}px`,
+                      lineHeight: 1.22,
+                      marginTop: (primaryCue && (!isTranslationOnly || isAltRevealed)) ? '4px' : '0px',
+                      ...textTypographyStyle
+                    }}
+                  >
+                    Ошибка перевода ({primaryCue?.translationError || translatedCue?.translationError})
+                  </div>
+                ) : Boolean(primaryCue?.translation || translatedCue?.translation || translatedCue?.text) ? (
                   <div
                     className={`ytai-blur-target select-none ${
                       isTranslationOnly ? 'font-medium' : ''
@@ -950,9 +967,15 @@ export function SubtitleOverlay({
                   >
                     {primaryCue?.translation || translatedCue?.translation || translatedCue?.text}
                   </div>
-                ) : primaryCue && isTranslationOnly ? (
+                ) : primaryCue ? (
+                  // Keep the second line's height reserved while the translation
+                  // is in flight. Otherwise the original line jumps up/down every
+                  // time a translation arrives or a new replica starts.
                   <div
-                    className="select-none text-slate-400 opacity-60 animate-pulse tracking-widest text-center"
+                    className={`select-none text-slate-400 text-center ${
+                      isTranslationOnly ? 'opacity-60 animate-pulse tracking-widest' : 'opacity-0'
+                    }`}
+                    aria-hidden="true"
                     style={{
                       fontSize: `${translatedFontSize}px`,
                       lineHeight: 1.22,

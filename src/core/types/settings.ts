@@ -29,6 +29,11 @@ export interface SubtitleBoxSize {
   height: number;
 }
 
+export const DEFAULT_SUBTITLE_BOX_SIZE: SubtitleBoxSize = {
+  width: 840,
+  height: 96
+};
+
 export interface LLMConfig {
   baseUrl: string;
   apiKey: string;

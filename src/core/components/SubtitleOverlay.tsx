@@ -9,16 +9,17 @@ import {
   type ReactElement
 } from 'react';
 import { GripHorizontal, Lock, Unlock } from 'lucide-react';
-import type {
-  ActiveListeningMode,
-  FontFamily,
-  FontWeight,
-  SubtitleBoxSize,
-  SubtitlePosition,
-  SubtitleScale,
-  SubtitleTrackMode,
-  TextOutline,
-  UserSettings
+import {
+  DEFAULT_SUBTITLE_BOX_SIZE,
+  type ActiveListeningMode,
+  type FontFamily,
+  type FontWeight,
+  type SubtitleBoxSize,
+  type SubtitlePosition,
+  type SubtitleScale,
+  type SubtitleTrackMode,
+  type TextOutline,
+  type UserSettings
 } from '../types/settings';
 import type { SubtitleCue, WordToken } from '../types/subtitles';
 
@@ -391,7 +392,7 @@ export function SubtitleOverlay({
       const nextFixed = !boxFixed;
       const updates: Partial<UserSettings> = { subtitleBoxFixed: nextFixed };
       if (nextFixed && !boxSize) {
-        updates.subtitleBoxSize = { width: 680, height: 112 };
+        updates.subtitleBoxSize = DEFAULT_SUBTITLE_BOX_SIZE;
       }
       onUpdateSettings?.(updates);
     },
@@ -467,11 +468,7 @@ export function SubtitleOverlay({
 
   const bgAlpha = (backdropOpacity ?? (overlayOpacity !== undefined ? Math.round(overlayOpacity * 100) : 80)) / 100;
 
-  const maxPercent =
-    primaryFontSize <= 24
-      ? 88
-      : Math.min(94, Math.round(88 + ((primaryFontSize - 24) / (56 - 24)) * 6));
-  const maxWidth = primaryFontSize <= 24 ? 'min(780px, 88%)' : `${maxPercent}%`;
+  const maxWidth = 'min(860px, 84%)';
 
   const dynamicPadX = Math.round(Math.max(14, primaryFontSize * 0.75));
   const dynamicPadY = Math.round(Math.max(6, primaryFontSize * 0.4));
@@ -761,7 +758,7 @@ export function SubtitleOverlay({
   const hasCue = Boolean(primaryCue || translatedCue);
   if (!hasCue && !boxFixed) return null;
 
-  const defaultFixedSize = { width: 680, height: 112 };
+  const defaultFixedSize = DEFAULT_SUBTITLE_BOX_SIZE;
   const effectiveWidth = boxSize?.width ?? defaultFixedSize.width;
   const effectiveHeight = boxSize?.height ?? defaultFixedSize.height;
 
@@ -919,12 +916,13 @@ export function SubtitleOverlay({
             {/* Primary Original Line: shown in dual mode, original mode, or when revealed by Alt/selection in translation-only mode */}
             {primaryCue && (!isTranslationOnly || isAltRevealed) && (
               <div
-                className={`ytai-blur-target leading-snug select-text ${
-                  isTranslationOnly ? 'mb-1 opacity-90' : ''
+                className={`ytai-blur-target select-text ${
+                  isTranslationOnly ? 'opacity-90' : ''
                 }`}
                 style={{
                   color: 'var(--ytai-text-primary)',
                   fontSize: `${isTranslationOnly ? Math.max(12, Math.round(primaryFontSize * 0.9)) : primaryFontSize}px`,
+                  lineHeight: 1.25,
                   ...textTypographyStyle
                 }}
               >
@@ -937,14 +935,16 @@ export function SubtitleOverlay({
               <>
                 {Boolean(primaryCue?.translation || translatedCue?.translation || translatedCue?.text) ? (
                   <div
-                    className={`ytai-blur-target leading-snug select-none ${
-                      isTranslationOnly ? 'mt-0 font-medium' : 'mt-1'
+                    className={`ytai-blur-target select-none ${
+                      isTranslationOnly ? 'font-medium' : ''
                     }`}
                     style={{
                       color: isTranslationOnly
                         ? 'var(--ytai-text-primary)'
                         : 'var(--ytai-text-secondary)',
                       fontSize: `${translatedFontSize}px`,
+                      lineHeight: 1.22,
+                      marginTop: (primaryCue && (!isTranslationOnly || isAltRevealed)) ? '4px' : '0px',
                       ...textTypographyStyle
                     }}
                   >
@@ -952,9 +952,11 @@ export function SubtitleOverlay({
                   </div>
                 ) : primaryCue && isTranslationOnly ? (
                   <div
-                    className="leading-snug select-none text-slate-400 opacity-60 animate-pulse tracking-widest text-center"
+                    className="select-none text-slate-400 opacity-60 animate-pulse tracking-widest text-center"
                     style={{
                       fontSize: `${translatedFontSize}px`,
+                      lineHeight: 1.22,
+                      marginTop: (primaryCue && (!isTranslationOnly || isAltRevealed)) ? '4px' : '0px',
                       ...textTypographyStyle
                     }}
                   >

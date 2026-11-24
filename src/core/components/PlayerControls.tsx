@@ -15,11 +15,12 @@ import {
   Sparkles,
   Type
 } from 'lucide-react';
-import type {
-  ActiveListeningMode,
-  ControlsScale,
-  SubtitleTrackMode,
-  UserSettings
+import {
+  DEFAULT_SUBTITLE_BOX_SIZE,
+  type ActiveListeningMode,
+  type ControlsScale,
+  type SubtitleTrackMode,
+  type UserSettings
 } from '../types/settings';
 import type { TrackMetadata } from '../types/subtitles';
 
@@ -1052,7 +1053,7 @@ export function PlayerControls({
                         onUpdateSettings({
                           subtitleBoxFixed: next,
                           ...(next && !settings.subtitleBoxSize
-                            ? { subtitleBoxSize: { width: 680, height: 112 } }
+                            ? { subtitleBoxSize: DEFAULT_SUBTITLE_BOX_SIZE }
                             : {})
                         });
                       }}

@@ -2,6 +2,7 @@ import type { Json3Event, Json3Response, SubtitleCue } from '../types/subtitles'
 import {
   cleanSubtitleText,
   normalizeWord,
+  splitLongCues,
   tokenizeCueText
 } from './subtitleParser';
 
@@ -13,9 +14,9 @@ interface TimedPiece {
 
 const SENTENCE_END_REGEX = /[.!?]["'”’)\]]*$/;
 const MAX_PAUSE_MS = 600;
-const MAX_CUE_LENGTH = 110;
+const MAX_CUE_LENGTH = 80;
 
-export { normalizeWord, tokenizeCueText };
+export { normalizeWord, splitLongCues, tokenizeCueText };
 
 export class SubtitleEngine {
   private cues: SubtitleCue[] = [];
@@ -26,9 +27,9 @@ export class SubtitleEngine {
     this.isAsrTrack = this.detectAsr(events, kind);
 
     if (this.isAsrTrack) {
-      this.cues = this.parseAsrEvents(events);
+      this.cues = splitLongCues(this.parseAsrEvents(events));
     } else {
-      this.cues = this.parseStandardEvents(events);
+      this.cues = splitLongCues(this.parseStandardEvents(events));
     }
 
     return this.cues;
@@ -36,14 +37,14 @@ export class SubtitleEngine {
 
   public loadCues(cues: SubtitleCue[]): SubtitleCue[] {
     this.isAsrTrack = false;
-    this.cues = cues
+    const sorted = cues
       .filter((c) => c && typeof c.startTime === 'number' && typeof c.endTime === 'number' && c.text)
-      .sort((a, b) => a.startTime - b.startTime)
-      .map((c, idx) => ({
-        ...c,
-        index: idx,
-        tokens: c.tokens && c.tokens.length > 0 ? c.tokens : tokenizeCueText(c.id, c.text, c.startTime, c.endTime)
-      }));
+      .sort((a, b) => a.startTime - b.startTime);
+    this.cues = splitLongCues(sorted).map((c, idx) => ({
+      ...c,
+      index: idx,
+      tokens: c.tokens && c.tokens.length > 0 ? c.tokens : tokenizeCueText(c.id, c.text, c.startTime, c.endTime)
+    }));
     return this.cues;
   }
 

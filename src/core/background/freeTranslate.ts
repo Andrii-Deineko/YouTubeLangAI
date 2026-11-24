@@ -63,7 +63,7 @@ async function fetchGoogle(url: string): Promise<Response> {
 }
 
 /**
- * Free fallback endpoint used by Chrome's dictionary. No key, no daily quota,
+ * Free endpoint used by Chrome's dictionary. No key, no daily quota,
  * and unlike the `gtx` endpoint it tolerates rapid sequential requests.
  * Multiple `q` parameters are translated in a single request.
  */
@@ -88,60 +88,6 @@ async function fetchGoogleDictTexts(
   });
   if (results.length !== texts.length) throw new Error('Google Dict response length mismatch');
   return results.map((text, index) => text || texts[index]);
-}
-
-/**
- * Automatic fallback: if the selected provider fails, try the other free,
- * key-less endpoints in sequence. MyMemory has a daily quota, Google GTX is
- * rate-limited to roughly one request/second, and Google Dict is the most
- * tolerant of rapid requests.
- */
-async function fetchFallbackText(
-  text: string,
-  sourceLang: string,
-  targetLang: string,
-  config: TranslationProviderConfig
-): Promise<SingleParseResult | undefined> {
-  if (!text.trim()) return undefined;
-  const provider = config.provider ?? 'mymemory';
-
-  if (provider !== 'mymemory') {
-    try {
-      const result = await fetchMyMemoryText(text, sourceLang, targetLang, config.myMemoryEmail);
-      return {
-        translation: result.text,
-        alternatives: [],
-        detectedLang: result.detectedSourceLanguage?.toLowerCase()
-      };
-    } catch (err) {
-      console.warn('[YT-Lang-AI] MyMemory fallback failed:', err);
-    }
-  }
-
-  if (provider !== 'googleDict') {
-    try {
-      const [result] = await fetchGoogleDictTexts([text], sourceLang, targetLang);
-      return { translation: result, alternatives: [] };
-    } catch (err) {
-      console.warn('[YT-Lang-AI] Google Dict fallback failed:', err);
-    }
-  }
-
-  if (provider !== 'google') {
-    try {
-      const sl = sourceLang && sourceLang !== 'unknown' ? sourceLang : 'auto';
-      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(
-        sl
-      )}&tl=${encodeURIComponent(targetLang)}&dt=t&q=${encodeURIComponent(text)}`;
-      const res = await fetchGoogle(url);
-      if (!res.ok) throw new Error(`Google GTX request failed with HTTP ${res.status}`);
-      return parseSingleResponse(await res.json(), text);
-    } catch (err) {
-      console.warn('[YT-Lang-AI] Google GTX fallback failed:', err);
-    }
-  }
-
-  return undefined;
 }
 
 export interface TranslationProviderConfig {
@@ -470,13 +416,12 @@ export async function freeTranslateWord(params: {
       wordRes = await fetchSingleText(params.word, sl, tl, true, config);
     } catch (err) {
       console.warn(`[YT-Lang-AI] ${providerLabel(provider)} translation failed:`, err);
-      wordRes =
-        (await fetchFallbackText(params.word, sl, tl, config)) ?? {
-          translation: '',
-          alternatives: [],
-          unavailable: true,
-          errorProvider: providerLabel(provider)
-        };
+      wordRes = {
+        translation: '',
+        alternatives: [],
+        unavailable: true,
+        errorProvider: providerLabel(provider)
+      };
     }
 
     let sentenceTranslation = '';
@@ -487,8 +432,7 @@ export async function freeTranslateWord(params: {
         sentenceTranslation = sRes.translation;
       } catch (err) {
         console.warn(`[YT-Lang-AI] ${providerLabel(provider)} sentence translation failed:`, err);
-        sentenceTranslation =
-          (await fetchFallbackText(sentenceText, sl, tl, config))?.translation ?? '';
+        sentenceTranslation = '';
       }
     }
 
@@ -723,12 +667,11 @@ async function translateSingleCueBatch(
       return [{ id: batch[0].id, text: res.translation }];
     } catch (err) {
       console.warn(`[YT-Lang-AI] ${providerLabel(config.provider)} cue translation failed:`, err);
-      const fallback = await fetchFallbackText(batch[0].text, sourceLang, targetLang, config);
       return [
         {
           id: batch[0].id,
-          text: fallback?.translation ?? '',
-          ...(fallback ? {} : { errorProvider: providerLabel(config.provider) })
+          text: '',
+          errorProvider: providerLabel(config.provider)
         }
       ];
     }
@@ -747,11 +690,10 @@ async function translateSingleCueBatch(
         translated.push({ id: cue.id, text: result.text });
       } catch (err) {
         console.warn('[YT-Lang-AI] MyMemory cue translation failed:', err);
-        const fallback = await fetchFallbackText(cue.text, sourceLang, targetLang, config);
         translated.push({
           id: cue.id,
-          text: fallback?.translation ?? '',
-          ...(fallback ? {} : { errorProvider: 'MyMemory' })
+          text: '',
+          errorProvider: 'MyMemory'
         });
       }
     }
@@ -819,29 +761,28 @@ async function translateSingleCueBatch(
     }
 
     console.warn(
-      `[YT-Lang-AI] Batch delimiter mismatch: expected ${batch.length}, got ${parts.length}. Using fallback.`
+      `[YT-Lang-AI] Batch delimiter mismatch: expected ${batch.length}, got ${parts.length}. Retrying line by line.`
     );
   } catch (err) {
-    console.warn('[YT-Lang-AI] Batch translation failed, executing fallback:', err);
+    console.warn('[YT-Lang-AI] Batch translation failed, retrying line by line:', err);
   }
 
-  // Safe line-by-line fallback for this batch
-  const fallbackResults = await Promise.all(
+  // Retry through the same selected provider, one cue at a time.
+  const retryResults = await Promise.all(
     batch.map(async (cue) => {
       try {
         const res = await fetchSingleText(cue.text, sourceLang, targetLang, false, config);
         return { id: cue.id, text: res.translation };
       } catch (err) {
         console.warn('[YT-Lang-AI] Google GTX cue translation failed:', err);
-        const fallback = await fetchFallbackText(cue.text, sourceLang, targetLang, config);
         return {
           id: cue.id,
-          text: fallback?.translation ?? '',
-          ...(fallback ? {} : { errorProvider: 'Google Translate' })
+          text: '',
+          errorProvider: 'Google Translate'
         };
       }
     })
   );
 
-  return fallbackResults;
+  return retryResults;
 }

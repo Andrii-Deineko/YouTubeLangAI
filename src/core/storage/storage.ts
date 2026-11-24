@@ -3,8 +3,11 @@ import {
   DEFAULT_SETTINGS,
   type ActiveListeningMode,
   type ControlsScale,
+  type FontFamily,
+  type FontWeight,
   type SubtitlePosition,
   type SubtitleScale,
+  type TextOutline,
   type UserSettings
 } from '../types/settings';
 import type { VocabularyCard } from '../types/vocabulary';
@@ -90,6 +93,27 @@ export function parseSubtitleScale(rawVal: unknown): SubtitleScale {
   return 'md';
 }
 
+export function parseFontFamily(rawVal: unknown): FontFamily {
+  if (rawVal === 'sans' || rawVal === 'serif' || rawVal === 'mono') {
+    return rawVal;
+  }
+  return 'sans';
+}
+
+export function parseFontWeight(rawVal: unknown): FontWeight {
+  if (rawVal === 'normal' || rawVal === 'bold') {
+    return rawVal;
+  }
+  return 'normal';
+}
+
+export function parseTextOutline(rawVal: unknown): TextOutline {
+  if (rawVal === 'none' || rawVal === 'shadow' || rawVal === 'outline') {
+    return rawVal;
+  }
+  return 'shadow';
+}
+
 export function mergeSettings(
   raw: (Partial<UserSettings> & {
     ai?: Partial<UserSettings['llm']>;
@@ -138,6 +162,33 @@ export function mergeSettings(
     ...(raw?.llm ?? raw?.ai ?? {})
   };
 
+  const rawFontSize =
+    typeof raw?.fontSize === 'number'
+      ? raw.fontSize
+      : typeof raw?.subtitleFontSize === 'number'
+        ? raw.subtitleFontSize
+        : DEFAULT_SETTINGS.fontSize;
+  const fontSize = Math.max(12, Math.min(56, rawFontSize));
+
+  const translationScale =
+    typeof raw?.translationScale === 'number' &&
+    [0.75, 0.85, 1.0, 1.15].includes(raw.translationScale)
+      ? raw.translationScale
+      : DEFAULT_SETTINGS.translationScale;
+
+  const fontFamily = parseFontFamily(raw?.fontFamily);
+  const fontWeight = parseFontWeight(raw?.fontWeight);
+  const textOutline = parseTextOutline(raw?.textOutline);
+
+  const rawBackdrop =
+    typeof raw?.backdropOpacity === 'number'
+      ? raw.backdropOpacity
+      : typeof raw?.overlayOpacity === 'number'
+        ? Math.round(raw.overlayOpacity * 100)
+        : DEFAULT_SETTINGS.backdropOpacity;
+  const backdropOpacity = Math.max(0, Math.min(100, rawBackdrop));
+  const overlayOpacity = backdropOpacity / 100;
+
   return {
     ...DEFAULT_SETTINGS,
     ...raw,
@@ -162,20 +213,20 @@ export function mergeSettings(
     subtitlePosition,
     nativeLang: raw?.nativeLang ?? DEFAULT_SETTINGS.nativeLang,
     videoLang: raw?.videoLang ?? DEFAULT_SETTINGS.videoLang,
-    subtitleFontSize:
-      typeof raw?.subtitleFontSize === 'number'
-        ? raw.subtitleFontSize
-        : DEFAULT_SETTINGS.subtitleFontSize,
+    fontSize,
+    subtitleFontSize: fontSize,
+    translationScale,
+    fontFamily,
+    fontWeight,
+    backdropOpacity,
+    textOutline,
     subtitleScale: parseSubtitleScale(raw?.subtitleScale),
     subtitleOffsetSec:
       typeof raw?.subtitleOffsetSec === 'number'
         ? raw.subtitleOffsetSec
         : DEFAULT_SETTINGS.subtitleOffsetSec,
     theme: raw?.theme ?? DEFAULT_SETTINGS.theme,
-    overlayOpacity:
-      typeof raw?.overlayOpacity === 'number'
-        ? raw.overlayOpacity
-        : DEFAULT_SETTINGS.overlayOpacity,
+    overlayOpacity,
     fallbackModel:
       typeof raw?.fallbackModel === 'string'
         ? raw.fallbackModel
@@ -217,6 +268,16 @@ export async function saveSettings(partial: Partial<UserSettings>): Promise<User
       syncedPartial.showDualSubtitles = syncedPartial.showTranslation;
     } else if (syncedPartial.showDualSubtitles !== undefined && syncedPartial.showTranslation === undefined) {
       syncedPartial.showTranslation = syncedPartial.showDualSubtitles;
+    }
+    if (syncedPartial.fontSize !== undefined && syncedPartial.subtitleFontSize === undefined) {
+      syncedPartial.subtitleFontSize = syncedPartial.fontSize;
+    } else if (syncedPartial.subtitleFontSize !== undefined && syncedPartial.fontSize === undefined) {
+      syncedPartial.fontSize = syncedPartial.subtitleFontSize;
+    }
+    if (syncedPartial.backdropOpacity !== undefined && syncedPartial.overlayOpacity === undefined) {
+      syncedPartial.overlayOpacity = syncedPartial.backdropOpacity / 100;
+    } else if (syncedPartial.overlayOpacity !== undefined && syncedPartial.backdropOpacity === undefined) {
+      syncedPartial.backdropOpacity = Math.round(syncedPartial.overlayOpacity * 100);
     }
     const next: UserSettings = mergeSettings({
       ...current,

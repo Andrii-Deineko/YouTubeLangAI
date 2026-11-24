@@ -9,9 +9,36 @@ import {
   type ReactElement
 } from 'react';
 import { GripHorizontal } from 'lucide-react';
-import type { ActiveListeningMode, SubtitlePosition, SubtitleScale } from '../types/settings';
+import type {
+  ActiveListeningMode,
+  FontFamily,
+  FontWeight,
+  SubtitlePosition,
+  SubtitleScale,
+  TextOutline
+} from '../types/settings';
 import type { SubtitleCue, WordToken } from '../types/subtitles';
-import { getSubtitleFontSizes } from '../styles/themes';
+
+const FONT_FAMILIES: Record<FontFamily, string> = {
+  sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+  serif: "Georgia, 'Times New Roman', Cambria, serif",
+  mono: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+};
+
+const TEXT_OUTLINES: Record<TextOutline, { textShadow: string; WebkitTextStroke: string }> = {
+  none: {
+    textShadow: 'none',
+    WebkitTextStroke: '0px transparent'
+  },
+  shadow: {
+    textShadow: 'var(--ytai-text-shadow, 0 2px 4px rgba(0,0,0,0.8))',
+    WebkitTextStroke: '0px transparent'
+  },
+  outline: {
+    textShadow: '0 0 2px #000, 0 0 4px #000, 1px 1px 2px #000, -1px -1px 2px #000',
+    WebkitTextStroke: '1px rgba(0, 0, 0, 0.9)'
+  }
+};
 
 export interface WordSelectionPayload {
   target: string;
@@ -28,6 +55,11 @@ interface SubtitleOverlayProps {
   activeListeningMode: ActiveListeningMode;
   altPressed: boolean;
   fontSize?: number;
+  translationScale?: number;
+  fontFamily?: FontFamily;
+  fontWeight?: FontWeight;
+  backdropOpacity?: number;
+  textOutline?: TextOutline;
   scale?: SubtitleScale;
   overlayOpacity?: number;
   position: SubtitlePosition | null;
@@ -124,6 +156,11 @@ export function SubtitleOverlay({
   activeListeningMode,
   altPressed,
   fontSize,
+  translationScale,
+  fontFamily,
+  fontWeight,
+  backdropOpacity,
+  textOutline,
   scale,
   overlayOpacity,
   position,
@@ -203,18 +240,32 @@ export function SubtitleOverlay({
   const isRevealedInHidden = altPressed || Boolean(selectedTarget);
   const isCardVisible = !isHiddenMode || isRevealedInHidden;
 
-  const effectiveFontSize = fontSize ?? 20;
-  const fontSizes = getSubtitleFontSizes(effectiveFontSize, scale);
+  let primaryFontSize = Math.min(56, Math.max(12, fontSize ?? 20));
+  if (scale === 'tv') {
+    primaryFontSize = Math.max(primaryFontSize, 40);
+  } else if (scale === 'xl') {
+    primaryFontSize = Math.max(primaryFontSize, 28);
+  }
+  const effectiveTranslationScale = translationScale ?? 0.85;
+  const translatedFontSize = Math.max(10, Math.round(primaryFontSize * effectiveTranslationScale));
+
+  const textTypographyStyle: React.CSSProperties = {
+    fontFamily: FONT_FAMILIES[fontFamily ?? 'sans'] || FONT_FAMILIES.sans,
+    fontWeight: fontWeight === 'bold' ? 700 : 500,
+    ...(TEXT_OUTLINES[textOutline ?? 'shadow'] || TEXT_OUTLINES.shadow)
+  };
+
+  const bgAlpha = (backdropOpacity ?? (overlayOpacity !== undefined ? Math.round(overlayOpacity * 100) : 80)) / 100;
 
   const maxPercent =
-    effectiveFontSize <= 24
+    primaryFontSize <= 24
       ? 88
-      : Math.min(94, Math.round(88 + ((effectiveFontSize - 24) / (56 - 24)) * 6));
-  const maxWidth = effectiveFontSize <= 24 ? 'min(780px, 88%)' : `${maxPercent}%`;
+      : Math.min(94, Math.round(88 + ((primaryFontSize - 24) / (56 - 24)) * 6));
+  const maxWidth = primaryFontSize <= 24 ? 'min(780px, 88%)' : `${maxPercent}%`;
 
-  const dynamicPadX = Math.round(Math.max(14, effectiveFontSize * 0.75));
-  const dynamicPadY = Math.round(Math.max(6, effectiveFontSize * 0.4));
-  const dynamicRadius = Math.round(Math.max(12, Math.min(26, effectiveFontSize * 0.5)));
+  const dynamicPadX = Math.round(Math.max(14, primaryFontSize * 0.75));
+  const dynamicPadY = Math.round(Math.max(6, primaryFontSize * 0.4));
+  const dynamicRadius = Math.round(Math.max(12, Math.min(26, primaryFontSize * 0.5)));
 
   // Recalculate bounds and clamp custom position when font size grows
   useEffect(() => {
@@ -252,7 +303,7 @@ export function SubtitleOverlay({
     ) {
       onUpdatePosition({ xPercent: newXPercent, yPercent: newYPercent });
     }
-  }, [effectiveFontSize, position, onUpdatePosition]);
+  }, [primaryFontSize, position, onUpdatePosition]);
 
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
     if (e.button !== 0) return;
@@ -528,13 +579,16 @@ export function SubtitleOverlay({
             : 'bottom 200ms cubic-bezier(0, 0, 0.2, 1), opacity 150ms ease-out',
           padding: `${dynamicPadY}px ${dynamicPadX}px`,
           borderRadius: `${dynamicRadius}px`,
-          backgroundColor: `rgba(var(--ytai-bg-rgb), var(--ytai-bg-opacity, ${overlayOpacity ?? 0.85}))`,
-          borderColor: 'var(--ytai-border)',
+          backgroundColor:
+            bgAlpha <= 0
+              ? 'transparent'
+              : `rgba(var(--ytai-bg-rgb), ${bgAlpha})`,
+          borderColor: bgAlpha <= 0 ? 'transparent' : 'var(--ytai-border)',
           borderWidth: '1px',
           borderStyle: 'solid',
-          backdropFilter: 'blur(var(--ytai-backdrop-blur, 12px))',
-          WebkitBackdropFilter: 'blur(var(--ytai-backdrop-blur, 12px))',
-          textShadow: 'var(--ytai-text-shadow)'
+          backdropFilter: bgAlpha <= 0 ? 'none' : 'blur(var(--ytai-backdrop-blur, 12px))',
+          WebkitBackdropFilter: bgAlpha <= 0 ? 'none' : 'blur(var(--ytai-backdrop-blur, 12px))',
+          boxShadow: bgAlpha <= 0 ? 'none' : undefined
         }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -582,11 +636,11 @@ export function SubtitleOverlay({
 
         {/* Primary Subtitle Line */}
         <div
-          className="ytai-blur-target leading-snug font-medium select-text"
+          className="ytai-blur-target leading-snug select-text"
           style={{
             color: 'var(--ytai-text-primary)',
-            fontSize: `${fontSizes.primary}px`,
-            textShadow: 'var(--ytai-text-shadow)'
+            fontSize: `${primaryFontSize}px`,
+            ...textTypographyStyle
           }}
         >
           {renderedTokens}
@@ -599,8 +653,8 @@ export function SubtitleOverlay({
               className="ytai-blur-target mt-1 leading-snug select-none"
               style={{
                 color: 'var(--ytai-text-secondary)',
-                fontSize: `${fontSizes.translated}px`,
-                textShadow: 'var(--ytai-text-shadow)'
+                fontSize: `${translatedFontSize}px`,
+                ...textTypographyStyle
               }}
             >
               {primaryCue?.translation || translatedCue?.translation || translatedCue?.text}

@@ -301,23 +301,44 @@ export function PlayerControls({
     Boolean(hasActivePopup);
 
   const scale = SCALE_CONFIGS[settings.controlsScale || 'md'] || SCALE_CONFIGS.md;
-  const currentFontSize = settings.subtitleFontSize ?? 20;
+  const currentFontSize = settings.fontSize ?? settings.subtitleFontSize ?? 20;
+  const currentTranslationScale = settings.translationScale ?? 0.85;
+  const currentFontFamily = settings.fontFamily ?? 'sans';
+  const currentFontWeight = settings.fontWeight ?? 'normal';
+  const currentTextOutline = settings.textOutline ?? 'shadow';
+  const currentBackdropOpacity =
+    settings.backdropOpacity ??
+    (settings.overlayOpacity !== undefined ? Math.round(settings.overlayOpacity * 100) : 80);
 
   const handleDecreaseFontSize = (e?: React.MouseEvent): void => {
     e?.stopPropagation();
     const next = Math.max(12, currentFontSize - 2);
-    onUpdateSettings({ subtitleFontSize: next });
+    onUpdateSettings({ fontSize: next, subtitleFontSize: next });
   };
 
   const handleIncreaseFontSize = (e?: React.MouseEvent): void => {
     e?.stopPropagation();
     const next = Math.min(56, currentFontSize + 2);
-    onUpdateSettings({ subtitleFontSize: next });
+    onUpdateSettings({ fontSize: next, subtitleFontSize: next });
   };
 
   const handleResetFontSize = (e?: React.MouseEvent): void => {
     e?.stopPropagation();
-    onUpdateSettings({ subtitleFontSize: 20 });
+    onUpdateSettings({ fontSize: 20, subtitleFontSize: 20 });
+  };
+
+  const handleResetTypographyStyle = (e?: React.MouseEvent): void => {
+    e?.stopPropagation();
+    onUpdateSettings({
+      fontSize: 20,
+      subtitleFontSize: 20,
+      translationScale: 0.85,
+      fontFamily: 'sans',
+      fontWeight: 'normal',
+      backdropOpacity: 80,
+      overlayOpacity: 0.8,
+      textOutline: 'shadow'
+    });
   };
 
   const cycleListeningMode = (e: React.MouseEvent): void => {
@@ -629,7 +650,7 @@ export function PlayerControls({
           >
             <button
               type="button"
-              title={`Размер шрифта субтитров: ${currentFontSize}px (наведите для настройки)`}
+              title={`Шрифт и стиль субтитров: ${currentFontSize}px (наведите для настройки)`}
               onClick={() => setIsFontMenuOpen((prev) => !prev)}
               style={isFontMenuOpen ? activeStyle : inactiveStyle}
               className={`flex items-center justify-center rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)] hover:text-white`}
@@ -642,48 +663,228 @@ export function PlayerControls({
                 className="absolute right-0 top-full pt-1.5 z-30 select-none animate-in fade-in duration-150"
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
                 onMouseEnter={handleFontMouseEnter}
                 onMouseLeave={handleFontMouseLeave}
               >
                 <div
-                  className={`flex items-center gap-1 rounded-2xl border ${scale.dropdownPadClass} px-2 py-1 shadow-2xl backdrop-blur-md whitespace-nowrap`}
+                  className="w-[268px] rounded-2xl border p-3 shadow-2xl backdrop-blur-md flex flex-col gap-3 text-xs"
                   style={{
                     backgroundColor: 'rgba(15, 17, 23, 0.96)',
                     borderColor: 'rgba(255, 255, 255, 0.16)',
                     color: 'var(--ytai-text-primary)'
                   }}
                 >
-                  <button
-                    type="button"
-                    title="Уменьшить шрифт (-2px, хоткей [)"
-                    disabled={currentFontSize <= 12}
-                    onClick={handleDecreaseFontSize}
-                    style={inactiveStyle}
-                    className={`flex items-center justify-center rounded-xl p-1 transition hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent`}
-                  >
-                    <Minus size={Math.max(12, scale.iconSize - 2)} />
-                  </button>
+                  {/* Section 1: Subtitle font size */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                        Размер субтитров
+                      </span>
+                      <button
+                        type="button"
+                        title="Кликните для сброса на 20px"
+                        onClick={handleResetFontSize}
+                        className="font-mono text-xs font-bold px-1.5 py-0.5 rounded transition hover:opacity-80"
+                        style={{ color: 'var(--ytai-accent)' }}
+                      >
+                        {currentFontSize}px
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        title="Уменьшить шрифт (-2px, хоткей [)"
+                        disabled={currentFontSize <= 12}
+                        onClick={handleDecreaseFontSize}
+                        className="flex h-6 w-6 items-center justify-center rounded-lg bg-white/5 transition hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-white/5"
+                      >
+                        <Minus size={12} />
+                      </button>
+                      <input
+                        type="range"
+                        min={12}
+                        max={56}
+                        step={1}
+                        value={currentFontSize}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          onUpdateSettings({ fontSize: val, subtitleFontSize: val });
+                        }}
+                        className="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-slate-700 accent-indigo-400"
+                      />
+                      <button
+                        type="button"
+                        title="Увеличить шрифт (+2px, хоткей ])"
+                        disabled={currentFontSize >= 56}
+                        onClick={handleIncreaseFontSize}
+                        className="flex h-6 w-6 items-center justify-center rounded-lg bg-white/5 transition hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-white/5"
+                      >
+                        <Plus size={12} />
+                      </button>
+                    </div>
+                  </div>
 
-                  <button
-                    type="button"
-                    title="Текущий размер шрифта (двойной клик — сбросить на 20px)"
-                    onDoubleClick={handleResetFontSize}
-                    className={`px-1.5 py-0.5 font-mono ${scale.textClass} font-bold tracking-tight rounded transition hover:opacity-80 cursor-pointer`}
-                    style={{ color: 'var(--ytai-accent)' }}
-                  >
-                    {currentFontSize}px
-                  </button>
+                  {/* Section 2: Translation size */}
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                      Размер перевода
+                    </div>
+                    <div className="grid grid-cols-4 gap-1">
+                      {[
+                        { scale: 0.75, label: '75%' },
+                        { scale: 0.85, label: '85%' },
+                        { scale: 1.0, label: '100%' },
+                        { scale: 1.15, label: '115%' }
+                      ].map(({ scale: s, label }) => {
+                        const isActive = Math.abs(currentTranslationScale - s) < 0.01;
+                        return (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => onUpdateSettings({ translationScale: s })}
+                            className={`rounded-lg py-1 text-center font-mono text-[11px] font-medium transition ${
+                              isActive
+                                ? 'text-white shadow-sm'
+                                : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white'
+                            }`}
+                            style={isActive ? { backgroundColor: 'var(--ytai-accent)' } : undefined}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
 
-                  <button
-                    type="button"
-                    title="Увеличить шрифт (+2px, хоткей ])"
-                    disabled={currentFontSize >= 56}
-                    onClick={handleIncreaseFontSize}
-                    style={inactiveStyle}
-                    className={`flex items-center justify-center rounded-xl p-1 transition hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent`}
-                  >
-                    <Plus size={Math.max(12, scale.iconSize - 2)} />
-                  </button>
+                  {/* Section 3: Font family */}
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                      Шрифт
+                    </div>
+                    <div className="grid grid-cols-3 gap-1">
+                      {[
+                        { id: 'sans' as const, label: 'Sans', fontClass: 'font-sans' },
+                        { id: 'serif' as const, label: 'Serif', fontClass: 'font-serif' },
+                        { id: 'mono' as const, label: 'Mono', fontClass: 'font-mono' }
+                      ].map(({ id, label, fontClass }) => {
+                        const isActive = currentFontFamily === id;
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => onUpdateSettings({ fontFamily: id })}
+                            className={`rounded-lg py-1 text-center text-[11px] font-medium transition ${fontClass} ${
+                              isActive
+                                ? 'text-white shadow-sm'
+                                : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white'
+                            }`}
+                            style={isActive ? { backgroundColor: 'var(--ytai-accent)' } : undefined}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Section 4: Font weight and Outline */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                        Начертание
+                      </div>
+                      <div className="grid grid-cols-2 gap-1">
+                        {[
+                          { id: 'normal' as const, label: 'Обычный' },
+                          { id: 'bold' as const, label: 'Жирный' }
+                        ].map(({ id, label }) => {
+                          const isActive = currentFontWeight === id;
+                          return (
+                            <button
+                              key={id}
+                              type="button"
+                              onClick={() => onUpdateSettings({ fontWeight: id })}
+                              className={`rounded-lg py-1 text-center text-[10px] font-medium transition ${
+                                isActive
+                                  ? 'text-white shadow-sm'
+                                  : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white'
+                              }`}
+                              style={isActive ? { backgroundColor: 'var(--ytai-accent)' } : undefined}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                        Обводка
+                      </div>
+                      <div className="grid grid-cols-3 gap-1">
+                        {[
+                          { id: 'none' as const, label: 'Нет' },
+                          { id: 'shadow' as const, label: 'Тень' },
+                          { id: 'outline' as const, label: 'Контур' }
+                        ].map(({ id, label }) => {
+                          const isActive = currentTextOutline === id;
+                          return (
+                            <button
+                              key={id}
+                              type="button"
+                              onClick={() => onUpdateSettings({ textOutline: id })}
+                              className={`rounded-lg py-1 text-center text-[10px] font-medium transition ${
+                                isActive
+                                  ? 'text-white shadow-sm'
+                                  : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white'
+                              }`}
+                              style={isActive ? { backgroundColor: 'var(--ytai-accent)' } : undefined}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section 5: Backdrop Opacity */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                        Подложка
+                      </span>
+                      <span className="font-mono text-xs font-bold text-slate-300">
+                        {currentBackdropOpacity}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={5}
+                      value={currentBackdropOpacity}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        onUpdateSettings({ backdropOpacity: val, overlayOpacity: val / 100 });
+                      }}
+                      className="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-slate-700 accent-indigo-400"
+                    />
+                  </div>
+
+                  {/* Footer: Reset style */}
+                  <div className="pt-1 border-t border-white/10">
+                    <button
+                      type="button"
+                      onClick={handleResetTypographyStyle}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-center text-[11px] font-medium text-slate-400 transition hover:bg-white/5 hover:text-white"
+                    >
+                      <RotateCcw size={12} />
+                      <span>Сбросить стиль</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

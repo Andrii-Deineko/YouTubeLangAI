@@ -61,7 +61,7 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
       data-theme={settings.theme || 'midnight-glass'}
       style={
         {
-          '--ytai-bg-opacity': String(settings.overlayOpacity ?? 0.85)
+          '--ytai-bg-opacity': String((settings.backdropOpacity ?? 80) / 100)
         } as React.CSSProperties
       }
       className="pointer-events-none relative h-full w-full font-sans"
@@ -87,7 +87,12 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
             showTranslation={settings.showTranslation}
             activeListeningMode={settings.activeListeningMode}
             altPressed={altPressed}
-            fontSize={settings.subtitleFontSize}
+            fontSize={settings.fontSize ?? settings.subtitleFontSize}
+            translationScale={settings.translationScale}
+            fontFamily={settings.fontFamily}
+            fontWeight={settings.fontWeight}
+            backdropOpacity={settings.backdropOpacity}
+            textOutline={settings.textOutline}
             scale={settings.subtitleScale}
             overlayOpacity={settings.overlayOpacity}
             position={settings.subtitlePosition}

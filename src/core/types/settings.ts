@@ -11,6 +11,12 @@ export type ControlsScale = 'sm' | 'md' | 'lg' | 'xl';
 
 export type ActiveListeningMode = 'off' | 'blur' | 'hidden';
 
+export type FontFamily = 'sans' | 'serif' | 'mono';
+
+export type FontWeight = 'normal' | 'bold';
+
+export type TextOutline = 'none' | 'shadow' | 'outline';
+
 export interface SubtitlePosition {
   xPercent: number;
   yPercent: number;
@@ -37,6 +43,12 @@ export interface UserSettings {
   autoHideControls: boolean;
   controlsScale?: ControlsScale;
   subtitleFontSize: number;
+  fontSize: number;
+  translationScale: number;
+  fontFamily: FontFamily;
+  fontWeight: FontWeight;
+  backdropOpacity: number;
+  textOutline: TextOutline;
   subtitleScale: SubtitleScale;
   subtitlePosition: SubtitlePosition | null;
   subtitleOffsetSec: number;
@@ -73,6 +85,12 @@ export const DEFAULT_SETTINGS: UserSettings = {
   autoHideControls: true,
   controlsScale: 'md',
   subtitleFontSize: 20,
+  fontSize: 20,
+  translationScale: 0.85,
+  fontFamily: 'sans',
+  fontWeight: 'normal',
+  backdropOpacity: 80,
+  textOutline: 'shadow',
   subtitleScale: 'md',
   subtitlePosition: null,
   subtitleOffsetSec: 0,

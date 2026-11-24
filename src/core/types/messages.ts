@@ -5,7 +5,6 @@ import type { AIExplanation, QuickTranslationResult, VocabularyCard } from './vo
 export const MAIN_MESSAGE_SOURCE = 'yt-lang-ai-main';
 export const ISOLATED_MESSAGE_SOURCE = 'yt-lang-ai-isolated';
 export const POST_MESSAGE_SOURCE_MAIN = 'cinelingua-main';
-export const POST_MESSAGE_SOURCE_ISOLATED = 'cinelingua-isolated';
 
 export interface TrackCapturedPayload {
   videoId: string;
@@ -172,14 +171,6 @@ export interface FreeTranslateWordResult {
   contextSentenceTranslation?: string;
 }
 
-export interface FreeTranslateCuesBatchMessage {
-  type: 'FREE_TRANSLATE_CUES_BATCH';
-  payload: {
-    videoId: string;
-    batchTranslations: Array<{ id: string; text: string }>;
-  };
-}
-
 export interface RuntimeResponseSuccess<T> {
   ok: true;
   data: T;
@@ -205,7 +196,6 @@ export interface LLMTestResult {
   models?: string[];
 }
 export type LLMTestResponse = RuntimeResponse<LLMTestResult>;
-export type ModelsResponse = RuntimeResponse<string[]>;
 export type FetchModelsResponse = RuntimeResponse<string[]>;
 export type FetchSubtitleTextResponse = { text?: string; error?: string };
 export type ScreenshotResponse = { dataUrl?: string; error?: string };

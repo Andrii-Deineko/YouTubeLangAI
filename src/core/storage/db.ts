@@ -1,15 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
-import type { Json3Response } from '../types/subtitles';
 import type { AIExplanation, QuickTranslationResult } from '../types/vocabulary';
-
-interface CachedSubtitleEntry {
-  key: string;
-  videoId: string;
-  lang: string;
-  tlang?: string;
-  data: Json3Response;
-  updatedAt: number;
-}
 
 interface CachedTranslationEntry {
   key: string;
@@ -26,7 +16,7 @@ interface CachedAIEntry {
 interface YTLangAIDBSchema extends DBSchema {
   subtitles: {
     key: string;
-    value: CachedSubtitleEntry;
+    value: unknown;
   };
   translations: {
     key: string;
@@ -62,10 +52,6 @@ function getDB(): Promise<IDBPDatabase<YTLangAIDBSchema>> {
   return dbPromise;
 }
 
-export function buildSubtitleCacheKey(videoId: string, lang: string, tlang?: string): string {
-  return `${videoId}:${lang}:${tlang ?? 'orig'}`;
-}
-
 export function buildTranslationCacheKey(
   sourceLang: string,
   nativeLang: string,
@@ -82,24 +68,6 @@ export function buildAIExplanationCacheKey(
 ): string {
   const normalizedTarget = target.trim().toLowerCase().replace(/\s+/g, ' ');
   return `${videoId}:${cueId}:${normalizedTarget}:${nativeLang.toLowerCase()}`;
-}
-
-export async function setCachedSubtitles(
-  videoId: string,
-  lang: string,
-  data: Json3Response,
-  tlang?: string
-): Promise<void> {
-  const db = await getDB();
-  const key = buildSubtitleCacheKey(videoId, lang, tlang);
-  await db.put('subtitles', {
-    key,
-    videoId,
-    lang,
-    tlang,
-    data,
-    updatedAt: Date.now()
-  });
 }
 
 export const TRANSLATION_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours

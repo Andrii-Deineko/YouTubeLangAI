@@ -2,7 +2,6 @@ import type { Json3Event, Json3Response, SubtitleCue } from '../types/subtitles'
 import {
   cleanSubtitleText,
   normalizeWord,
-  parseSubtitles,
   tokenizeCueText
 } from './subtitleParser';
 
@@ -46,15 +45,6 @@ export class SubtitleEngine {
         tokens: c.tokens && c.tokens.length > 0 ? c.tokens : tokenizeCueText(c.id, c.text, c.startTime, c.endTime)
       }));
     return this.cues;
-  }
-
-  public loadRawCues(cues: SubtitleCue[]): SubtitleCue[] {
-    return this.loadCues(cues);
-  }
-
-  public loadRawSubtitles(content: string): SubtitleCue[] {
-    const parsed = parseSubtitles(content);
-    return this.loadCues(parsed);
   }
 
   public clear(): void {

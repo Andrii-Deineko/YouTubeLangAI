@@ -1,7 +1,7 @@
 import { cleanSubtitleText } from '../../core/engine/subtitleParser';
 import type { SubtitleCue } from '../../core/types/subtitles';
 
-export const hiddenNativeNodes = new Set<HTMLElement>();
+const hiddenNativeNodes = new Set<HTMLElement>();
 
 /**
  * Restores visibility on all native PlayerJS elements previously hidden.
@@ -22,7 +22,7 @@ export function restoreNativeNodes(): void {
  * Normalizes subtitle cue text for strict equality comparison:
  * Lowercases, strips tags, collapses multiple whitespaces/newlines and trims.
  */
-export function normalizeForSubMatch(text: string): string {
+function normalizeForSubMatch(text: string): string {
   return cleanSubtitleText(text)
     .toLowerCase()
     .replace(/[\u2018\u2019\u201A\u201B`]/g, "'")
@@ -32,15 +32,15 @@ export function normalizeForSubMatch(text: string): string {
     .trim();
 }
 
-export function stripPunctuationForSubMatch(text: string): string {
+function stripPunctuationForSubMatch(text: string): string {
   return normalizeForSubMatch(text)
     .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'«»[\]]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-export const SUPPRESSION_STYLE_ID = 'cinelingua-html5-captions-suppression';
-export const SUPPRESSION_CSS = `
+const SUPPRESSION_STYLE_ID = 'cinelingua-html5-captions-suppression';
+const SUPPRESSION_CSS = `
 .jw-captions,
 .jw-captions-window,
 .plyr__captions,
@@ -75,7 +75,7 @@ export function setHtml5CaptionsSuppression(enabled: boolean): void {
 /**
  * Collects normalized texts of active cues at currentTime or from provided cues.
  */
-export function collectActiveSubtitleLines(
+function collectActiveSubtitleLines(
   currentCue?: SubtitleCue | null,
   secondaryCue?: SubtitleCue | null
 ): Set<string> {

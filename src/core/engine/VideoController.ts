@@ -11,7 +11,6 @@ export interface VideoControllerCallbacks {
   onAltKeyChange: (pressed: boolean) => void;
   onAdjustFontSize?: (delta: number) => void;
   shouldPauseOnAltHold?: () => boolean;
-  getPauseTimerSeconds?: () => number;
   isPopupOpen: () => boolean;
   hasCues: () => boolean;
   isOverlayEnabled: () => boolean;
@@ -169,14 +168,6 @@ export class VideoController {
     this.resumingProgrammatically = false;
     this.pausedByAlt = false;
     this.clearPauseTimer();
-  }
-
-  public pauseOnInspect(): void {
-    this.pauseForInspection();
-  }
-
-  public resumeAfterInspect(allowAutoResume = true): void {
-    this.resumeFromInspection(allowAutoResume);
   }
 
   public isInspectionPaused(): boolean {

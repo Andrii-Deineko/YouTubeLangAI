@@ -300,11 +300,6 @@ export function detectLanguageFromLabelAndCues(
   return detectLanguageFromCues(cues, defaultLang);
 }
 
-export const parseSubtitleFile = parseSubtitles;
-export const parseSrtSubtitle = parseSrt;
-export const parsePlayerJsSubtitles = parsePlayerJsSubtitleString;
-
-
 export function unescapeString(raw: string): string {
   if (!raw) return '';
   let str = raw.replace(/\\\//g, '/').replace(/\\"/g, '"');

@@ -264,7 +264,3 @@ export function getRateLimitBlockedUntil(): number {
   }
   return 0;
 }
-
-export function isCircuitBreakerActive(): boolean {
-  return getRateLimitBlockedUntil() > Date.now();
-}

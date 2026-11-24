@@ -100,7 +100,7 @@ interface ChatCompletionResponse {
   };
 }
 
-export function buildAIExplainMessages(params: AIExplainRequestParams): ChatCompletionMessage[] {
+function buildAIExplainMessages(params: AIExplainRequestParams): ChatCompletionMessage[] {
   const systemPrompt = [
     'You are an expert bilingual lexicographer and language tutor.',
     'Analyze the target word or phrase strictly within the provided YouTube video scene context.',
@@ -164,7 +164,7 @@ function parseExamples(value: unknown): AIExample[] {
   return parsed.slice(0, 3);
 }
 
-export function parseAIExplanation(rawContent: string, fallbackTarget: string): AIExplanation {
+function parseAIExplanation(rawContent: string, fallbackTarget: string): AIExplanation {
   const cleaned = stripMarkdownJsonFence(rawContent);
   const parsed: unknown = JSON.parse(cleaned);
   if (typeof parsed !== 'object' || parsed === null) {
@@ -208,7 +208,7 @@ export function resolveChatCompletionsUrl(rawBaseUrl: string): string {
   return `${trimmed}/v1/chat/completions`;
 }
 
-export function resolveModelsUrl(rawBaseUrl: string): string {
+function resolveModelsUrl(rawBaseUrl: string): string {
   const trimmed = rawBaseUrl.trim().replace(/\/+$/, '');
   if (!trimmed) {
     return 'https://api.openai.com/v1/models';

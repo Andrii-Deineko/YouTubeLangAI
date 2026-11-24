@@ -126,14 +126,14 @@ export class ContentRunner {
     this.adapterTeardown = this.adapter.init({
       onTracksLoaded: (data) => {
         if (data.primaryCues) {
-          this.primaryEngine.loadRawCues(data.primaryCues);
+          this.primaryEngine.loadCues(data.primaryCues);
           this.trackMeta = data.primaryMeta ?? null;
           this.activePrimaryCue = this.primaryEngine.findActiveCue(
             this.videoController?.getCurrentTime() ?? 0
           );
         }
         if (data.translatedCues) {
-          this.translatedEngine.loadRawCues(data.translatedCues);
+          this.translatedEngine.loadCues(data.translatedCues);
           this.activeTranslatedCue = this.translatedEngine.findActiveCue(
             this.videoController?.getCurrentTime() ?? 0
           );
@@ -276,7 +276,6 @@ export class ContentRunner {
         }
       },
       shouldPauseOnAltHold: () => this.settings.pauseOnAltHold ?? true,
-      getPauseTimerSeconds: () => this.settings.pauseTimerSeconds ?? 0,
       isPopupOpen: () => this.selectedSelection !== null,
       hasCues: () => this.primaryEngine.getCues().length > 0,
       isOverlayEnabled: () => this.settings.enabled,
@@ -410,7 +409,7 @@ export class ContentRunner {
 
   private handleSelectTarget(selection: WordSelectionPayload): void {
     this.videoController?.clearPauseTimer();
-    this.videoController?.pauseOnInspect();
+    this.videoController?.pauseForInspection();
     this.selectedSelection = selection;
     this.renderUI();
   }
@@ -418,7 +417,7 @@ export class ContentRunner {
   private closePopupAndResume(allowAutoResume = true): void {
     this.selectedSelection = null;
     if (allowAutoResume && this.videoController?.isInspectionPaused()) {
-      this.videoController.resumeAfterInspect();
+      this.videoController.resumeFromInspection();
     }
     this.renderUI();
   }

@@ -23,19 +23,6 @@
   --ytai-border: rgba(255, 255, 255, 0.12);
   --ytai-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
   --ytai-backdrop-blur: 12px;
-
-  /* Cross-compatibility aliases for legacy CineLingua and AI design tokens */
-  --ai-surface: var(--ytai-surface);
-  --ai-text-primary: var(--ytai-text-primary);
-  --ai-text-secondary: var(--ytai-text-secondary);
-  --ai-accent: var(--ytai-accent);
-  --ai-border: var(--ytai-border);
-  --cinelingua-bg-rgb: var(--ytai-bg-rgb);
-  --cinelingua-surface: var(--ytai-surface);
-  --cinelingua-text-primary: var(--ytai-text-primary);
-  --cinelingua-text-secondary: var(--ytai-text-secondary);
-  --cinelingua-accent: var(--ytai-accent);
-  --cinelingua-border: var(--ytai-border);
 }
 
 /* Cinema Minimal Theme (Ultra transparent with yellow subtitles and high text-shadow) */

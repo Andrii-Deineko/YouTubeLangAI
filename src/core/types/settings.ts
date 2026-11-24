@@ -58,32 +58,6 @@ export const DEFAULT_BLACKLISTED_DOMAINS: readonly string[] = [
   'twitch.tv'
 ];
 
-export const DEFAULT_CINEMA_SITES: readonly string[] = [
-  'localhost',
-  '127.0.0.1',
-  'rezka.ag',
-  'hdrezka.ag',
-  'hdrezka.me',
-  'hdrezka.ac',
-  'hdrezka.cm',
-  'hdrezka.co',
-  'hdrezka.tv',
-  'hdrezka.app',
-  'hdrezka.re',
-  'hdrezka-ag.com',
-  '9animetv.to',
-  '9anime.to',
-  '9anime.pl',
-  'hianime.to',
-  'megacloud.tv',
-  'vidplay.online',
-  'filemoon.sx',
-  'rabbitstream.net',
-  'streamguard.cc',
-  'voidboost.net',
-  'voidboost.cc'
-];
-
 export const DEFAULT_SETTINGS: UserSettings = {
   enabled: true,
   nativeLang: 'ru',

@@ -11,9 +11,9 @@ import {
 } from './nativeSuppression';
 import {
   detectLanguageFromLabelAndCues,
-  parsePlayerJsSubtitles,
-  parseSrtSubtitle,
-  parseSubtitleFile,
+  parsePlayerJsSubtitleString,
+  parseSrt,
+  parseSubtitles,
   type PlayerJsTrackInfo
 } from '../../core/engine/subtitleParser';
 import type { SubtitleCue, TrackMetadata } from '../../core/types/subtitles';
@@ -140,7 +140,7 @@ export class CinemaAdapter implements PlatformAdapter {
         let trackLabel = 'Cinema Track';
 
         if (payload.playerJsString) {
-          const tracks = parsePlayerJsSubtitles(payload.playerJsString);
+          const tracks = parsePlayerJsSubtitleString(payload.playerJsString);
           if (tracks.length > 0) {
             // Pick first track or english track
             const enTrack = tracks.find(
@@ -152,8 +152,8 @@ export class CinemaAdapter implements PlatformAdapter {
               const text = await this.fetchSubtitleContent(enTrack.url);
               if (text) {
                 cues = text.includes('WEBVTT')
-                  ? parseSubtitleFile(text)
-                  : parseSrtSubtitle(text);
+                  ? parseSubtitles(text)
+                  : parseSrt(text);
               }
             } catch {
               // Ignore fetch error
@@ -162,8 +162,8 @@ export class CinemaAdapter implements PlatformAdapter {
         } else if (payload.rawText) {
           trackLabel = payload.url ? new URL(payload.url, window.location.href).pathname.split('/').pop() || 'Track' : 'Track';
           cues = payload.rawText.includes('WEBVTT')
-            ? parseSubtitleFile(payload.rawText)
-            : parseSrtSubtitle(payload.rawText);
+            ? parseSubtitles(payload.rawText)
+            : parseSrt(payload.rawText);
         }
 
         if (cues.length > 0) {

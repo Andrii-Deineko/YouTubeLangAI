@@ -2,8 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
-:host {
-  all: initial;
+html,
+body {
   font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
@@ -122,40 +122,6 @@
 
 ::-webkit-scrollbar-corner {
   background: transparent;
-}
-
-/* ==========================================================================
-   Active Listening Modes (Zero-rerender CSS transitions)
-   ========================================================================== */
-.ytai-subtitle-overlay[data-mode='blur']:not([data-alt-pressed='true']):not([data-has-selection='true']) .ytai-blur-target {
-  filter: blur(6px);
-  transition: filter 150ms ease;
-}
-
-.ytai-subtitle-overlay[data-mode='blur']:not([data-alt-pressed='true']):not([data-has-selection='true']):hover .ytai-blur-target {
-  filter: blur(0px);
-}
-
-.ytai-subtitle-overlay[data-mode='blur']:not([data-alt-pressed='true']):not([data-has-selection='true']) .ytai-blur-hint {
-  opacity: 1;
-  transition: opacity 150ms ease;
-}
-
-.ytai-subtitle-overlay[data-mode='blur']:not([data-alt-pressed='true']):not([data-has-selection='true']):hover .ytai-blur-hint {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.ytai-subtitle-overlay[data-mode='hidden']:not([data-alt-pressed='true']):not([data-has-selection='true']) {
-  opacity: 0 !important;
-  pointer-events: none !important;
-  transition: opacity 150ms ease;
-}
-
-.ytai-subtitle-overlay[data-mode='hidden'][data-alt-pressed='true'],
-.ytai-subtitle-overlay[data-mode='hidden'][data-has-selection='true'] {
-  opacity: 1 !important;
-  pointer-events: auto !important;
 }
 
 

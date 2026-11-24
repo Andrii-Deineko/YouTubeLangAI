@@ -130,14 +130,6 @@ export const SUBTITLE_SCALES: SubtitleScaleOption[] = [
   { id: 'tv', label: 'TV · 40px', name: 'TV / Диван', primary: 40, translated: 28 }
 ];
 
-export const SCALE_FONT_SIZE_MAP: Record<SubtitleScale, number> = {
-  sm: 16,
-  md: 20,
-  lg: 24,
-  xl: 32,
-  tv: 40
-};
-
 export function getSubtitleFontSizes(
   baseSize: number,
   scale: SubtitleScale = 'md'
@@ -175,18 +167,6 @@ export function getThemeCssVariables(
     '--ytai-border': theme.border,
     '--ytai-surface': theme.surface,
     '--ytai-text-shadow': theme.textShadow,
-    '--ytai-backdrop-blur': theme.backdropBlur,
-
-    '--ai-bg-rgb': theme.bgRgb,
-    '--ai-bg-opacity': String(overlayOpacity),
-    '--ai-text-primary': theme.textPrimary,
-    '--ai-text-secondary': theme.textSecondary,
-    '--ai-accent': theme.accent,
-    '--ai-accent-rgb': theme.accentRgb,
-    '--ai-accent-fg': theme.accentFg || '#ffffff',
-    '--ai-border': theme.border,
-    '--ai-surface': theme.surface,
-    '--ai-text-shadow': theme.textShadow,
-    '--ai-backdrop': `blur(${theme.backdropBlur})`
+    '--ytai-backdrop-blur': theme.backdropBlur
   };
 }

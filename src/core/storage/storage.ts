@@ -7,7 +7,6 @@ import {
   type SubtitleScale,
   type UserSettings
 } from '../types/settings';
-import type { SubtitleTrack } from '../types/subtitles';
 import type { VocabularyCard } from '../types/vocabulary';
 
 export const SETTINGS_KEY = 'cinelingua_settings';
@@ -15,8 +14,6 @@ export const LEGACY_SETTINGS_KEY = 'yt_lang_ai_settings';
 export const VOCABULARY_KEY = 'cinelingua_vocabulary';
 export const LEGACY_VOCABULARY_KEY = 'yt_lang_ai_vocabulary';
 export const MODELS_CACHE_KEY = 'cinelingua_models_cache';
-export const EPISODE_TRACKS_CACHE_KEY = 'cinelingua_episode_tracks_cache';
-export const EPISODE_TRACKS_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 let storageWriteQueue: Promise<void> = Promise.resolve();
 
@@ -27,55 +24,6 @@ function enqueueStorageWrite<T>(op: () => Promise<T>): Promise<T> {
     () => undefined
   );
   return resultPromise;
-}
-
-export interface CachedEpisodeTracksEntry {
-  tracks: SubtitleTrack[];
-  timestamp: number;
-}
-
-export async function getCachedEpisodeTracks(
-  episodeKey: string
-): Promise<SubtitleTrack[] | null> {
-  try {
-    if (!chrome?.storage?.local || !chrome?.runtime?.id) return null;
-    const result = await chrome.storage.local.get(EPISODE_TRACKS_CACHE_KEY);
-    const cache = result[EPISODE_TRACKS_CACHE_KEY] as
-      | Record<string, CachedEpisodeTracksEntry>
-      | undefined;
-    if (!cache || !cache[episodeKey]) return null;
-
-    const entry = cache[episodeKey];
-    if (Date.now() - entry.timestamp > EPISODE_TRACKS_TTL_MS) {
-      delete cache[episodeKey];
-      void chrome.storage.local.set({ [EPISODE_TRACKS_CACHE_KEY]: cache });
-      return null;
-    }
-    return entry.tracks;
-  } catch {
-    return null;
-  }
-}
-
-export async function saveCachedEpisodeTracks(
-  episodeKey: string,
-  tracks: SubtitleTrack[]
-): Promise<void> {
-  if (!episodeKey || !tracks || tracks.length === 0) return;
-  return enqueueStorageWrite(async () => {
-    try {
-      if (!chrome?.storage?.local || !chrome?.runtime?.id) return;
-      const result = await chrome.storage.local.get(EPISODE_TRACKS_CACHE_KEY);
-      const cache = (result[EPISODE_TRACKS_CACHE_KEY] as Record<string, CachedEpisodeTracksEntry>) || {};
-      cache[episodeKey] = {
-        tracks,
-        timestamp: Date.now()
-      };
-      await chrome.storage.local.set({ [EPISODE_TRACKS_CACHE_KEY]: cache });
-    } catch {
-      // Ignore storage errors
-    }
-  });
 }
 
 export interface CachedModelsState {
@@ -319,8 +267,6 @@ export function onSettingsChanged(callback: (settings: UserSettings) => void): (
   }
 }
 
-export const subscribeToSettings = onSettingsChanged;
-
 export async function getVocabulary(): Promise<VocabularyCard[]> {
   try {
     if (!chrome?.storage?.local || !chrome?.runtime?.id) {
@@ -359,8 +305,6 @@ export async function saveVocabularyCard(card: VocabularyCard): Promise<Vocabula
   });
 }
 
-export const saveVocabCard = saveVocabularyCard;
-
 export async function updateVocabularyCard(card: VocabularyCard): Promise<VocabularyCard[]> {
   return enqueueStorageWrite(async () => {
     const cards = await getVocabulary();
@@ -390,8 +334,6 @@ export async function deleteVocabularyCard(cardId: string): Promise<VocabularyCa
     return updated;
   });
 }
-
-export const deleteVocabCard = deleteVocabularyCard;
 
 export function onVocabularyChanged(callback: (cards: VocabularyCard[]) => void): () => void {
   try {

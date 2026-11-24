@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactElement
+} from 'react';
 import {
   Captions,
   Eye,
@@ -160,7 +167,9 @@ export function PlayerControls({
   const [isTimerMenuOpen, setIsTimerMenuOpen] = useState(false);
   const [customTimerInput, setCustomTimerInput] = useState('');
   const [isFontMenuOpen, setIsFontMenuOpen] = useState(false);
+  const [fontPopoverRightOffset, setFontPopoverRightOffset] = useState<number | null>(null);
 
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
   const trackMenuRef = useRef<HTMLDivElement | null>(null);
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const timerMenuRef = useRef<HTMLDivElement | null>(null);
@@ -169,6 +178,56 @@ export function PlayerControls({
   const modeLeaveTimeoutRef = useRef<number | null>(null);
   const timerLeaveTimeoutRef = useRef<number | null>(null);
   const fontLeaveTimeoutRef = useRef<number | null>(null);
+
+  const updateFontPopoverPosition = useCallback((): void => {
+    const btnWrap = fontMenuRef.current;
+    const toolbarEl = toolbarRef.current;
+    if (!btnWrap || !toolbarEl) {
+      setFontPopoverRightOffset(null);
+      return;
+    }
+
+    const POPOVER_WIDTH = 296;
+    const btnRect = btnWrap.getBoundingClientRect();
+    const toolbarRect = toolbarEl.getBoundingClientRect();
+    const playerEl =
+      toolbarEl.closest<HTMLElement>('#movie_player, .html5-video-player') ??
+      toolbarEl.parentElement;
+    const containerRight = playerEl
+      ? playerEl.getBoundingClientRect().right
+      : window.innerWidth;
+    const maxAllowedRight = Math.min(containerRight - 8, window.innerWidth - 8);
+
+    const btnCenter = btnRect.left + btnRect.width / 2;
+    const centeredRight = btnCenter + POPOVER_WIDTH / 2;
+    const centeredLeft = btnCenter - POPOVER_WIDTH / 2;
+
+    if (centeredRight <= maxAllowedRight && centeredLeft >= 8) {
+      setFontPopoverRightOffset(null);
+    } else {
+      const targetRight = Math.min(toolbarRect.right, maxAllowedRight);
+      const rightShift = Math.max(0, Math.round(targetRight - btnRect.right));
+      setFontPopoverRightOffset(rightShift);
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isFontMenuOpen) return;
+    updateFontPopoverPosition();
+    window.addEventListener('resize', updateFontPopoverPosition);
+    return () => {
+      window.removeEventListener('resize', updateFontPopoverPosition);
+    };
+  }, [
+    isFontMenuOpen,
+    trackMeta,
+    cueCount,
+    settings.subtitlePosition,
+    settings.subtitleBoxSize,
+    settings.subtitleBoxFixed,
+    settings.controlsScale,
+    updateFontPopoverPosition
+  ]);
 
   useEffect(() => {
     return () => {
@@ -491,6 +550,7 @@ export function PlayerControls({
 
   return (
     <div
+      ref={toolbarRef}
       className={`absolute right-3 top-3 z-50 flex items-center rounded-full shadow-lg select-none transition-opacity duration-300 ${scale.containerClass} ${
         isVisible ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
       }`}
@@ -858,13 +918,20 @@ export function PlayerControls({
 
             {isFontMenuOpen && (
               <div
-                className="absolute right-0 top-full pt-1.5 z-50 select-none animate-in fade-in duration-150"
+                className={`absolute top-full pt-1.5 z-50 select-none animate-in fade-in duration-150 ${
+                  fontPopoverRightOffset === null ? 'left-1/2 -translate-x-1/2' : ''
+                }`}
+                style={
+                  fontPopoverRightOffset !== null
+                    ? { right: `-${fontPopoverRightOffset}px` }
+                    : undefined
+                }
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
                 onKeyDown={(e) => e.stopPropagation()}
               >
                 <div
-                  className="w-[268px] rounded-2xl border p-3 shadow-2xl backdrop-blur-md flex flex-col gap-3 text-xs"
+                  className="w-[296px] rounded-2xl border p-3 shadow-2xl backdrop-blur-md flex flex-col gap-3 text-xs"
                   style={{
                     backgroundColor: 'rgba(15, 17, 23, 0.96)',
                     borderColor: 'rgba(255, 255, 255, 0.16)',
@@ -985,7 +1052,7 @@ export function PlayerControls({
                   </div>
 
                   {/* Section 4: Font weight and Outline */}
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-[minmax(0,114px)_1fr] gap-2">
                     <div>
                       <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
                         Начертание
@@ -1001,7 +1068,7 @@ export function PlayerControls({
                               key={id}
                               type="button"
                               onClick={() => onUpdateSettings({ fontWeight: id })}
-                              className={`rounded-lg py-1 text-center text-[10px] font-medium transition ${
+                              className={`rounded-lg px-1 py-1 text-center text-[10px] font-medium whitespace-nowrap transition ${
                                 isActive
                                   ? 'text-white shadow-sm'
                                   : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white'
@@ -1031,7 +1098,7 @@ export function PlayerControls({
                               key={id}
                               type="button"
                               onClick={() => onUpdateSettings({ textOutline: id })}
-                              className={`rounded-lg py-1 text-center text-[10px] font-medium transition ${
+                              className={`rounded-lg px-1 py-1 text-center text-[10px] font-medium whitespace-nowrap transition ${
                                 isActive
                                   ? 'text-white shadow-sm'
                                   : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white'

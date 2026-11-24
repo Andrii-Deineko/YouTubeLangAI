@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react';
 import {
   Captions,
   Eye,
@@ -140,6 +140,69 @@ const TRACK_MODES: Array<{
   }
 ];
 
+/**
+ * Keeps hover popovers/tooltips inside the visible viewport. The HUD lives in a
+ * shadow root inside the player, so a menu anchored to the top-right controls bar
+ * can easily extend past the right/bottom screen edge (especially in fullscreen).
+ */
+function useClampedPopover(
+  anchorRef: React.RefObject<HTMLElement | null>,
+  enabled: boolean,
+  align: 'left' | 'right',
+  revision = ''
+): { popoverRef: React.RefObject<HTMLDivElement | null>; style: React.CSSProperties } {
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const [style, setStyle] = useState<React.CSSProperties>({ visibility: 'hidden' });
+
+  useLayoutEffect(() => {
+    if (!enabled) return;
+
+    const update = (): void => {
+      const anchor = anchorRef.current;
+      const popover = popoverRef.current;
+      if (!anchor || !popover) return;
+
+      const a = anchor.getBoundingClientRect();
+      const width = popover.offsetWidth;
+      const height = popover.offsetHeight;
+      const margin = 8;
+      const gap = 6;
+
+      let left = align === 'right' ? a.right - width : a.left;
+      left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
+
+      let top = a.bottom + gap;
+      if (top + height > window.innerHeight - margin) {
+        const above = a.top - height - gap;
+        top = above >= margin ? above : Math.max(margin, window.innerHeight - height - margin);
+      }
+
+      const parent = popover.offsetParent as HTMLElement | null;
+      if (parent) {
+        const p = parent.getBoundingClientRect();
+        setStyle({
+          left: left - p.left,
+          top: top - p.top,
+          maxWidth: 'calc(100vw - 16px)',
+          visibility: 'visible'
+        });
+      } else {
+        setStyle({ left, top, maxWidth: 'calc(100vw - 16px)', visibility: 'visible' });
+      }
+    };
+
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [anchorRef, enabled, align, revision]);
+
+  return { popoverRef, style };
+}
+
 export function PlayerControls({
   settings,
   trackMeta,
@@ -170,6 +233,8 @@ export function PlayerControls({
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const timerMenuRef = useRef<HTMLDivElement | null>(null);
   const fontMenuRef = useRef<HTMLDivElement | null>(null);
+  const trackDropdownRef = useRef<HTMLDivElement | null>(null);
+  const modeDropdownRef = useRef<HTMLDivElement | null>(null);
   const trackLeaveTimeoutRef = useRef<number | null>(null);
   const modeLeaveTimeoutRef = useRef<number | null>(null);
   const timerLeaveTimeoutRef = useRef<number | null>(null);
@@ -413,6 +478,24 @@ export function PlayerControls({
     Boolean(hasActivePopup);
 
   const scale = SCALE_CONFIGS[settings.controlsScale || 'md'] || SCALE_CONFIGS.md;
+
+  const trackDropdown = useClampedPopover(trackMenuRef, isTrackMenuOpen, 'left');
+  const trackTooltip = useClampedPopover(
+    trackDropdownRef,
+    isTrackMenuOpen && Boolean(hoveredTrackModeId),
+    'left',
+    hoveredTrackModeId ?? ''
+  );
+  const modeDropdown = useClampedPopover(modeMenuRef, isModeMenuOpen, 'right');
+  const modeTooltip = useClampedPopover(
+    modeDropdownRef,
+    isModeMenuOpen && Boolean(hoveredModeId),
+    'right',
+    hoveredModeId ?? ''
+  );
+  const timerDropdown = useClampedPopover(timerMenuRef, isTimerMenuOpen, 'right');
+  const fontDropdown = useClampedPopover(fontMenuRef, isFontMenuOpen, 'right');
+
   const currentFontSize = settings.fontSize ?? settings.subtitleFontSize ?? 20;
   const currentTranslationScale = settings.translationScale ?? 0.85;
   const currentFontFamily = settings.fontFamily ?? 'sans';
@@ -575,10 +658,16 @@ export function PlayerControls({
             {/* Dropdown Menu: 3 icons with rich hover tooltips */}
             {isTrackMenuOpen && (
               <div
-                className={`absolute left-0 top-full mt-1.5 z-30 flex items-center gap-1.5 rounded-2xl border ${scale.dropdownPadClass} shadow-2xl backdrop-blur-md select-none`}
+                ref={(node) => {
+                  trackDropdown.popoverRef.current = node;
+                  trackDropdownRef.current = node;
+                }}
+                className={`absolute left-0 top-full z-30 flex items-center gap-1.5 rounded-2xl border ${scale.dropdownPadClass} shadow-2xl backdrop-blur-md select-none`}
                 style={{
                   backgroundColor: 'rgba(15, 17, 23, 0.95)',
-                  borderColor: 'rgba(255, 255, 255, 0.16)'
+                  borderColor: 'rgba(255, 255, 255, 0.16)',
+                  ...trackDropdown.style,
+                  marginTop: 0
                 }}
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
@@ -614,11 +703,14 @@ export function PlayerControls({
                   if (!hovered) return null;
                   return (
                     <div
-                      className="absolute left-0 top-full mt-2 w-64 rounded-xl border p-2.5 text-xs shadow-2xl backdrop-blur-md pointer-events-none z-50 select-none animate-in fade-in duration-150"
+                      ref={trackTooltip.popoverRef}
+                      className="absolute left-0 top-full w-64 rounded-xl border p-2.5 text-xs shadow-2xl backdrop-blur-md pointer-events-none z-50 select-none animate-in fade-in duration-150"
                       style={{
                         backgroundColor: 'rgba(15, 17, 23, 0.96)',
                         borderColor: 'rgba(255, 255, 255, 0.16)',
-                        color: 'var(--ytai-text-primary)'
+                        color: 'var(--ytai-text-primary)',
+                        ...trackTooltip.style,
+                        marginTop: 0
                       }}
                     >
                       <div className="font-semibold text-white">
@@ -664,10 +756,16 @@ export function PlayerControls({
             {/* Dropdown Menu: STRICTLY 3 icons with rich hover tooltips */}
             {isModeMenuOpen && (
               <div
-                className={`absolute right-0 top-full mt-1.5 z-30 flex items-center gap-1.5 rounded-2xl border ${scale.dropdownPadClass} shadow-2xl backdrop-blur-md select-none`}
+                ref={(node) => {
+                  modeDropdown.popoverRef.current = node;
+                  modeDropdownRef.current = node;
+                }}
+                className={`absolute right-0 top-full z-30 flex items-center gap-1.5 rounded-2xl border ${scale.dropdownPadClass} shadow-2xl backdrop-blur-md select-none`}
                 style={{
                   backgroundColor: 'rgba(15, 17, 23, 0.95)',
-                  borderColor: 'rgba(255, 255, 255, 0.16)'
+                  borderColor: 'rgba(255, 255, 255, 0.16)',
+                  ...modeDropdown.style,
+                  marginTop: 0
                 }}
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
@@ -702,11 +800,14 @@ export function PlayerControls({
                   if (!hoveredMode) return null;
                   return (
                     <div
-                      className="absolute right-0 top-full mt-2 w-64 rounded-xl border p-2.5 text-xs shadow-2xl backdrop-blur-md pointer-events-none z-50 select-none animate-in fade-in duration-150"
+                      ref={modeTooltip.popoverRef}
+                      className="absolute right-0 top-full w-64 rounded-xl border p-2.5 text-xs shadow-2xl backdrop-blur-md pointer-events-none z-50 select-none animate-in fade-in duration-150"
                       style={{
                         backgroundColor: 'rgba(15, 17, 23, 0.96)',
                         borderColor: 'rgba(255, 255, 255, 0.16)',
-                        color: 'var(--ytai-text-primary)'
+                        color: 'var(--ytai-text-primary)',
+                        ...modeTooltip.style,
+                        marginTop: 0
                       }}
                     >
                       <div className="font-semibold text-white">
@@ -754,11 +855,14 @@ export function PlayerControls({
 
             {isTimerMenuOpen && (
               <div
-                className={`absolute right-0 top-full mt-1.5 z-30 w-44 rounded-2xl border ${scale.dropdownPadClass} p-2 shadow-2xl backdrop-blur-md select-none`}
+                ref={timerDropdown.popoverRef}
+                className={`absolute right-0 top-full z-30 w-44 rounded-2xl border ${scale.dropdownPadClass} p-2 shadow-2xl backdrop-blur-md select-none`}
                 style={{
                   backgroundColor: 'rgba(15, 17, 23, 0.96)',
                   borderColor: 'rgba(255, 255, 255, 0.16)',
-                  color: 'var(--ytai-text-primary)'
+                  color: 'var(--ytai-text-primary)',
+                  ...timerDropdown.style,
+                  marginTop: 0
                 }}
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
@@ -866,7 +970,9 @@ export function PlayerControls({
 
             {isFontMenuOpen && (
               <div
-                className="absolute right-0 top-full pt-1.5 z-30 select-none animate-in fade-in duration-150"
+                ref={fontDropdown.popoverRef}
+                className="absolute right-0 top-full z-30 select-none animate-in fade-in duration-150"
+                style={fontDropdown.style}
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
                 onKeyDown={(e) => e.stopPropagation()}

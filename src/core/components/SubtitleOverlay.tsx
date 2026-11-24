@@ -2,6 +2,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -193,6 +194,8 @@ export function SubtitleOverlay({
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [hoveredHandle, setHoveredHandle] = useState<ResizeHandle>(null);
+  const [isBoxHovered, setIsBoxHovered] = useState(false);
+  const [autoFitScale, setAutoFitScale] = useState<number>(1);
 
   const [bottomOffset, setBottomOffset] = useState<number>(() => {
     if (typeof document === 'undefined') return 68;
@@ -200,6 +203,7 @@ export function SubtitleOverlay({
   });
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const isDraggingRef = useRef(false);
   const justFinishedDragRef = useRef(false);
   const currentDragPosRef = useRef<SubtitlePosition | null>(null);
@@ -454,9 +458,65 @@ export function SubtitleOverlay({
     primaryFontSize = Math.max(primaryFontSize, 28);
   }
   const effectiveTranslationScale = translationScale ?? 0.85;
-  const translatedFontSize = isTranslationOnly
+  const rawTranslatedFontSize = isTranslationOnly
     ? primaryFontSize
     : Math.max(10, Math.round(primaryFontSize * effectiveTranslationScale));
+
+  // Dynamic auto-fit font scaling when static box is shrunk
+  const effectivePrimaryFontSize = Math.max(11, Math.round(primaryFontSize * autoFitScale));
+  const effectiveTranslatedFontSize = Math.max(11, Math.round(rawTranslatedFontSize * autoFitScale));
+
+  useLayoutEffect(() => {
+    if (!boxFixed) {
+      if (autoFitScale !== 1) setAutoFitScale(1);
+      return;
+    }
+
+    const boxEl = containerRef.current;
+    const contentEl = contentRef.current;
+    if (!boxEl || !contentEl) return;
+
+    const measureAndFit = (): void => {
+      const availH = contentEl.clientHeight;
+      const availW = contentEl.clientWidth;
+      if (availH <= 0 || availW <= 0) return;
+
+      const innerEl = contentEl.firstElementChild as HTMLElement | null;
+      if (!innerEl) return;
+
+      const sh = innerEl.scrollHeight;
+      const sw = innerEl.scrollWidth;
+      if (sh <= 0 || sw <= 0) return;
+
+      const unscaledH = sh / autoFitScale;
+      const unscaledW = sw / autoFitScale;
+      if (unscaledH <= 0 || unscaledW <= 0) return;
+
+      const ratioH = availH / unscaledH;
+      const ratioW = availW / unscaledW;
+      const idealScale = Math.min(ratioH, ratioW);
+      const nextScale = Math.max(0.55, Math.min(1.0, Number((idealScale * 0.97).toFixed(2))));
+      setAutoFitScale((prev) => (Math.abs(prev - nextScale) > 0.03 ? nextScale : prev));
+    };
+
+    measureAndFit();
+
+    const observer = new ResizeObserver(() => {
+      measureAndFit();
+    });
+
+    observer.observe(boxEl);
+    return () => observer.disconnect();
+  }, [
+    boxFixed,
+    primaryCue,
+    translatedCue,
+    primaryFontSize,
+    rawTranslatedFontSize,
+    isTranslationOnly,
+    isAltRevealed,
+    autoFitScale
+  ]);
 
   const textTypographyStyle: React.CSSProperties = {
     fontFamily: FONT_FAMILIES[fontFamily ?? 'sans'] || FONT_FAMILIES.sans,
@@ -783,7 +843,7 @@ export function SubtitleOverlay({
       };
 
   const isDraggingOrResizing = isDragging || isResizing;
-  const isHighlightBorder = isResizing || hoveredHandle !== null;
+  const showResizeFrame = isBoxHovered || isDragging || isResizing || hoveredHandle !== null;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 overflow-visible">
@@ -819,20 +879,23 @@ export function SubtitleOverlay({
             bgAlpha <= 0
               ? 'transparent'
               : `rgba(var(--ytai-bg-rgb), ${bgAlpha})`,
-          borderColor: isHighlightBorder
-            ? 'var(--ytai-accent)'
-            : bgAlpha <= 0
+          borderColor:
+            bgAlpha <= 0
               ? 'transparent'
               : 'var(--ytai-border)',
-          borderWidth: '1.5px',
+          borderWidth: '1px',
           borderStyle: 'solid',
           backdropFilter: bgAlpha <= 0 ? 'none' : 'blur(var(--ytai-backdrop-blur, 12px))',
           WebkitBackdropFilter: bgAlpha <= 0 ? 'none' : 'blur(var(--ytai-backdrop-blur, 12px))',
-          boxShadow: isHighlightBorder
-            ? '0 0 0 1.5px var(--ytai-accent), 0 8px 32px rgba(0,0,0,0.5)'
-            : bgAlpha <= 0
+          boxShadow:
+            bgAlpha <= 0
               ? 'none'
               : undefined
+        }}
+        onMouseEnter={() => setIsBoxHovered(true)}
+        onMouseLeave={() => {
+          setIsBoxHovered(false);
+          setHoveredHandle(null);
         }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -903,66 +966,140 @@ export function SubtitleOverlay({
           <div className="w-8" aria-hidden="true" />
         </div>
 
-        {/* Subtitle Content (Centered in fixed mode) */}
+        {/* Subtitle Content (Centered in fixed mode without flex top-clipping) */}
         <div
+          ref={contentRef}
           className={`w-full text-center ${
             boxFixed
-              ? 'flex-1 flex flex-col items-center justify-center overflow-y-auto min-h-0'
+              ? 'flex-1 flex flex-col items-center overflow-hidden min-h-0'
               : ''
           }`}
         >
-          {/* Primary Original Line: shown in dual mode, original mode, or when revealed by Alt/selection in translation-only mode */}
-          {primaryCue && (!isTranslationOnly || isAltRevealed) && (
-            <div
-              className={`ytai-blur-target leading-snug select-text ${
-                isTranslationOnly ? 'mb-1 opacity-90' : ''
-              }`}
-              style={{
-                color: 'var(--ytai-text-primary)',
-                fontSize: `${isTranslationOnly ? Math.max(12, Math.round(primaryFontSize * 0.9)) : primaryFontSize}px`,
-                ...textTypographyStyle
-              }}
-            >
-              {renderedTokens}
-            </div>
+          <div className={`w-full flex flex-col items-center ${boxFixed ? 'my-auto' : ''}`}>
+            {/* Primary Original Line: shown in dual mode, original mode, or when revealed by Alt/selection in translation-only mode */}
+            {primaryCue && (!isTranslationOnly || isAltRevealed) && (
+              <div
+                className={`ytai-blur-target leading-snug select-text ${
+                  isTranslationOnly ? 'mb-1 opacity-90' : ''
+                }`}
+                style={{
+                  color: 'var(--ytai-text-primary)',
+                  fontSize: `${isTranslationOnly ? Math.max(11, Math.round(effectivePrimaryFontSize * 0.9)) : effectivePrimaryFontSize}px`,
+                  ...textTypographyStyle
+                }}
+              >
+                {renderedTokens}
+              </div>
+            )}
+
+            {/* Translation Line: shown in dual mode and translation-only mode */}
+            {!isOriginalOnly && (
+              <>
+                {Boolean(primaryCue?.translation || translatedCue?.translation || translatedCue?.text) ? (
+                  <div
+                    className={`ytai-blur-target leading-snug select-none ${
+                      isTranslationOnly ? 'mt-0 font-medium' : 'mt-1'
+                    }`}
+                    style={{
+                      color: isTranslationOnly
+                        ? 'var(--ytai-text-primary)'
+                        : 'var(--ytai-text-secondary)',
+                      fontSize: `${effectiveTranslatedFontSize}px`,
+                      ...textTypographyStyle
+                    }}
+                  >
+                    {primaryCue?.translation || translatedCue?.translation || translatedCue?.text}
+                  </div>
+                ) : primaryCue && isTranslationOnly ? (
+                  <div
+                    className="leading-snug select-none text-slate-400 opacity-60 animate-pulse tracking-widest text-center"
+                    style={{
+                      fontSize: `${effectiveTranslatedFontSize}px`,
+                      ...textTypographyStyle
+                    }}
+                  >
+                    ···
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* HUD Resize Frame (visible on hover, drag, or resize) */}
+        <div
+          className={`pointer-events-none absolute inset-0 transition-opacity duration-200 ${
+            showResizeFrame ? 'opacity-100' : 'opacity-0'
+          }`}
+          style={{
+            borderRadius: `${dynamicRadius}px`,
+            border: '1px solid color-mix(in srgb, var(--ytai-accent) 35%, transparent)'
+          }}
+        >
+          {/* Active edge highlights */}
+          {hoveredHandle === 'top' && (
+            <div className="absolute -top-[1px] left-3 right-3 h-[2px] bg-[var(--ytai-accent)] shadow-[0_0_8px_var(--ytai-accent)]" />
+          )}
+          {hoveredHandle === 'bottom' && (
+            <div className="absolute -bottom-[1px] left-3 right-3 h-[2px] bg-[var(--ytai-accent)] shadow-[0_0_8px_var(--ytai-accent)]" />
+          )}
+          {hoveredHandle === 'left' && (
+            <div className="absolute -left-[1px] top-3 bottom-3 w-[2px] bg-[var(--ytai-accent)] shadow-[0_0_8px_var(--ytai-accent)]" />
+          )}
+          {hoveredHandle === 'right' && (
+            <div className="absolute -right-[1px] top-3 bottom-3 w-[2px] bg-[var(--ytai-accent)] shadow-[0_0_8px_var(--ytai-accent)]" />
           )}
 
-          {/* Translation Line: shown in dual mode and translation-only mode */}
-          {!isOriginalOnly && (
-            <>
-              {Boolean(primaryCue?.translation || translatedCue?.translation || translatedCue?.text) ? (
-                <div
-                  className={`ytai-blur-target leading-snug select-none ${
-                    isTranslationOnly ? 'mt-0 font-medium' : 'mt-1'
-                  }`}
-                  style={{
-                    color: isTranslationOnly
-                      ? 'var(--ytai-text-primary)'
-                      : 'var(--ytai-text-secondary)',
-                    fontSize: `${translatedFontSize}px`,
-                    ...textTypographyStyle
-                  }}
-                >
-                  {primaryCue?.translation || translatedCue?.translation || translatedCue?.text}
-                </div>
-              ) : primaryCue && isTranslationOnly ? (
-                <div
-                  className="leading-snug select-none text-slate-400 opacity-60 animate-pulse tracking-widest text-center"
-                  style={{
-                    fontSize: `${translatedFontSize}px`,
-                    ...textTypographyStyle
-                  }}
-                >
-                  ···
-                </div>
-              ) : null}
-            </>
-          )}
+          {/* 4 Thick Accent Corners (L-shaped brackets) */}
+          <div
+            className={`absolute -top-[1px] -left-[1px] w-[14px] h-[14px] transition-transform duration-150 ${
+              hoveredHandle === 'top-left' ? 'scale-110' : ''
+            }`}
+            style={{
+              borderTop: '2.5px solid var(--ytai-accent)',
+              borderLeft: '2.5px solid var(--ytai-accent)',
+              borderTopLeftRadius: `${dynamicRadius}px`,
+              filter: hoveredHandle === 'top-left' ? 'drop-shadow(0 0 4px var(--ytai-accent))' : undefined
+            }}
+          />
+          <div
+            className={`absolute -top-[1px] -right-[1px] w-[14px] h-[14px] transition-transform duration-150 ${
+              hoveredHandle === 'top-right' ? 'scale-110' : ''
+            }`}
+            style={{
+              borderTop: '2.5px solid var(--ytai-accent)',
+              borderRight: '2.5px solid var(--ytai-accent)',
+              borderTopRightRadius: `${dynamicRadius}px`,
+              filter: hoveredHandle === 'top-right' ? 'drop-shadow(0 0 4px var(--ytai-accent))' : undefined
+            }}
+          />
+          <div
+            className={`absolute -bottom-[1px] -left-[1px] w-[14px] h-[14px] transition-transform duration-150 ${
+              hoveredHandle === 'bottom-left' ? 'scale-110' : ''
+            }`}
+            style={{
+              borderBottom: '2.5px solid var(--ytai-accent)',
+              borderLeft: '2.5px solid var(--ytai-accent)',
+              borderBottomLeftRadius: `${dynamicRadius}px`,
+              filter: hoveredHandle === 'bottom-left' ? 'drop-shadow(0 0 4px var(--ytai-accent))' : undefined
+            }}
+          />
+          <div
+            className={`absolute -bottom-[1px] -right-[1px] w-[14px] h-[14px] transition-transform duration-150 ${
+              hoveredHandle === 'bottom-right' ? 'scale-110' : ''
+            }`}
+            style={{
+              borderBottom: '2.5px solid var(--ytai-accent)',
+              borderRight: '2.5px solid var(--ytai-accent)',
+              borderBottomRightRadius: `${dynamicRadius}px`,
+              filter: hoveredHandle === 'bottom-right' ? 'drop-shadow(0 0 4px var(--ytai-accent))' : undefined
+            }}
+          />
         </div>
 
         {/* Interactive Resize Handles (Edges and Corners) */}
         <div
-          className="absolute -top-1 left-2 right-2 h-2 cursor-ns-resize z-20"
+          className="absolute -top-1 left-3 right-3 h-2 cursor-ns-resize z-20"
           onPointerDown={(e) => handleResizeStart('top', e)}
           onMouseEnter={() => setHoveredHandle('top')}
           onMouseLeave={() => setHoveredHandle((h) => (h === 'top' ? null : h))}
@@ -970,7 +1107,7 @@ export function SubtitleOverlay({
           onMouseDown={(e) => e.stopPropagation()}
         />
         <div
-          className="absolute -bottom-1 left-2 right-2 h-2 cursor-ns-resize z-20"
+          className="absolute -bottom-1 left-3 right-3 h-2 cursor-ns-resize z-20"
           onPointerDown={(e) => handleResizeStart('bottom', e)}
           onMouseEnter={() => setHoveredHandle('bottom')}
           onMouseLeave={() => setHoveredHandle((h) => (h === 'bottom' ? null : h))}
@@ -978,7 +1115,7 @@ export function SubtitleOverlay({
           onMouseDown={(e) => e.stopPropagation()}
         />
         <div
-          className="absolute -left-1 top-2 bottom-2 w-2 cursor-ew-resize z-20"
+          className="absolute -left-1 top-3 bottom-3 w-2 cursor-ew-resize z-20"
           onPointerDown={(e) => handleResizeStart('left', e)}
           onMouseEnter={() => setHoveredHandle('left')}
           onMouseLeave={() => setHoveredHandle((h) => (h === 'left' ? null : h))}
@@ -986,7 +1123,7 @@ export function SubtitleOverlay({
           onMouseDown={(e) => e.stopPropagation()}
         />
         <div
-          className="absolute -right-1 top-2 bottom-2 w-2 cursor-ew-resize z-20"
+          className="absolute -right-1 top-3 bottom-3 w-2 cursor-ew-resize z-20"
           onPointerDown={(e) => handleResizeStart('right', e)}
           onMouseEnter={() => setHoveredHandle('right')}
           onMouseLeave={() => setHoveredHandle((h) => (h === 'right' ? null : h))}

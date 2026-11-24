@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import {
+  Captions,
   Eye,
   Ghost,
   Languages,
+  Layers,
   Lock,
   Minus,
   Move,
@@ -13,7 +15,12 @@ import {
   Sparkles,
   Type
 } from 'lucide-react';
-import type { ActiveListeningMode, ControlsScale, UserSettings } from '../types/settings';
+import type {
+  ActiveListeningMode,
+  ControlsScale,
+  SubtitleTrackMode,
+  UserSettings
+} from '../types/settings';
 import type { TrackMetadata } from '../types/subtitles';
 
 interface PlayerControlsProps {
@@ -105,6 +112,32 @@ const LISTENING_MODES: Array<{
   }
 ];
 
+const TRACK_MODES: Array<{
+  id: SubtitleTrackMode;
+  label: string;
+  description: string;
+  icon: typeof Languages;
+}> = [
+  {
+    id: 'dual',
+    label: 'Двойные субтитры',
+    description: 'Оригинальный текст и перевод второй строкой',
+    icon: Layers
+  },
+  {
+    id: 'translation',
+    label: 'Только перевод',
+    description: 'Только переведённая строка (оригинал по Alt для разбора слов)',
+    icon: Languages
+  },
+  {
+    id: 'original',
+    label: 'Только оригинал',
+    description: 'Только оригинальная дорожка без перевода',
+    icon: Captions
+  }
+];
+
 export function PlayerControls({
   settings,
   trackMeta,
@@ -119,21 +152,28 @@ export function PlayerControls({
   const [isHovered, setIsHovered] = useState(false);
   const [isYtAutohide, setIsYtAutohide] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [isTrackMenuOpen, setIsTrackMenuOpen] = useState(false);
+  const [hoveredTrackModeId, setHoveredTrackModeId] = useState<SubtitleTrackMode | null>(null);
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
   const [hoveredModeId, setHoveredModeId] = useState<ActiveListeningMode | null>(null);
   const [isTimerMenuOpen, setIsTimerMenuOpen] = useState(false);
   const [customTimerInput, setCustomTimerInput] = useState('');
   const [isFontMenuOpen, setIsFontMenuOpen] = useState(false);
 
+  const trackMenuRef = useRef<HTMLDivElement | null>(null);
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const timerMenuRef = useRef<HTMLDivElement | null>(null);
   const fontMenuRef = useRef<HTMLDivElement | null>(null);
+  const trackLeaveTimeoutRef = useRef<number | null>(null);
   const modeLeaveTimeoutRef = useRef<number | null>(null);
   const timerLeaveTimeoutRef = useRef<number | null>(null);
   const fontLeaveTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     return () => {
+      if (trackLeaveTimeoutRef.current !== null) {
+        window.clearTimeout(trackLeaveTimeoutRef.current);
+      }
       if (modeLeaveTimeoutRef.current !== null) {
         window.clearTimeout(modeLeaveTimeoutRef.current);
       }
@@ -145,6 +185,25 @@ export function PlayerControls({
       }
     };
   }, []);
+
+  const handleTrackMouseEnter = (): void => {
+    if (trackLeaveTimeoutRef.current !== null) {
+      window.clearTimeout(trackLeaveTimeoutRef.current);
+      trackLeaveTimeoutRef.current = null;
+    }
+    setIsTrackMenuOpen(true);
+  };
+
+  const handleTrackMouseLeave = (): void => {
+    if (trackLeaveTimeoutRef.current !== null) {
+      window.clearTimeout(trackLeaveTimeoutRef.current);
+    }
+    trackLeaveTimeoutRef.current = window.setTimeout(() => {
+      setIsTrackMenuOpen(false);
+      setHoveredTrackModeId(null);
+      trackLeaveTimeoutRef.current = null;
+    }, 150);
+  };
 
   const handleModeMouseEnter = (): void => {
     if (modeLeaveTimeoutRef.current !== null) {
@@ -256,10 +315,14 @@ export function PlayerControls({
   }, []);
 
   useEffect(() => {
-    if (!isModeMenuOpen && !isTimerMenuOpen && !isFontMenuOpen) return;
+    if (!isTrackMenuOpen && !isModeMenuOpen && !isTimerMenuOpen && !isFontMenuOpen) return;
 
     const handleDocumentClick = (e: MouseEvent): void => {
       const path = e.composedPath();
+      if (trackMenuRef.current && !path.includes(trackMenuRef.current)) {
+        setIsTrackMenuOpen(false);
+        setHoveredTrackModeId(null);
+      }
       if (modeMenuRef.current && !path.includes(modeMenuRef.current)) {
         setIsModeMenuOpen(false);
         setHoveredModeId(null);
@@ -274,6 +337,8 @@ export function PlayerControls({
 
     const handleDocumentKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
+        setIsTrackMenuOpen(false);
+        setHoveredTrackModeId(null);
         setIsModeMenuOpen(false);
         setIsTimerMenuOpen(false);
         setIsFontMenuOpen(false);
@@ -287,7 +352,7 @@ export function PlayerControls({
       document.removeEventListener('mousedown', handleDocumentClick);
       document.removeEventListener('keydown', handleDocumentKeyDown);
     };
-  }, [isModeMenuOpen, isTimerMenuOpen, isFontMenuOpen]);
+  }, [isTrackMenuOpen, isModeMenuOpen, isTimerMenuOpen, isFontMenuOpen]);
 
   const shouldAutoHide = settings.autoHideControls ?? true;
   const isVisible =
@@ -295,6 +360,7 @@ export function PlayerControls({
     isPaused ||
     !isYtAutohide ||
     isHovered ||
+    isTrackMenuOpen ||
     isModeMenuOpen ||
     isTimerMenuOpen ||
     isFontMenuOpen ||
@@ -340,6 +406,32 @@ export function PlayerControls({
       overlayOpacity: 0.8,
       textOutline: 'shadow'
     });
+  };
+
+  const currentTrackMode: SubtitleTrackMode =
+    settings.subtitleTrackMode ||
+    (settings.showTranslation === false ? 'original' : 'dual');
+
+  const cycleTrackMode = (e: React.MouseEvent): void => {
+    e.stopPropagation();
+    const nextMode: SubtitleTrackMode =
+      currentTrackMode === 'dual'
+        ? 'translation'
+        : currentTrackMode === 'translation'
+          ? 'original'
+          : 'dual';
+    onUpdateSettings({ subtitleTrackMode: nextMode });
+  };
+
+  const getTrackModeTitle = (): string => {
+    switch (currentTrackMode) {
+      case 'dual':
+        return 'Двойные субтитры (Оригинал + Перевод) · Клик: только перевод';
+      case 'translation':
+        return 'Только перевод (Оригинал по Alt) · Клик: только оригинал';
+      case 'original':
+        return 'Только оригинал · Клик: двойные субтитры';
+    }
   };
 
   const cycleListeningMode = (e: React.MouseEvent): void => {
@@ -418,18 +510,84 @@ export function PlayerControls({
 
       {settings.enabled && (
         <>
-          <button
-            type="button"
-            title="Toggle Dual Subtitles"
-            onClick={() => {
-              const nextVal = !(settings.showTranslation ?? settings.showDualSubtitles);
-              onUpdateSettings({ showTranslation: nextVal, showDualSubtitles: nextVal });
-            }}
-            style={(settings.showTranslation ?? settings.showDualSubtitles) ? activeStyle : inactiveStyle}
-            className={`rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)]`}
+          {/* Subtitle Track Mode (文A button: click = cycle, hover = 3-icon menu) */}
+          <div
+            className="relative"
+            ref={trackMenuRef}
+            onMouseEnter={handleTrackMouseEnter}
+            onMouseLeave={handleTrackMouseLeave}
           >
-            <Languages size={scale.iconSize} />
-          </button>
+            <button
+              type="button"
+              title={getTrackModeTitle()}
+              onClick={cycleTrackMode}
+              style={currentTrackMode !== 'original' ? activeStyle : inactiveStyle}
+              className={`flex items-center justify-center rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)]`}
+            >
+              <Languages size={scale.iconSize} />
+            </button>
+
+            {/* Dropdown Menu: 3 icons with rich hover tooltips */}
+            {isTrackMenuOpen && (
+              <div
+                className={`absolute left-0 top-full mt-1.5 z-30 flex items-center gap-1.5 rounded-2xl border ${scale.dropdownPadClass} shadow-2xl backdrop-blur-md select-none`}
+                style={{
+                  backgroundColor: 'rgba(15, 17, 23, 0.95)',
+                  borderColor: 'rgba(255, 255, 255, 0.16)'
+                }}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                {TRACK_MODES.map((mode) => {
+                  const Icon = mode.icon;
+                  const isActive = currentTrackMode === mode.id;
+                  return (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      title={mode.label}
+                      onClick={() => {
+                        onUpdateSettings({ subtitleTrackMode: mode.id });
+                        setIsTrackMenuOpen(false);
+                        setHoveredTrackModeId(null);
+                      }}
+                      onMouseEnter={() => setHoveredTrackModeId(mode.id)}
+                      onMouseLeave={() =>
+                        setHoveredTrackModeId((prev) => (prev === mode.id ? null : prev))
+                      }
+                      style={isActive ? activeStyle : inactiveStyle}
+                      className={`flex items-center justify-center rounded-xl ${scale.iconBtnPadClass} transition hover:bg-white/10`}
+                    >
+                      <Icon size={scale.iconSize} />
+                    </button>
+                  );
+                })}
+
+                {/* Rich Hover Tooltip */}
+                {(() => {
+                  const hovered = TRACK_MODES.find((m) => m.id === hoveredTrackModeId);
+                  if (!hovered) return null;
+                  return (
+                    <div
+                      className="absolute left-0 top-full mt-2 w-64 rounded-xl border p-2.5 text-xs shadow-2xl backdrop-blur-md pointer-events-none z-50 select-none animate-in fade-in duration-150"
+                      style={{
+                        backgroundColor: 'rgba(15, 17, 23, 0.96)',
+                        borderColor: 'rgba(255, 255, 255, 0.16)',
+                        color: 'var(--ytai-text-primary)'
+                      }}
+                    >
+                      <div className="font-semibold text-white">
+                        {hovered.label}
+                      </div>
+                      <p className="mt-1 text-[11px] leading-relaxed text-slate-300">
+                        {hovered.description}
+                      </p>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
 
           {/* Subtitle Perception Mode (Icon click = cycle, Hover = dropdown) */}
           <div

@@ -85,6 +85,7 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
             translatedCue={translatedCue}
             showDualSubtitles={settings.showDualSubtitles}
             showTranslation={settings.showTranslation}
+            subtitleTrackMode={settings.subtitleTrackMode}
             activeListeningMode={settings.activeListeningMode}
             altPressed={altPressed}
             fontSize={settings.fontSize ?? settings.subtitleFontSize}

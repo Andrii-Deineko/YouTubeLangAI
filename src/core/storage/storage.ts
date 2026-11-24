@@ -8,6 +8,7 @@ import {
   type SubtitleBoxSize,
   type SubtitlePosition,
   type SubtitleScale,
+  type SubtitleTrackMode,
   type TextOutline,
   type UserSettings
 } from '../types/settings';
@@ -115,6 +116,13 @@ export function parseTextOutline(rawVal: unknown): TextOutline {
   return 'shadow';
 }
 
+export function parseSubtitleTrackMode(rawVal: unknown): SubtitleTrackMode {
+  if (rawVal === 'dual' || rawVal === 'translation' || rawVal === 'original') {
+    return rawVal;
+  }
+  return 'dual';
+}
+
 export function mergeSettings(
   raw: (Partial<UserSettings> & {
     ai?: Partial<UserSettings['llm']>;
@@ -126,10 +134,28 @@ export function mergeSettings(
   }) | undefined
 ): UserSettings {
   const enabled = raw?.enabled ?? raw?.overlayEnabled ?? DEFAULT_SETTINGS.enabled;
-  const showDualSubtitles =
-    raw?.showDualSubtitles ?? raw?.showTranslation ?? raw?.secondTrackEnabled ?? DEFAULT_SETTINGS.showDualSubtitles;
+
+  let subtitleTrackMode: SubtitleTrackMode;
+  if (
+    raw?.subtitleTrackMode === 'dual' ||
+    raw?.subtitleTrackMode === 'translation' ||
+    raw?.subtitleTrackMode === 'original'
+  ) {
+    subtitleTrackMode = raw.subtitleTrackMode;
+  } else if (
+    raw?.showTranslation === false ||
+    raw?.showDualSubtitles === false ||
+    raw?.secondTrackEnabled === false
+  ) {
+    subtitleTrackMode = 'original';
+  } else {
+    subtitleTrackMode = DEFAULT_SETTINGS.subtitleTrackMode;
+  }
+
   const showTranslation =
-    raw?.showTranslation ?? raw?.showDualSubtitles ?? raw?.secondTrackEnabled ?? DEFAULT_SETTINGS.showTranslation;
+    subtitleTrackMode === 'dual' || subtitleTrackMode === 'translation';
+  const showDualSubtitles = subtitleTrackMode === 'dual';
+
   const activeListeningMode = parseActiveListeningMode(
     raw?.activeListeningMode ?? raw?.activeListening
   );
@@ -211,6 +237,7 @@ export function mergeSettings(
     ...DEFAULT_SETTINGS,
     ...raw,
     enabled,
+    subtitleTrackMode,
     showDualSubtitles,
     showTranslation,
     activeListeningMode,
@@ -284,10 +311,14 @@ export async function saveSettings(partial: Partial<UserSettings>): Promise<User
   return enqueueStorageWrite(async () => {
     const current = await getSettings();
     const syncedPartial = { ...partial };
-    if (syncedPartial.showTranslation !== undefined && syncedPartial.showDualSubtitles === undefined) {
-      syncedPartial.showDualSubtitles = syncedPartial.showTranslation;
-    } else if (syncedPartial.showDualSubtitles !== undefined && syncedPartial.showTranslation === undefined) {
-      syncedPartial.showTranslation = syncedPartial.showDualSubtitles;
+    if (syncedPartial.subtitleTrackMode !== undefined) {
+      syncedPartial.showTranslation = syncedPartial.subtitleTrackMode !== 'original';
+      syncedPartial.showDualSubtitles = syncedPartial.subtitleTrackMode === 'dual';
+    } else if (syncedPartial.showTranslation !== undefined || syncedPartial.showDualSubtitles !== undefined) {
+      const isTrans = syncedPartial.showTranslation ?? syncedPartial.showDualSubtitles;
+      syncedPartial.subtitleTrackMode = isTrans ? 'dual' : 'original';
+      syncedPartial.showTranslation = Boolean(isTrans);
+      syncedPartial.showDualSubtitles = Boolean(isTrans);
     }
     if (syncedPartial.fontSize !== undefined && syncedPartial.subtitleFontSize === undefined) {
       syncedPartial.subtitleFontSize = syncedPartial.fontSize;

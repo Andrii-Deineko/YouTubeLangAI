@@ -69,10 +69,14 @@ export class ContentRunner {
     this.unsubscribeSettings = onSettingsChanged((newSettings) => {
       const prevNativeLang = this.settings.nativeLang;
       const prevShowTrans =
-        this.settings.showTranslation ?? this.settings.showDualSubtitles;
+        this.settings.subtitleTrackMode
+          ? this.settings.subtitleTrackMode !== 'original'
+          : (this.settings.showTranslation ?? this.settings.showDualSubtitles);
       this.settings = newSettings;
       const nextShowTrans =
-        newSettings.showTranslation ?? newSettings.showDualSubtitles;
+        newSettings.subtitleTrackMode
+          ? newSettings.subtitleTrackMode !== 'original'
+          : (newSettings.showTranslation ?? newSettings.showDualSubtitles);
 
       if (newSettings.nativeLang !== prevNativeLang) {
         this.primaryEngine.clearTranslations();
@@ -219,7 +223,8 @@ export class ContentRunner {
         if (!this.settings.enabled || this.isAdShowing || !this.videoController) return;
 
         const isTranslationVisible =
-          this.settings.showTranslation ?? this.settings.showDualSubtitles ?? true;
+          this.settings.subtitleTrackMode !== 'original' &&
+          (this.settings.showTranslation ?? this.settings.showDualSubtitles ?? true);
         const nextPrimary = this.primaryEngine.findActiveCue(timeSec);
         const nextTranslated = isTranslationVisible
           ? this.translatedEngine.findActiveCue(timeSec)
@@ -425,7 +430,8 @@ export class ContentRunner {
   private async handleUpdateSettings(partial: Partial<UserSettings>): Promise<void> {
     this.settings = await saveSettings(partial);
     const isTransEnabled =
-      this.settings.showTranslation ?? this.settings.showDualSubtitles;
+      this.settings.subtitleTrackMode !== 'original' &&
+      (this.settings.showTranslation ?? this.settings.showDualSubtitles ?? true);
     if (
       isTransEnabled &&
       this.trackMeta &&
@@ -579,7 +585,8 @@ export class ContentRunner {
 
   private triggerSubtitleTranslation(): void {
     const isTranslationEnabled =
-      this.settings.showTranslation ?? this.settings.showDualSubtitles ?? true;
+      this.settings.subtitleTrackMode !== 'original' &&
+      (this.settings.showTranslation ?? this.settings.showDualSubtitles ?? true);
     if (!isTranslationEnabled) return;
 
     const primaryCues = this.primaryEngine.getCues();

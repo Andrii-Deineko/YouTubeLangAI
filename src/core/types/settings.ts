@@ -11,6 +11,8 @@ export type ControlsScale = 'sm' | 'md' | 'lg' | 'xl';
 
 export type ActiveListeningMode = 'off' | 'blur' | 'hidden';
 
+export type SubtitleTrackMode = 'dual' | 'translation' | 'original';
+
 export type FontFamily = 'sans' | 'serif' | 'mono';
 
 export type FontWeight = 'normal' | 'bold';
@@ -39,6 +41,7 @@ export interface UserSettings {
   videoLang: string;
   showDualSubtitles: boolean;
   showTranslation: boolean;
+  subtitleTrackMode: SubtitleTrackMode;
   activeListeningMode: ActiveListeningMode;
   pauseOnAltReveal: boolean;
   pauseOnAltHold: boolean;
@@ -83,6 +86,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   videoLang: 'en',
   showDualSubtitles: true,
   showTranslation: true,
+  subtitleTrackMode: 'dual',
   activeListeningMode: 'off',
   pauseOnAltReveal: false,
   pauseOnAltHold: true,

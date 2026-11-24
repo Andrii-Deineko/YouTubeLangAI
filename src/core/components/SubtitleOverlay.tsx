@@ -16,6 +16,7 @@ import type {
   SubtitleBoxSize,
   SubtitlePosition,
   SubtitleScale,
+  SubtitleTrackMode,
   TextOutline,
   UserSettings
 } from '../types/settings';
@@ -54,6 +55,7 @@ interface SubtitleOverlayProps {
   translatedCue: SubtitleCue | null;
   showDualSubtitles?: boolean;
   showTranslation?: boolean;
+  subtitleTrackMode?: SubtitleTrackMode;
   activeListeningMode: ActiveListeningMode;
   altPressed: boolean;
   fontSize?: number;
@@ -169,6 +171,7 @@ export function SubtitleOverlay({
   translatedCue,
   showDualSubtitles,
   showTranslation,
+  subtitleTrackMode,
   activeListeningMode,
   altPressed,
   fontSize,
@@ -432,6 +435,14 @@ export function SubtitleOverlay({
   const isHiddenMode = activeListeningMode === 'hidden';
   const isBlurMode = activeListeningMode === 'blur';
 
+  const effectiveTrackMode: SubtitleTrackMode =
+    subtitleTrackMode ??
+    (showTranslation ?? showDualSubtitles ?? true ? 'dual' : 'original');
+
+  const isTranslationOnly = effectiveTrackMode === 'translation';
+  const isOriginalOnly = effectiveTrackMode === 'original';
+  const isAltRevealed = altPressed || Boolean(selectedTarget);
+
   // In 'hidden' mode, mouse hover intentionally does NOT reveal subtitles; only Alt or active selection does.
   const isRevealedInHidden = altPressed || Boolean(selectedTarget);
   const isCardVisible = !isHiddenMode || isRevealedInHidden;
@@ -443,7 +454,9 @@ export function SubtitleOverlay({
     primaryFontSize = Math.max(primaryFontSize, 28);
   }
   const effectiveTranslationScale = translationScale ?? 0.85;
-  const translatedFontSize = Math.max(10, Math.round(primaryFontSize * effectiveTranslationScale));
+  const translatedFontSize = isTranslationOnly
+    ? primaryFontSize
+    : Math.max(10, Math.round(primaryFontSize * effectiveTranslationScale));
 
   const textTypographyStyle: React.CSSProperties = {
     fontFamily: FONT_FAMILIES[fontFamily ?? 'sans'] || FONT_FAMILIES.sans,
@@ -744,7 +757,8 @@ export function SubtitleOverlay({
     });
   }, [primaryCue, selectedTarget, handleTokenClick, handleTokenEnter]);
 
-  if (!primaryCue && !boxFixed) return null;
+  const hasCue = Boolean(primaryCue || translatedCue);
+  if (!hasCue && !boxFixed) return null;
 
   const defaultFixedSize = { width: 680, height: 112 };
   const effectiveWidth = boxSize?.width ?? defaultFixedSize.width;
@@ -857,7 +871,16 @@ export function SubtitleOverlay({
             </button>
           </div>
 
-          {isBlurMode && (
+          {isTranslationOnly && isAltRevealed && (
+            <div
+              className="text-[11px] leading-tight tracking-wide font-medium select-none transition-colors"
+              style={{ color: 'var(--ytai-accent)' }}
+            >
+              Оригинал (Alt) · Кликните слово для сохранения
+            </div>
+          )}
+
+          {!isTranslationOnly && isBlurMode && (
             <div
               className={`ytai-blur-hint text-[11px] leading-tight tracking-wide font-medium select-none transition-colors ${
                 altPressed || Boolean(selectedTarget) ? 'hidden' : ''
@@ -888,12 +911,15 @@ export function SubtitleOverlay({
               : ''
           }`}
         >
-          {primaryCue && (
+          {/* Primary Original Line: shown in dual mode, original mode, or when revealed by Alt/selection in translation-only mode */}
+          {primaryCue && (!isTranslationOnly || isAltRevealed) && (
             <div
-              className="ytai-blur-target leading-snug select-text"
+              className={`ytai-blur-target leading-snug select-text ${
+                isTranslationOnly ? 'mb-1 opacity-90' : ''
+              }`}
               style={{
                 color: 'var(--ytai-text-primary)',
-                fontSize: `${primaryFontSize}px`,
+                fontSize: `${isTranslationOnly ? Math.max(12, Math.round(primaryFontSize * 0.9)) : primaryFontSize}px`,
                 ...textTypographyStyle
               }}
             >
@@ -901,19 +927,37 @@ export function SubtitleOverlay({
             </div>
           )}
 
-          {(showTranslation ?? showDualSubtitles ?? true) &&
-            Boolean(primaryCue?.translation || translatedCue?.translation || translatedCue?.text) && (
-              <div
-                className="ytai-blur-target mt-1 leading-snug select-none"
-                style={{
-                  color: 'var(--ytai-text-secondary)',
-                  fontSize: `${translatedFontSize}px`,
-                  ...textTypographyStyle
-                }}
-              >
-                {primaryCue?.translation || translatedCue?.translation || translatedCue?.text}
-              </div>
-            )}
+          {/* Translation Line: shown in dual mode and translation-only mode */}
+          {!isOriginalOnly && (
+            <>
+              {Boolean(primaryCue?.translation || translatedCue?.translation || translatedCue?.text) ? (
+                <div
+                  className={`ytai-blur-target leading-snug select-none ${
+                    isTranslationOnly ? 'mt-0 font-medium' : 'mt-1'
+                  }`}
+                  style={{
+                    color: isTranslationOnly
+                      ? 'var(--ytai-text-primary)'
+                      : 'var(--ytai-text-secondary)',
+                    fontSize: `${translatedFontSize}px`,
+                    ...textTypographyStyle
+                  }}
+                >
+                  {primaryCue?.translation || translatedCue?.translation || translatedCue?.text}
+                </div>
+              ) : primaryCue && isTranslationOnly ? (
+                <div
+                  className="leading-snug select-none text-slate-400 opacity-60 animate-pulse tracking-widest text-center"
+                  style={{
+                    fontSize: `${translatedFontSize}px`,
+                    ...textTypographyStyle
+                  }}
+                >
+                  ···
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
 
         {/* Interactive Resize Handles (Edges and Corners) */}

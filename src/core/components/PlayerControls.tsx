@@ -3,11 +3,14 @@ import {
   Eye,
   Ghost,
   Languages,
+  Minus,
   Move,
   PauseCircle,
+  Plus,
   Power,
   RotateCcw,
-  Sparkles
+  Sparkles,
+  Type
 } from 'lucide-react';
 import type { ActiveListeningMode, ControlsScale, UserSettings } from '../types/settings';
 import type { TrackMetadata } from '../types/subtitles';
@@ -119,11 +122,14 @@ export function PlayerControls({
   const [hoveredModeId, setHoveredModeId] = useState<ActiveListeningMode | null>(null);
   const [isTimerMenuOpen, setIsTimerMenuOpen] = useState(false);
   const [customTimerInput, setCustomTimerInput] = useState('');
+  const [isFontMenuOpen, setIsFontMenuOpen] = useState(false);
 
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const timerMenuRef = useRef<HTMLDivElement | null>(null);
+  const fontMenuRef = useRef<HTMLDivElement | null>(null);
   const modeLeaveTimeoutRef = useRef<number | null>(null);
   const timerLeaveTimeoutRef = useRef<number | null>(null);
+  const fontLeaveTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     return () => {
@@ -132,6 +138,9 @@ export function PlayerControls({
       }
       if (timerLeaveTimeoutRef.current !== null) {
         window.clearTimeout(timerLeaveTimeoutRef.current);
+      }
+      if (fontLeaveTimeoutRef.current !== null) {
+        window.clearTimeout(fontLeaveTimeoutRef.current);
       }
     };
   }, []);
@@ -171,6 +180,24 @@ export function PlayerControls({
       setIsTimerMenuOpen(false);
       timerLeaveTimeoutRef.current = null;
     }, 150);
+  };
+
+  const handleFontMouseEnter = (): void => {
+    if (fontLeaveTimeoutRef.current !== null) {
+      window.clearTimeout(fontLeaveTimeoutRef.current);
+      fontLeaveTimeoutRef.current = null;
+    }
+    setIsFontMenuOpen(true);
+  };
+
+  const handleFontMouseLeave = (): void => {
+    if (fontLeaveTimeoutRef.current !== null) {
+      window.clearTimeout(fontLeaveTimeoutRef.current);
+    }
+    fontLeaveTimeoutRef.current = window.setTimeout(() => {
+      setIsFontMenuOpen(false);
+      fontLeaveTimeoutRef.current = null;
+    }, 180);
   };
 
   const handleCustomTimerSubmit = (): void => {
@@ -228,7 +255,7 @@ export function PlayerControls({
   }, []);
 
   useEffect(() => {
-    if (!isModeMenuOpen && !isTimerMenuOpen) return;
+    if (!isModeMenuOpen && !isTimerMenuOpen && !isFontMenuOpen) return;
 
     const handleDocumentClick = (e: MouseEvent): void => {
       const path = e.composedPath();
@@ -239,12 +266,16 @@ export function PlayerControls({
       if (timerMenuRef.current && !path.includes(timerMenuRef.current)) {
         setIsTimerMenuOpen(false);
       }
+      if (fontMenuRef.current && !path.includes(fontMenuRef.current)) {
+        setIsFontMenuOpen(false);
+      }
     };
 
     const handleDocumentKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
         setIsModeMenuOpen(false);
         setIsTimerMenuOpen(false);
+        setIsFontMenuOpen(false);
         setHoveredModeId(null);
       }
     };
@@ -255,7 +286,7 @@ export function PlayerControls({
       document.removeEventListener('mousedown', handleDocumentClick);
       document.removeEventListener('keydown', handleDocumentKeyDown);
     };
-  }, [isModeMenuOpen, isTimerMenuOpen]);
+  }, [isModeMenuOpen, isTimerMenuOpen, isFontMenuOpen]);
 
   const shouldAutoHide = settings.autoHideControls ?? true;
   const isVisible =
@@ -265,25 +296,28 @@ export function PlayerControls({
     isHovered ||
     isModeMenuOpen ||
     isTimerMenuOpen ||
+    isFontMenuOpen ||
     Boolean(altPressed) ||
     Boolean(hasActivePopup);
 
   const scale = SCALE_CONFIGS[settings.controlsScale || 'md'] || SCALE_CONFIGS.md;
   const currentFontSize = settings.subtitleFontSize ?? 20;
 
-  const handleDecreaseFontSize = (): void => {
-    const next = Math.max(14, currentFontSize - 4);
+  const handleDecreaseFontSize = (e?: React.MouseEvent): void => {
+    e?.stopPropagation();
+    const next = Math.max(12, currentFontSize - 2);
     onUpdateSettings({ subtitleFontSize: next });
   };
 
-  const handleIncreaseFontSize = (): void => {
-    const next = Math.min(56, currentFontSize + 4);
+  const handleIncreaseFontSize = (e?: React.MouseEvent): void => {
+    e?.stopPropagation();
+    const next = Math.min(56, currentFontSize + 2);
     onUpdateSettings({ subtitleFontSize: next });
   };
 
-  const handleToggleTvPreset = (): void => {
-    const next = currentFontSize >= 44 ? 20 : 48;
-    onUpdateSettings({ subtitleFontSize: next });
+  const handleResetFontSize = (e?: React.MouseEvent): void => {
+    e?.stopPropagation();
+    onUpdateSettings({ subtitleFontSize: 20 });
   };
 
   const cycleListeningMode = (e: React.MouseEvent): void => {
@@ -586,43 +620,73 @@ export function PlayerControls({
             <RotateCcw size={scale.iconSize} />
           </button>
 
-          {/* Quick Subtitle Font Sizing Group (A- / size / A+) */}
+          {/* Subtitle Font Sizing Popover (Single compact button + hover popover) */}
           <div
-            className="flex items-center rounded-full border px-1 py-0.5"
-            style={{
-              backgroundColor: 'var(--ytai-surface)',
-              borderColor: 'var(--ytai-border)'
-            }}
+            className="relative inline-flex items-center"
+            ref={fontMenuRef}
+            onMouseEnter={handleFontMouseEnter}
+            onMouseLeave={handleFontMouseLeave}
           >
             <button
               type="button"
-              title="Уменьшить субтитры (хоткей: [)"
-              onClick={handleDecreaseFontSize}
-              disabled={currentFontSize <= 14}
-              className={`rounded-full px-1.5 py-0.5 ${scale.textClass} font-semibold transition hover:bg-white/10 hover:text-white disabled:opacity-40`}
-              style={inactiveStyle}
+              title={`Размер шрифта субтитров: ${currentFontSize}px (наведите для настройки)`}
+              onClick={() => setIsFontMenuOpen((prev) => !prev)}
+              style={isFontMenuOpen ? activeStyle : inactiveStyle}
+              className={`flex items-center justify-center rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)] hover:text-white`}
             >
-              A-
+              <Type size={scale.iconSize} />
             </button>
-            <button
-              type="button"
-              onClick={handleToggleTvPreset}
-              className={`px-1 ${scale.textClass} font-bold tracking-tight transition hover:opacity-80`}
-              style={{ color: 'var(--ytai-accent)' }}
-              title={`Размер шрифта: ${currentFontSize}px (кликните для переключения Standard / TV)`}
-            >
-              {currentFontSize}
-            </button>
-            <button
-              type="button"
-              title="Увеличить субтитры (хоткей: ])"
-              onClick={handleIncreaseFontSize}
-              disabled={currentFontSize >= 56}
-              className={`rounded-full px-1.5 py-0.5 ${scale.textClass} font-semibold transition hover:bg-white/10 hover:text-white disabled:opacity-40`}
-              style={inactiveStyle}
-            >
-              A+
-            </button>
+
+            {isFontMenuOpen && (
+              <div
+                className="absolute right-0 top-full pt-1.5 z-30 select-none animate-in fade-in duration-150"
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onMouseEnter={handleFontMouseEnter}
+                onMouseLeave={handleFontMouseLeave}
+              >
+                <div
+                  className={`flex items-center gap-1 rounded-2xl border ${scale.dropdownPadClass} px-2 py-1 shadow-2xl backdrop-blur-md whitespace-nowrap`}
+                  style={{
+                    backgroundColor: 'rgba(15, 17, 23, 0.96)',
+                    borderColor: 'rgba(255, 255, 255, 0.16)',
+                    color: 'var(--ytai-text-primary)'
+                  }}
+                >
+                  <button
+                    type="button"
+                    title="Уменьшить шрифт (-2px, хоткей [)"
+                    disabled={currentFontSize <= 12}
+                    onClick={handleDecreaseFontSize}
+                    style={inactiveStyle}
+                    className={`flex items-center justify-center rounded-xl p-1 transition hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent`}
+                  >
+                    <Minus size={Math.max(12, scale.iconSize - 2)} />
+                  </button>
+
+                  <button
+                    type="button"
+                    title="Текущий размер шрифта (двойной клик — сбросить на 20px)"
+                    onDoubleClick={handleResetFontSize}
+                    className={`px-1.5 py-0.5 font-mono ${scale.textClass} font-bold tracking-tight rounded transition hover:opacity-80 cursor-pointer`}
+                    style={{ color: 'var(--ytai-accent)' }}
+                  >
+                    {currentFontSize}px
+                  </button>
+
+                  <button
+                    type="button"
+                    title="Увеличить шрифт (+2px, хоткей ])"
+                    disabled={currentFontSize >= 56}
+                    onClick={handleIncreaseFontSize}
+                    style={inactiveStyle}
+                    className={`flex items-center justify-center rounded-xl p-1 transition hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent`}
+                  >
+                    <Plus size={Math.max(12, scale.iconSize - 2)} />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Reset position button (shown only when position has been customized) */}

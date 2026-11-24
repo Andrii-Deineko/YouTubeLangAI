@@ -264,7 +264,7 @@ export class ContentRunner {
       onClosePopup: () => this.closePopupAndResume(true),
       onAdjustFontSize: (delta: number) => {
         const current = this.settings.subtitleFontSize ?? 20;
-        const next = Math.min(56, Math.max(14, current + delta));
+        const next = Math.min(56, Math.max(12, current + delta));
         if (next !== current) {
           void this.handleUpdateSettings({ subtitleFontSize: next });
         }

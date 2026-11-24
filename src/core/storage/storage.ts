@@ -1,10 +1,13 @@
 import {
   DEFAULT_BLACKLISTED_DOMAINS,
+  DEFAULT_KEYBINDINGS,
   DEFAULT_SETTINGS,
   type ActiveListeningMode,
   type ControlsScale,
   type FontFamily,
   type FontWeight,
+  type KeybindAction,
+  type KeybindingsMap,
   type SubtitleBoxSize,
   type SubtitlePosition,
   type SubtitleScale,
@@ -233,6 +236,36 @@ export function mergeSettings(
   const backdropOpacity = Math.max(0, Math.min(100, rawBackdrop));
   const overlayOpacity = backdropOpacity / 100;
 
+  const rawKeybindings =
+    raw?.keybindings && typeof raw.keybindings === 'object'
+      ? (raw.keybindings as Record<string, unknown>)
+      : {};
+
+  const keybindings: KeybindingsMap = { ...DEFAULT_KEYBINDINGS };
+  for (const action of Object.keys(DEFAULT_KEYBINDINGS) as KeybindAction[]) {
+    if (action in rawKeybindings) {
+      const val = rawKeybindings[action];
+      if (val === null) {
+        keybindings[action] = null;
+      } else if (
+        val &&
+        typeof val === 'object' &&
+        'code' in val &&
+        typeof (val as { code: unknown }).code === 'string'
+      ) {
+        const item = val as { code: string; ctrl?: boolean; alt?: boolean; shift?: boolean };
+        if (item.code.trim()) {
+          keybindings[action] = {
+            code: item.code.trim(),
+            ...(item.ctrl ? { ctrl: true } : {}),
+            ...(item.alt ? { alt: true } : {}),
+            ...(item.shift ? { shift: true } : {})
+          };
+        }
+      }
+    }
+  }
+
   return {
     ...DEFAULT_SETTINGS,
     ...raw,
@@ -288,7 +321,8 @@ export function mergeSettings(
     customMirrors: Array.isArray(raw?.customMirrors) ? raw.customMirrors : [],
     blacklistedDomains: Array.isArray(raw?.blacklistedDomains)
       ? raw.blacklistedDomains
-      : [...DEFAULT_BLACKLISTED_DOMAINS]
+      : [...DEFAULT_BLACKLISTED_DOMAINS],
+    keybindings
   };
 }
 

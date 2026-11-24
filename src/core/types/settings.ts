@@ -34,6 +34,34 @@ export const DEFAULT_SUBTITLE_BOX_SIZE: SubtitleBoxSize = {
   height: 96
 };
 
+export interface KeybindValue {
+  code: string;
+  ctrl?: boolean;
+  alt?: boolean;
+  shift?: boolean;
+}
+
+export type KeybindAction =
+  | 'holdPeekAndPause'
+  | 'repeatCue'
+  | 'prevCue'
+  | 'nextCue'
+  | 'cycleSubtitleMode'
+  | 'cycleTrackMode'
+  | 'toggleAutoPause';
+
+export type KeybindingsMap = Record<KeybindAction, KeybindValue | null>;
+
+export const DEFAULT_KEYBINDINGS: KeybindingsMap = {
+  holdPeekAndPause: { code: 'AltLeft' },
+  repeatCue: { code: 'KeyR' },
+  prevCue: { code: 'BracketLeft' },
+  nextCue: { code: 'BracketRight' },
+  cycleSubtitleMode: { code: 'KeyB' },
+  cycleTrackMode: { code: 'KeyT' },
+  toggleAutoPause: { code: 'KeyP' }
+};
+
 export interface LLMConfig {
   baseUrl: string;
   apiKey: string;
@@ -76,6 +104,7 @@ export interface UserSettings {
   cinemaModuleEnabled: boolean;
   customMirrors: string[];
   blacklistedDomains: string[];
+  keybindings: KeybindingsMap;
 }
 
 export const DEFAULT_BLACKLISTED_DOMAINS: readonly string[] = [
@@ -124,5 +153,6 @@ export const DEFAULT_SETTINGS: UserSettings = {
   },
   cinemaModuleEnabled: false,
   customMirrors: [],
-  blacklistedDomains: [...DEFAULT_BLACKLISTED_DOMAINS]
+  blacklistedDomains: [...DEFAULT_BLACKLISTED_DOMAINS],
+  keybindings: DEFAULT_KEYBINDINGS
 };

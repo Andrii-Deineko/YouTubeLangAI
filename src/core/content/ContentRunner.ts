@@ -10,8 +10,12 @@ import {
   saveSettings,
   saveVocabularyCard
 } from '../storage/storage';
-import type { UserSettings } from '../types/settings';
-import { DEFAULT_SETTINGS } from '../types/settings';
+import type {
+  ActiveListeningMode,
+  SubtitleTrackMode,
+  UserSettings
+} from '../types/settings';
+import { DEFAULT_KEYBINDINGS, DEFAULT_SETTINGS } from '../types/settings';
 import type { SubtitleCue, TrackMetadata } from '../types/subtitles';
 import type { AIExplanation } from '../types/vocabulary';
 import type {
@@ -284,7 +288,11 @@ export class ContentRunner {
       isPopupOpen: () => this.selectedSelection !== null,
       hasCues: () => this.primaryEngine.getCues().length > 0,
       isOverlayEnabled: () => this.settings.enabled,
-      isAdShowing: () => this.isAdShowing
+      isAdShowing: () => this.isAdShowing,
+      getKeybindings: () => this.settings.keybindings ?? DEFAULT_KEYBINDINGS,
+      onCycleSubtitleMode: () => this.handleCycleSubtitleMode(),
+      onCycleTrackMode: () => this.handleCycleTrackMode(),
+      onToggleAutoPause: () => this.handleToggleAutoPause()
     });
   }
 
@@ -374,6 +382,29 @@ export class ContentRunner {
       return true;
     }
     return false;
+  }
+
+  private handleCycleSubtitleMode(): void {
+    const modes: ActiveListeningMode[] = ['off', 'blur', 'hidden'];
+    const currentIdx = modes.indexOf(this.settings.activeListeningMode ?? 'off');
+    const nextMode = modes[(currentIdx + 1) % modes.length];
+    void this.handleUpdateSettings({ activeListeningMode: nextMode });
+  }
+
+  private handleCycleTrackMode(): void {
+    const modes: SubtitleTrackMode[] = ['dual', 'translation', 'original'];
+    const currentIdx = modes.indexOf(this.settings.subtitleTrackMode ?? 'dual');
+    const nextMode = modes[(currentIdx + 1) % modes.length];
+    void this.handleUpdateSettings({
+      subtitleTrackMode: nextMode,
+      showTranslation: nextMode !== 'original',
+      showDualSubtitles: nextMode === 'dual'
+    });
+  }
+
+  private handleToggleAutoPause(): void {
+    const next = !(this.settings.autoPauseAfterCue ?? false);
+    void this.handleUpdateSettings({ autoPauseAfterCue: next });
   }
 
   private handleQuickSaveShortcut(): boolean {

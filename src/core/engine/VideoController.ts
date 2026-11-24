@@ -1,4 +1,10 @@
+import { DEFAULT_KEYBINDINGS, type KeybindingsMap } from '../types/settings';
 import type { SubtitleCue } from '../types/subtitles';
+import {
+  isHoldKeybindRelease,
+  matchesHoldKeybind,
+  matchesTapKeybind
+} from '../utils/keybinds';
 
 export interface VideoControllerCallbacks {
   onTimeUpdate: (currentTimeSec: number) => void;
@@ -15,6 +21,10 @@ export interface VideoControllerCallbacks {
   hasCues: () => boolean;
   isOverlayEnabled: () => boolean;
   isAdShowing: () => boolean;
+  getKeybindings?: () => KeybindingsMap;
+  onCycleSubtitleMode?: () => void;
+  onCycleTrackMode?: () => void;
+  onToggleAutoPause?: () => void;
 }
 
 export class VideoController {
@@ -24,6 +34,7 @@ export class VideoController {
   private inspecting = false;
   private resumingProgrammatically = false;
   private pausedByAlt = false;
+  private isHoldingKey = false;
   private pauseTimerTimeoutId: number | null = null;
   private programmaticPause = false;
   private callbacks: VideoControllerCallbacks;
@@ -53,8 +64,11 @@ export class VideoController {
     window.addEventListener(
       'blur',
       () => {
-        this.callbacks.onAltKeyChange(false);
-        this.handleAltRelease();
+        if (this.isHoldingKey) {
+          this.isHoldingKey = false;
+          this.callbacks.onAltKeyChange(false);
+          this.handleAltRelease();
+        }
       },
       { signal: controller.signal }
     );
@@ -355,9 +369,16 @@ export class VideoController {
       return;
     }
 
-    // 3. Alt key handling: prevent system menu focus and manage Alt-hold auto-pause
-    if (e.key === 'Alt') {
+    const keybindings = this.callbacks.getKeybindings
+      ? this.callbacks.getKeybindings()
+      : DEFAULT_KEYBINDINGS;
+
+    // 3. Hold Peek & Pause keybind: reveal original text and pause on hold
+    const holdBind = keybindings.holdPeekAndPause;
+    if (holdBind && matchesHoldKeybind(e, holdBind)) {
       e.preventDefault();
+      e.stopImmediatePropagation();
+      this.isHoldingKey = true;
       this.callbacks.onAltKeyChange(true);
 
       const isOverlay = this.callbacks.isOverlayEnabled ? this.callbacks.isOverlayEnabled() : true;
@@ -387,73 +408,73 @@ export class VideoController {
       return;
     }
 
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    // 5. Configurable single action keybindings
+    if (keybindings.repeatCue && matchesTapKeybind(e, keybindings.repeatCue)) {
+      const handled = this.callbacks.onRepeatCue();
+      if (handled !== false) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+      return;
+    }
 
-    switch (e.code) {
-      case 'KeyR': {
-        const handled = this.callbacks.onRepeatCue();
-        if (handled !== false) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-        }
-        break;
+    if (keybindings.prevCue && matchesTapKeybind(e, keybindings.prevCue)) {
+      const handled = this.callbacks.onPreviousCue();
+      if (handled !== false) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
       }
-      case 'ArrowLeft':
-      case 'KeyA': {
-        const handled = this.callbacks.onPreviousCue();
-        if (handled !== false) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-        }
-        break;
+      return;
+    }
+
+    if (keybindings.nextCue && matchesTapKeybind(e, keybindings.nextCue)) {
+      const handled = this.callbacks.onNextCue();
+      if (handled !== false) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
       }
-      case 'ArrowRight':
-      case 'KeyD': {
-        const handled = this.callbacks.onNextCue();
-        if (handled !== false) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-        }
-        break;
+      return;
+    }
+
+    if (keybindings.cycleSubtitleMode && matchesTapKeybind(e, keybindings.cycleSubtitleMode)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this.callbacks.onCycleSubtitleMode?.();
+      return;
+    }
+
+    if (keybindings.cycleTrackMode && matchesTapKeybind(e, keybindings.cycleTrackMode)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this.callbacks.onCycleTrackMode?.();
+      return;
+    }
+
+    if (keybindings.toggleAutoPause && matchesTapKeybind(e, keybindings.toggleAutoPause)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this.callbacks.onToggleAutoPause?.();
+      return;
+    }
+
+    // Quick save shortcut fallback
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.code === 'KeyS') {
+      const handled = this.callbacks.onSaveActiveWord();
+      if (handled !== false) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
       }
-      case 'Escape':
-        if (this.callbacks.isPopupOpen()) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          this.callbacks.onClosePopup();
-        }
-        break;
-      case 'KeyS': {
-        const handled = this.callbacks.onSaveActiveWord();
-        if (handled !== false) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-        }
-        break;
-      }
-      case 'BracketLeft': {
-        if (this.callbacks.onAdjustFontSize) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          this.callbacks.onAdjustFontSize(-2);
-        }
-        break;
-      }
-      case 'BracketRight': {
-        if (this.callbacks.onAdjustFontSize) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          this.callbacks.onAdjustFontSize(+2);
-        }
-        break;
-      }
-      default:
-        break;
+      return;
     }
   }
 
   private handleKeyUp(e: KeyboardEvent): void {
-    if (e.key === 'Alt') {
+    const keybindings = this.callbacks.getKeybindings
+      ? this.callbacks.getKeybindings()
+      : DEFAULT_KEYBINDINGS;
+    const holdBind = keybindings.holdPeekAndPause;
+    if (this.isHoldingKey && holdBind && isHoldKeybindRelease(e, holdBind)) {
+      this.isHoldingKey = false;
       this.callbacks.onAltKeyChange(false);
       this.handleAltRelease();
     }

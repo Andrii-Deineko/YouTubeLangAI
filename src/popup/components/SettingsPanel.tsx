@@ -9,6 +9,7 @@ import {
   Film,
   Ghost,
   Globe,
+  Keyboard,
   Layers,
   Loader2,
   Palette,
@@ -17,7 +18,8 @@ import {
   RefreshCw,
   RotateCcw,
   ShieldCheck,
-  Tv
+  Tv,
+  X
 } from 'lucide-react';
 import { clearAllCaches } from '../../core/storage/db';
 import { resolveChatCompletionsUrl } from '../../core/background/llm';
@@ -31,7 +33,19 @@ import type {
   LLMTestResponse,
   RuntimeRequest
 } from '../../core/types/messages';
-import type { LLMConfig, UserSettings } from '../../core/types/settings';
+import {
+  DEFAULT_KEYBINDINGS,
+  type KeybindAction,
+  type KeybindingsMap,
+  type KeybindValue,
+  type LLMConfig,
+  type UserSettings
+} from '../../core/types/settings';
+import {
+  KEYBIND_ACTION_LABELS,
+  findKeybindConflict,
+  formatKeybind
+} from '../../core/utils/keybinds';
 import { ThemeDropdown } from './ThemeDropdown';
 
 interface SettingsPanelProps {
@@ -184,6 +198,82 @@ export function SettingsPanel({
   const [currentSiteHostname, setCurrentSiteHostname] = useState<string>('');
   const [isCurrentSiteCinema, setIsCurrentSiteCinema] = useState(false);
   const [hasCurrentSitePermission, setHasCurrentSitePermission] = useState(false);
+
+  const [recordingAction, setRecordingAction] = useState<KeybindAction | null>(null);
+  const pendingModifierRef = useRef<string | null>(null);
+  const currentKeybindings = settings.keybindings ?? DEFAULT_KEYBINDINGS;
+
+  useEffect(() => {
+    if (!recordingAction) return;
+
+    const handleKeyDown = (e: KeyboardEvent): void => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Escape cancels recording
+      if (e.code === 'Escape') {
+        pendingModifierRef.current = null;
+        setRecordingAction(null);
+        return;
+      }
+
+      const isModifier =
+        e.code === 'AltLeft' ||
+        e.code === 'AltRight' ||
+        e.code === 'ShiftLeft' ||
+        e.code === 'ShiftRight' ||
+        e.code === 'ControlLeft' ||
+        e.code === 'ControlRight' ||
+        e.code === 'MetaLeft' ||
+        e.code === 'MetaRight';
+
+      if (isModifier) {
+        pendingModifierRef.current = e.code;
+        return;
+      }
+
+      // Non-modifier key pressed (with or without modifier held)
+      pendingModifierRef.current = null;
+      const newBind: KeybindValue = {
+        code: e.code,
+        ...(e.ctrlKey ? { ctrl: true } : {}),
+        ...(e.altKey ? { alt: true } : {}),
+        ...(e.shiftKey ? { shift: true } : {})
+      };
+
+      const nextKeybindings: KeybindingsMap = {
+        ...currentKeybindings,
+        [recordingAction]: newBind
+      };
+      setRecordingAction(null);
+      void onUpdateSettings({ keybindings: nextKeybindings });
+    };
+
+    const handleKeyUp = (e: KeyboardEvent): void => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (pendingModifierRef.current && e.code === pendingModifierRef.current) {
+        const singleModifierCode = pendingModifierRef.current;
+        pendingModifierRef.current = null;
+        const newBind: KeybindValue = { code: singleModifierCode };
+        const nextKeybindings: KeybindingsMap = {
+          ...currentKeybindings,
+          [recordingAction]: newBind
+        };
+        setRecordingAction(null);
+        void onUpdateSettings({ keybindings: nextKeybindings });
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('keyup', handleKeyUp, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('keyup', handleKeyUp, true);
+      pendingModifierRef.current = null;
+    };
+  }, [recordingAction, currentKeybindings, onUpdateSettings]);
   const [enablingCinema, setEnablingCinema] = useState(false);
   const [cinemaError, setCinemaError] = useState<string | null>(null);
 
@@ -1025,6 +1115,104 @@ export function SettingsPanel({
               );
             })}
           </div>
+        </div>
+      </section>
+
+      {/* Hotkeys Configuration */}
+      <section
+        className="space-y-3.5 rounded-2xl border p-3.5 transition-colors"
+        style={{
+          backgroundColor: 'var(--ytai-surface)',
+          borderColor: 'var(--ytai-border)'
+        }}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Keyboard className="h-4 w-4 text-white" style={{ color: 'var(--ytai-accent)' }} />
+            <h3 className="font-semibold text-white">Горячие клавиши</h3>
+          </div>
+          <button
+            type="button"
+            onClick={() => void onUpdateSettings({ keybindings: DEFAULT_KEYBINDINGS })}
+            title="Сбросить все горячие клавиши по умолчанию"
+            className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-slate-400 transition hover:bg-white/10 hover:text-white cursor-pointer"
+          >
+            <RotateCcw className="h-3 w-3" />
+            <span>Сбросить</span>
+          </button>
+        </div>
+
+        <div className="space-y-1.5">
+          {(Object.keys(DEFAULT_KEYBINDINGS) as KeybindAction[]).map((action) => {
+            const meta = KEYBIND_ACTION_LABELS[action];
+            const bind = currentKeybindings[action];
+            const isRecording = recordingAction === action;
+            const conflictAction = findKeybindConflict(action, bind, currentKeybindings);
+
+            return (
+              <div
+                key={action}
+                className="flex items-center justify-between gap-2 rounded-xl p-2 transition-colors hover:bg-white/5"
+              >
+                <div className="flex flex-col min-w-0 pr-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs font-medium text-white">{meta.title}</span>
+                    {conflictAction && (
+                      <span className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        <AlertTriangle className="h-2.5 w-2.5" />
+                        Конфликт клавиш
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[11px] text-slate-400 line-clamp-1">{meta.description}</span>
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isRecording) {
+                        setRecordingAction(null);
+                      } else {
+                        setRecordingAction(action);
+                      }
+                    }}
+                    className={`min-w-[96px] px-2.5 py-1 text-xs font-mono font-medium rounded-lg border transition text-center cursor-pointer ${
+                      isRecording
+                        ? 'border-indigo-400 bg-indigo-500/20 text-indigo-300 animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.5)]'
+                        : bind
+                          ? 'border-white/15 bg-white/10 text-white hover:border-white/30 hover:bg-white/15'
+                          : 'border-dashed border-white/20 bg-transparent text-slate-400 hover:border-white/40 hover:text-slate-200'
+                    }`}
+                    style={
+                      isRecording
+                        ? { borderColor: 'var(--ytai-accent)', color: 'var(--ytai-accent)' }
+                        : undefined
+                    }
+                  >
+                    {isRecording ? 'Нажмите клавишу...' : formatKeybind(bind)}
+                  </button>
+
+                  {bind && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextKeybindings: KeybindingsMap = {
+                          ...currentKeybindings,
+                          [action]: null
+                        };
+                        void onUpdateSettings({ keybindings: nextKeybindings });
+                      }}
+                      title="Очистить горячую клавишу"
+                      className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-white/10 transition cursor-pointer"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </section>
 

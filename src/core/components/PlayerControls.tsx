@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import {
-  ChevronDown,
   Eye,
   Ghost,
   Languages,
@@ -8,8 +7,7 @@ import {
   PauseCircle,
   Power,
   RotateCcw,
-  Sparkles,
-  Timer
+  Sparkles
 } from 'lucide-react';
 import type { ActiveListeningMode, ControlsScale, UserSettings } from '../types/settings';
 import type { TrackMetadata } from '../types/subtitles';
@@ -377,69 +375,32 @@ export function PlayerControls({
             <Languages size={scale.iconSize} />
           </button>
 
-          {/* Split-button: Subtitle Perception Mode (Icon click = cycle, Hover = dropdown) */}
+          {/* Subtitle Perception Mode (Icon click = cycle, Hover = dropdown) */}
           <div
             className="relative"
             ref={modeMenuRef}
             onMouseEnter={handleModeMouseEnter}
             onMouseLeave={handleModeMouseLeave}
           >
-            <div
-              className="flex items-center rounded-full transition"
+            <button
+              type="button"
+              title={getListeningModeTitle()}
+              onClick={cycleListeningMode}
               style={
                 settings.activeListeningMode !== 'off'
                   ? activeStyle
-                  : {
-                      backgroundColor: 'transparent',
-                      color: 'var(--ytai-text-secondary)'
-                    }
+                  : inactiveStyle
               }
+              className={`flex items-center justify-center rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)]`}
             >
-              {/* Left clickable zone: Mode icon (instant circular cycle) */}
-              <button
-                type="button"
-                title={getListeningModeTitle()}
-                onClick={cycleListeningMode}
-                className={`flex items-center justify-center rounded-l-full ${scale.iconBtnPadClass} transition hover:opacity-80`}
-              >
-                {settings.activeListeningMode === 'hidden' ? (
-                  <Ghost size={scale.iconSize} />
-                ) : settings.activeListeningMode === 'blur' ? (
-                  <Sparkles size={scale.iconSize} />
-                ) : (
-                  <Eye size={scale.iconSize} />
-                )}
-              </button>
-
-              <span
-                className="h-3 w-[1px] opacity-25"
-                style={{
-                  backgroundColor:
-                    settings.activeListeningMode !== 'off'
-                      ? 'currentColor'
-                      : 'var(--ytai-border, rgba(255,255,255,0.2))'
-                }}
-              />
-
-              {/* Right clickable zone: ChevronDown (toggle dropdown menu) */}
-              <button
-                type="button"
-                title="Выбрать режим субтитров..."
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsModeMenuOpen((prev) => !prev);
-                  setHoveredModeId(null);
-                }}
-                className="flex items-center justify-center rounded-r-full px-1 py-1 transition hover:opacity-80"
-              >
-                <ChevronDown
-                  size={Math.max(10, scale.iconSize - 4)}
-                  className={`transition-transform duration-200 ${
-                    isModeMenuOpen ? 'rotate-180 opacity-100' : 'opacity-70'
-                  }`}
-                />
-              </button>
-            </div>
+              {settings.activeListeningMode === 'hidden' ? (
+                <Ghost size={scale.iconSize} />
+              ) : settings.activeListeningMode === 'blur' ? (
+                <Sparkles size={scale.iconSize} />
+              ) : (
+                <Eye size={scale.iconSize} />
+              )}
+            </button>
 
             {/* Dropdown Menu: STRICTLY 3 icons with rich hover tooltips */}
             {isModeMenuOpen && (
@@ -502,19 +463,7 @@ export function PlayerControls({
             )}
           </div>
 
-          <button
-            type="button"
-            title="Auto-pause at end of each subtitle cue"
-            onClick={() =>
-              onUpdateSettings({ autoPauseAfterCue: !settings.autoPauseAfterCue })
-            }
-            style={settings.autoPauseAfterCue ? activeStyle : inactiveStyle}
-            className={`rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)]`}
-          >
-            <PauseCircle size={scale.iconSize} />
-          </button>
-
-          {/* Pause Timer Control (Hover dropdown) */}
+          {/* Auto-pause toggle (click) + Pause Timer dropdown (hover) */}
           <div
             className="relative"
             ref={timerMenuRef}
@@ -524,21 +473,19 @@ export function PlayerControls({
             <button
               type="button"
               title={
-                settings.pauseTimerSeconds > 0
-                  ? `Таймер автопаузы: ${settings.pauseTimerSeconds}с (наведите для выбора)`
-                  : 'Таймер автопаузы (наведите для выбора)'
+                settings.autoPauseAfterCue
+                  ? settings.pauseTimerSeconds > 0
+                    ? `Автопауза субтитров включена с возобновлением через ${settings.pauseTimerSeconds}с (клик — выключить, наведите для таймера)`
+                    : 'Автопауза субтитров включена (клик — выключить, наведите для таймера)'
+                  : 'Автопауза в конце субтитров (клик — включить, наведите для таймера)'
               }
-              onClick={() => {
-                if (settings.pauseTimerSeconds > 0) {
-                  onUpdateSettings({ pauseTimerSeconds: 0 });
-                } else {
-                  onUpdateSettings({ pauseTimerSeconds: 3, autoPauseAfterCue: true });
-                }
-              }}
-              style={settings.pauseTimerSeconds > 0 ? activeStyle : inactiveStyle}
+              onClick={() =>
+                onUpdateSettings({ autoPauseAfterCue: !settings.autoPauseAfterCue })
+              }
+              style={settings.autoPauseAfterCue ? activeStyle : inactiveStyle}
               className={`flex items-center gap-1 rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)]`}
             >
-              <Timer size={scale.iconSize} />
+              <PauseCircle size={scale.iconSize} />
               {settings.pauseTimerSeconds > 0 && (
                 <span className="font-mono text-[10px] font-bold leading-none tracking-tight pr-0.5">
                   {settings.pauseTimerSeconds}с

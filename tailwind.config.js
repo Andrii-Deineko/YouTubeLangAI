@@ -2,7 +2,17 @@
 export default {
   content: ['./src/**/*.{ts,tsx,html}'],
   theme: {
-    extend: {}
+    extend: {
+      colors: {
+        ai: {
+          surface: 'var(--ytai-surface, var(--ai-surface))',
+          primary: 'var(--ytai-text-primary, var(--ai-text-primary))',
+          secondary: 'var(--ytai-text-secondary, var(--ai-text-secondary))',
+          accent: 'var(--ytai-accent, var(--ai-accent))',
+          border: 'var(--ytai-border, var(--ai-border))'
+        }
+      }
+    }
   },
   plugins: []
 };

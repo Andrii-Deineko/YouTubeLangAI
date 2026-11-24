@@ -9,7 +9,7 @@
     "128": "icons/icon128.png"
   },
   "action": {
-    "default_popup": "src/app/index.html",
+    "default_popup": "src/popup/index.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -18,27 +18,30 @@
     "default_title": "YouTube Lang AI"
   },
   "background": {
-    "service_worker": "src/background/service-worker.ts",
+    "service_worker": "src/core/background/service-worker.ts",
     "type": "module"
   },
   "content_scripts": [
     {
-      "matches": ["*://*.youtube.com/*"],
-      "js": ["src/injected/interceptor.ts"],
+      "matches": ["*://*.youtube.com/*", "*://youtube.com/*"],
+      "js": ["src/entries/interceptor-yt.ts"],
       "world": "MAIN",
-      "run_at": "document_start"
+      "run_at": "document_start",
+      "all_frames": false
     },
     {
-      "matches": ["*://*.youtube.com/*"],
-      "js": ["src/content/index.ts"],
+      "matches": ["*://*.youtube.com/*", "*://youtube.com/*"],
+      "js": ["src/entries/content-yt.ts"],
       "world": "ISOLATED",
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": false
     }
   ],
-  "permissions": ["storage", "unlimitedStorage"],
+  "permissions": ["storage", "unlimitedStorage", "scripting"],
   "host_permissions": [
     "*://*.youtube.com/*",
+    "*://youtube.com/*",
     "https://translate.googleapis.com/*"
   ],
-  "optional_host_permissions": ["http://127.0.0.1/*"]
+  "optional_host_permissions": ["https://*/*", "http://*/*"]
 }

@@ -72,7 +72,7 @@ async function handleQuickTranslate(
   );
 
   const cached = await getCachedTranslation(cacheKey);
-  if (cached) {
+  if (cached && !cached.translationUnavailable && cached.translation.trim()) {
     return { ...cached, fromCache: true };
   }
 
@@ -100,7 +100,9 @@ async function handleQuickTranslate(
       translationUnavailable: translated.translationUnavailable,
       errorProvider: translated.errorProvider
     };
-    await setCachedTranslation(cacheKey, result);
+    if (!result.translationUnavailable && result.translation.trim()) {
+      await setCachedTranslation(cacheKey, result);
+    }
     return result;
   })();
 

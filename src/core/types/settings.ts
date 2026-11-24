@@ -102,6 +102,7 @@ export interface UserSettings {
   ankiConnectUrl: string;
   llm: LLMConfig;
   cinemaModuleEnabled: boolean;
+  netflixModuleEnabled: boolean;
   customMirrors: string[];
   blacklistedDomains: string[];
   keybindings: KeybindingsMap;
@@ -152,6 +153,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
     model: 'gemini-1.5-flash'
   },
   cinemaModuleEnabled: false,
+  netflixModuleEnabled: false,
   customMirrors: [],
   blacklistedDomains: [...DEFAULT_BLACKLISTED_DOMAINS],
   keybindings: DEFAULT_KEYBINDINGS

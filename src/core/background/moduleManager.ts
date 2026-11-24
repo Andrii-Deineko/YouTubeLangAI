@@ -2,6 +2,11 @@ import { getSettings, saveSettings } from '../storage/storage';
 
 export const CINEMA_INTERCEPTOR_SCRIPT_ID = 'cinema-interceptor';
 export const CINEMA_CONTENT_SCRIPT_ID = 'cinema-content';
+export const NETFLIX_CONTENT_SCRIPT_ID = 'netflix-content';
+export const NETFLIX_ORIGINS = [
+  'https://*.netflix.com/*',
+  'https://netflix.com/*'
+] as const;
 
 export async function hasCinemaPermissions(): Promise<boolean> {
   if (typeof chrome === 'undefined' || !chrome.permissions?.contains) {
@@ -137,6 +142,98 @@ export async function syncCinemaModuleState(): Promise<{
     }
   } catch (err) {
     console.warn('[Module Manager] Error syncing cinema module state:', err);
+    return { enabled: false, registered: false };
+  }
+}
+
+export async function hasNetflixPermissions(): Promise<boolean> {
+  if (typeof chrome === 'undefined' || !chrome.permissions?.contains) {
+    return false;
+  }
+  try {
+    return await chrome.permissions.contains({ origins: [...NETFLIX_ORIGINS] });
+  } catch {
+    return false;
+  }
+}
+
+export async function isNetflixScriptRegistered(): Promise<boolean> {
+  if (typeof chrome === 'undefined' || !chrome.scripting?.getRegisteredContentScripts) {
+    return false;
+  }
+  try {
+    const scripts = await chrome.scripting.getRegisteredContentScripts({
+      ids: [NETFLIX_CONTENT_SCRIPT_ID]
+    });
+    return scripts.length === 1;
+  } catch {
+    return false;
+  }
+}
+
+export async function registerNetflixScripts(): Promise<{ success: boolean; error?: string }> {
+  if (typeof chrome === 'undefined' || !chrome.scripting?.registerContentScripts) {
+    return { success: false, error: 'chrome.scripting not supported' };
+  }
+
+  try {
+    await unregisterNetflixScripts();
+    await chrome.scripting.registerContentScripts([
+      {
+        id: NETFLIX_CONTENT_SCRIPT_ID,
+        js: ['assets/content-netflix.js'],
+        matches: [...NETFLIX_ORIGINS],
+        world: 'ISOLATED',
+        runAt: 'document_idle',
+        allFrames: false,
+        persistAcrossSessions: true
+      }
+    ]);
+    await saveSettings({ netflixModuleEnabled: true });
+    return { success: true };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to register Netflix script';
+    console.warn('[Module Manager] Error registering Netflix script:', message);
+    return { success: false, error: message };
+  }
+}
+
+export async function unregisterNetflixScripts(): Promise<void> {
+  if (typeof chrome === 'undefined' || !chrome.scripting?.unregisterContentScripts) return;
+  try {
+    await chrome.scripting.unregisterContentScripts({ ids: [NETFLIX_CONTENT_SCRIPT_ID] });
+  } catch {
+    // Ignore error if not registered.
+  }
+}
+
+export async function disableNetflixModule(): Promise<{ success: boolean }> {
+  await unregisterNetflixScripts();
+  await saveSettings({ netflixModuleEnabled: false });
+  return { success: true };
+}
+
+export async function syncNetflixModuleState(): Promise<{
+  enabled: boolean;
+  registered: boolean;
+}> {
+  try {
+    const settings = await getSettings();
+    const hasPermission = await hasNetflixPermissions();
+    const registered = await isNetflixScriptRegistered();
+
+    if (settings.netflixModuleEnabled && hasPermission) {
+      if (!registered) await registerNetflixScripts();
+      return { enabled: true, registered: true };
+    }
+
+    if (registered) await unregisterNetflixScripts();
+    if (settings.netflixModuleEnabled && !hasPermission) {
+      await saveSettings({ netflixModuleEnabled: false });
+    }
+    return { enabled: false, registered: false };
+  } catch (err) {
+    console.warn('[Module Manager] Error syncing Netflix module state:', err);
     return { enabled: false, registered: false };
   }
 }

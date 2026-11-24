@@ -84,7 +84,8 @@ if (fs.existsSync(assetsDir)) {
     'interceptor-yt.js',
     'content-yt.js',
     'interceptor-cinema.js',
-    'content-cinema.js'
+    'content-cinema.js',
+    'content-netflix.js'
   ];
   for (const req of required) {
     if (!fs.existsSync(path.join(assetsDir, req))) {

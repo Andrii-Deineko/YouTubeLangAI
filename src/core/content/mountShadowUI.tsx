@@ -12,6 +12,7 @@ export interface ShadowUIState {
   trackMeta: TrackMetadata | null;
   cueCount: number;
   captionRateLimitedUntil?: number;
+  supportsCueSeeking?: boolean;
   primaryCue: SubtitleCue | null;
   translatedCue: SubtitleCue | null;
   altPressed: boolean;
@@ -45,6 +46,7 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
     trackMeta,
     cueCount,
     captionRateLimitedUntil,
+    supportsCueSeeking,
     primaryCue,
     translatedCue,
     altPressed,
@@ -71,6 +73,7 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
         trackMeta={trackMeta}
         cueCount={cueCount}
         captionRateLimitedUntil={captionRateLimitedUntil}
+        supportsCueSeeking={supportsCueSeeking}
         altPressed={altPressed}
         hasActivePopup={Boolean(selectedTarget || popupElement)}
         onUpdateSettings={onUpdateSettings}

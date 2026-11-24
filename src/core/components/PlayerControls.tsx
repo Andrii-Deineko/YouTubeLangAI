@@ -29,6 +29,7 @@ interface PlayerControlsProps {
   trackMeta: TrackMetadata | null;
   cueCount: number;
   captionRateLimitedUntil?: number;
+  supportsCueSeeking?: boolean;
   altPressed?: boolean;
   hasActivePopup?: boolean;
   onUpdateSettings: (partial: Partial<UserSettings>) => void;
@@ -144,12 +145,16 @@ export function PlayerControls({
   trackMeta,
   cueCount,
   captionRateLimitedUntil,
+  supportsCueSeeking = true,
   altPressed,
   hasActivePopup,
   onUpdateSettings,
   onRepeatCue,
   onResetPosition
 }: PlayerControlsProps): ReactElement {
+  const isNetflix =
+    window.location.hostname === 'netflix.com' ||
+    window.location.hostname.endsWith('.netflix.com');
   const [isHovered, setIsHovered] = useState(false);
   const [isYtAutohide, setIsYtAutohide] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -271,26 +276,48 @@ export function PlayerControls({
   };
 
   useEffect(() => {
+    const extensionHost =
+      document.getElementById('cinelingua-ui-root') ??
+      document.getElementById('yt-lang-ai-root');
     const playerEl =
+      extensionHost?.parentElement ??
       document.querySelector<HTMLElement>('#movie_player') ??
       document.querySelector<HTMLElement>('.html5-video-player');
     const videoEl =
       playerEl?.querySelector<HTMLVideoElement>('video') ??
       document.querySelector<HTMLVideoElement>('video');
 
+    let netflixAutohideTimer: number | null = null;
+    const clearNetflixAutohideTimer = (): void => {
+      if (netflixAutohideTimer !== null) {
+        window.clearTimeout(netflixAutohideTimer);
+        netflixAutohideTimer = null;
+      }
+    };
+    const showNetflixControlsTemporarily = (): void => {
+      if (!isNetflix) return;
+      clearNetflixAutohideTimer();
+      setIsYtAutohide(false);
+      if (videoEl && !videoEl.paused) {
+        netflixAutohideTimer = window.setTimeout(() => {
+          setIsYtAutohide(true);
+          netflixAutohideTimer = null;
+        }, 3000);
+      }
+    };
+
     const updateStates = (): void => {
       if (playerEl) {
-        setIsYtAutohide(playerEl.classList.contains('ytp-autohide'));
+        if (isNetflix) showNetflixControlsTemporarily();
+        else setIsYtAutohide(playerEl.classList.contains('ytp-autohide'));
       }
-      if (videoEl) {
-        setIsPaused(videoEl.paused);
-      }
+      if (videoEl) setIsPaused(videoEl.paused);
     };
 
     updateStates();
 
     let observer: MutationObserver | null = null;
-    if (playerEl) {
+    if (playerEl && !isNetflix) {
       observer = new MutationObserver((mutations) => {
         for (const m of mutations) {
           if (m.type === 'attributes' && m.attributeName === 'class') {
@@ -302,18 +329,35 @@ export function PlayerControls({
       observer.observe(playerEl, { attributes: true, attributeFilter: ['class'] });
     }
 
-    const onPlay = (): void => setIsPaused(false);
-    const onPause = (): void => setIsPaused(true);
+    const onPlay = (): void => {
+      setIsPaused(false);
+      showNetflixControlsTemporarily();
+    };
+    const onPause = (): void => {
+      setIsPaused(true);
+      clearNetflixAutohideTimer();
+      setIsYtAutohide(false);
+    };
+    const onNetflixActivity = (): void => showNetflixControlsTemporarily();
 
     videoEl?.addEventListener('play', onPlay);
     videoEl?.addEventListener('pause', onPause);
+    if (isNetflix) {
+      playerEl?.addEventListener('pointermove', onNetflixActivity, { passive: true });
+      playerEl?.addEventListener('pointerdown', onNetflixActivity, { passive: true });
+      window.addEventListener('keydown', onNetflixActivity, { passive: true });
+    }
 
     return () => {
       observer?.disconnect();
+      clearNetflixAutohideTimer();
       videoEl?.removeEventListener('play', onPlay);
       videoEl?.removeEventListener('pause', onPause);
+      playerEl?.removeEventListener('pointermove', onNetflixActivity);
+      playerEl?.removeEventListener('pointerdown', onNetflixActivity);
+      window.removeEventListener('keydown', onNetflixActivity);
     };
-  }, []);
+  }, [isNetflix]);
 
   useEffect(() => {
     if (!isTrackMenuOpen && !isModeMenuOpen && !isTimerMenuOpen && !isFontMenuOpen) return;
@@ -791,15 +835,17 @@ export function PlayerControls({
             )}
           </div>
 
-          <button
-            type="button"
-            title="Repeat current subtitle (R)"
-            onClick={onRepeatCue}
-            style={inactiveStyle}
-            className={`rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)] hover:text-white`}
-          >
-            <RotateCcw size={scale.iconSize} />
-          </button>
+          {supportsCueSeeking && (
+            <button
+              type="button"
+              title="Repeat current subtitle (R)"
+              onClick={onRepeatCue}
+              style={inactiveStyle}
+              className={`rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)] hover:text-white`}
+            >
+              <RotateCcw size={scale.iconSize} />
+            </button>
+          )}
 
           {/* Subtitle Font Sizing Popover (Single compact button + hover popover) */}
           <div

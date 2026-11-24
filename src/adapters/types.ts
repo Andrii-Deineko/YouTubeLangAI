@@ -6,6 +6,7 @@ export interface CapturedTrackData {
   primaryMeta?: TrackMetadata;
   translatedMeta?: TrackMetadata;
   rateLimitedUntil?: number;
+  liveCueBoundary?: boolean;
 }
 
 export interface PlatformSessionCallbacks {
@@ -15,8 +16,9 @@ export interface PlatformSessionCallbacks {
 }
 
 export interface PlatformAdapter {
-  readonly id: 'youtube' | 'cinema';
+  readonly id: 'youtube' | 'cinema' | 'netflix';
   readonly name: string;
+  readonly supportsCueSeeking?: boolean;
 
   /**
    * Check if this adapter can run on the current page / frame.

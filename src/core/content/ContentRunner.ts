@@ -1,5 +1,5 @@
 import { createElement } from 'react';
-import type { PlatformAdapter } from '../../adapters/types';
+import type { CapturedTrackData, PlatformAdapter } from '../../adapters/types';
 import { SubtitleEngine } from '../engine/SubtitleEngine';
 import { VideoController } from '../engine/VideoController';
 import { createNewCard } from '../storage/cardFactory';
@@ -41,6 +41,7 @@ export class ContentRunner {
   private lastAutoPausedCueId: string | null = null;
   private savedWordKeys = new Set<string>();
   private captionRateLimitedUntil = 0;
+  private pendingLiveTrackData: CapturedTrackData | null = null;
 
   private mountedUI: MountedShadowUI | null = null;
   private currentPlayerEl: HTMLElement | null = null;
@@ -133,28 +134,7 @@ export class ContentRunner {
 
     this.adapterTeardown = this.adapter.init({
       onTracksLoaded: (data) => {
-        if (data.primaryCues) {
-          this.primaryEngine.loadCues(data.primaryCues);
-          this.trackMeta = data.primaryMeta ?? null;
-          this.activePrimaryCue = this.primaryEngine.findActiveCue(
-            this.videoController?.getCurrentTime() ?? 0
-          );
-        }
-        if (data.translatedCues) {
-          this.translatedEngine.loadCues(data.translatedCues);
-          this.activeTranslatedCue = this.translatedEngine.findActiveCue(
-            this.videoController?.getCurrentTime() ?? 0
-          );
-        }
-        if (data.rateLimitedUntil !== undefined) {
-          this.captionRateLimitedUntil = data.rateLimitedUntil;
-        }
-
-        this.syncNativeCaptions();
-        this.attachToPlayer();
-        this.renderUI();
-
-        this.triggerSubtitleTranslation();
+        this.handleTracksLoaded(data);
       },
       onAdStateChange: (isAd) => {
         this.isAdShowing = isAd;
@@ -221,10 +201,70 @@ export class ContentRunner {
     this.domObserver.observe(rootTarget, { childList: true, subtree: true });
   }
 
+  private handleTracksLoaded(data: CapturedTrackData): void {
+    if (
+      data.liveCueBoundary &&
+      this.settings.autoPauseAfterCue &&
+      this.activePrimaryCue &&
+      this.videoController &&
+      !this.videoController.isPaused() &&
+      this.lastAutoPausedCueId !== this.activePrimaryCue.id
+    ) {
+      this.lastAutoPausedCueId = this.activePrimaryCue.id;
+      this.pendingLiveTrackData = data;
+      this.videoController.pauseVideo();
+      const timerSec = this.settings.pauseTimerSeconds ?? 0;
+      if (timerSec > 0) this.videoController.schedulePauseTimer(timerSec);
+      this.renderUI();
+      return;
+    }
+
+    this.applyTrackData(data);
+  }
+
+  private applyTrackData(data: CapturedTrackData): void {
+    if (data.primaryCues) {
+      const preservedTranslations = this.primaryEngine
+        .getCues()
+        .filter((cue) => Boolean(cue.translation))
+        .map((cue) => ({ id: cue.id, text: cue.translation ?? '' }));
+      this.primaryEngine.loadCues(data.primaryCues);
+      this.primaryEngine.applyTranslations(preservedTranslations);
+      this.trackMeta = data.primaryMeta ?? null;
+      this.activePrimaryCue = this.primaryEngine.findActiveCue(
+        this.videoController?.getCurrentTime() ?? 0
+      );
+    }
+    if (data.translatedCues) {
+      this.translatedEngine.loadCues(data.translatedCues);
+      this.activeTranslatedCue = this.translatedEngine.findActiveCue(
+        this.videoController?.getCurrentTime() ?? 0
+      );
+    } else if (data.primaryCues) {
+      this.activeTranslatedCue = this.translatedEngine.findActiveCue(
+        this.videoController?.getCurrentTime() ?? 0
+      );
+    }
+    if (data.rateLimitedUntil !== undefined) {
+      this.captionRateLimitedUntil = data.rateLimitedUntil;
+    }
+
+    this.syncNativeCaptions();
+    this.attachToPlayer();
+    this.renderUI();
+    this.triggerSubtitleTranslation();
+  }
+
   private createVideoController(): VideoController {
     return new VideoController({
       onTimeUpdate: (timeSec: number) => {
         if (!this.settings.enabled || this.isAdShowing || !this.videoController) return;
+
+        if (this.pendingLiveTrackData && !this.videoController.isPaused()) {
+          const pending = this.pendingLiveTrackData;
+          this.pendingLiveTrackData = null;
+          this.applyTrackData(pending);
+        }
 
         const isTranslationVisible =
           this.settings.subtitleTrackMode !== 'original' &&
@@ -236,6 +276,7 @@ export class ContentRunner {
 
         if (
           this.settings.autoPauseAfterCue &&
+          this.adapter.id !== 'netflix' &&
           this.activePrimaryCue &&
           !this.videoController.isPaused() &&
           this.lastAutoPausedCueId !== this.activePrimaryCue.id &&
@@ -265,6 +306,7 @@ export class ContentRunner {
       },
       onSeeked: () => {
         this.lastAutoPausedCueId = null;
+        this.pendingLiveTrackData = null;
       },
       onRepeatCue: () => this.handleRepeatCue(),
       onPreviousCue: () => this.handlePreviousCue(),
@@ -322,6 +364,7 @@ export class ContentRunner {
           trackMeta: this.trackMeta,
           cueCount: this.primaryEngine.getCues().length,
           captionRateLimitedUntil: this.captionRateLimitedUntil,
+          supportsCueSeeking: this.adapter.supportsCueSeeking !== false,
           primaryCue: this.activePrimaryCue,
           translatedCue: this.activeTranslatedCue,
           altPressed: this.altPressed,
@@ -351,6 +394,7 @@ export class ContentRunner {
   }
 
   private handleRepeatCue(): void {
+    if (this.adapter.supportsCueSeeking === false) return;
     if (!this.videoController) return;
     const time = this.videoController.getCurrentTime();
     const cue = this.primaryEngine.findActiveCue(time);
@@ -361,6 +405,7 @@ export class ContentRunner {
   }
 
   private handlePreviousCue(): boolean {
+    if (this.adapter.supportsCueSeeking === false) return false;
     if (!this.videoController) return false;
     const time = this.videoController.getCurrentTime();
     const prev = this.primaryEngine.getPreviousCue(time);
@@ -373,6 +418,7 @@ export class ContentRunner {
   }
 
   private handleNextCue(): boolean {
+    if (this.adapter.supportsCueSeeking === false) return false;
     if (!this.videoController) return false;
     const time = this.videoController.getCurrentTime();
     const next = this.primaryEngine.getNextCue(time);
@@ -598,6 +644,7 @@ export class ContentRunner {
       trackMeta: this.trackMeta,
       cueCount: this.primaryEngine.getCues().length,
       captionRateLimitedUntil: this.captionRateLimitedUntil,
+      supportsCueSeeking: this.adapter.supportsCueSeeking !== false,
       primaryCue: this.activePrimaryCue,
       translatedCue: this.activeTranslatedCue,
       altPressed: this.altPressed,

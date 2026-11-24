@@ -145,6 +145,15 @@ export type RuntimeRequest =
     }
   | {
       type: 'GET_CINEMA_MODULE_STATUS';
+    }
+  | {
+      type: 'ENABLE_NETFLIX_MODULE';
+    }
+  | {
+      type: 'DISABLE_NETFLIX_MODULE';
+    }
+  | {
+      type: 'GET_NETFLIX_MODULE_STATUS';
     };
 
 export interface CinemaModuleStatus {
@@ -203,3 +212,5 @@ export type InjectMainInterceptorResponse = { ok: boolean; data?: boolean; error
 export type FreeTranslateWordResponse = RuntimeResponse<FreeTranslateWordResult>;
 export type FreeTranslateCuesResponse = RuntimeResponse<Array<{ id: string; text: string }>>;
 export type CinemaModuleStatusResponse = RuntimeResponse<CinemaModuleStatus>;
+export type NetflixModuleStatus = CinemaModuleStatus;
+export type NetflixModuleStatusResponse = RuntimeResponse<NetflixModuleStatus>;

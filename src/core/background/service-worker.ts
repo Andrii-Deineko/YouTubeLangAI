@@ -15,10 +15,15 @@ import {
 } from './llm';
 import {
   disableCinemaModule,
+  disableNetflixModule,
   hasCinemaPermissions,
+  hasNetflixPermissions,
   isCinemaScriptRegistered,
+  isNetflixScriptRegistered,
   registerCinemaScripts,
-  syncCinemaModuleState
+  registerNetflixScripts,
+  syncCinemaModuleState,
+  syncNetflixModuleState
 } from './moduleManager';
 import { getSettings } from '../storage/storage';
 import type { RuntimeRequest, RuntimeResponse } from '../types/messages';
@@ -357,6 +362,29 @@ async function processMessage(
           }
         };
       }
+      case 'ENABLE_NETFLIX_MODULE': {
+        const result = await registerNetflixScripts();
+        return result.success
+          ? { ok: true, data: result }
+          : { ok: false, error: result.error || 'Failed to register Netflix script' };
+      }
+      case 'DISABLE_NETFLIX_MODULE': {
+        const result = await disableNetflixModule();
+        return { ok: true, data: result };
+      }
+      case 'GET_NETFLIX_MODULE_STATUS': {
+        const settings = await getSettings();
+        const hasPermission = await hasNetflixPermissions();
+        const registered = await isNetflixScriptRegistered();
+        return {
+          ok: true,
+          data: {
+            enabled: settings.netflixModuleEnabled,
+            hasPermission,
+            registered
+          }
+        };
+      }
       default:
         return { ok: false, error: 'Unsupported message type' };
     }
@@ -370,15 +398,18 @@ async function processMessage(
 
 chrome.runtime.onInstalled.addListener(() => {
   void syncCinemaModuleState();
+  void syncNetflixModuleState();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   void syncCinemaModuleState();
+  void syncNetflixModuleState();
 });
 
 if (chrome.permissions?.onRemoved) {
   chrome.permissions.onRemoved.addListener(() => {
     void syncCinemaModuleState();
+    void syncNetflixModuleState();
   });
 }
 

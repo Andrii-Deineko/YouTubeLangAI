@@ -318,6 +318,10 @@ export function mergeSettings(
       typeof raw?.cinemaModuleEnabled === 'boolean'
         ? raw.cinemaModuleEnabled
         : DEFAULT_SETTINGS.cinemaModuleEnabled,
+    netflixModuleEnabled:
+      typeof raw?.netflixModuleEnabled === 'boolean'
+        ? raw.netflixModuleEnabled
+        : DEFAULT_SETTINGS.netflixModuleEnabled,
     customMirrors: Array.isArray(raw?.customMirrors) ? raw.customMirrors : [],
     blacklistedDomains: Array.isArray(raw?.blacklistedDomains)
       ? raw.blacklistedDomains

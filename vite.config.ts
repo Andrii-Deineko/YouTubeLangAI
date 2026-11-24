@@ -116,7 +116,37 @@ function unifiedContentBundlePlugin(): Plugin {
         }
       });
 
-      // 5. Point static content_scripts directly to self-contained YouTube IIFEs
+      // 5. Bundle Netflix ISOLATED content script as self-contained IIFE
+      await viteBuild({
+        configFile: false,
+        logLevel: 'silent',
+        plugins: [react()],
+        define: {
+          'process.env.NODE_ENV': JSON.stringify('production')
+        },
+        esbuild: {
+          minify: true,
+          pure: ['console.debug']
+        },
+        build: {
+          minify: 'esbuild',
+          outDir: assetsDir,
+          emptyOutDir: false,
+          lib: {
+            entry: resolve(process.cwd(), 'src/entries/content-netflix.ts'),
+            name: 'LangAIContentScript_Netflix',
+            formats: ['iife'],
+            fileName: () => 'content-netflix.js'
+          },
+          rollupOptions: {
+            output: {
+              inlineDynamicImports: true
+            }
+          }
+        }
+      });
+
+      // 6. Point static content_scripts directly to self-contained YouTube IIFEs
       if (Array.isArray(builtManifest.content_scripts)) {
         for (const cs of builtManifest.content_scripts) {
           if (cs.world === 'MAIN') {
@@ -127,7 +157,7 @@ function unifiedContentBundlePlugin(): Plugin {
         }
       }
 
-      // 6. Force use_dynamic_url: false on web_accessible_resources
+      // 7. Force use_dynamic_url: false on web_accessible_resources
       builtManifest.web_accessible_resources = [
         {
           matches: ['<all_urls>'],
@@ -138,7 +168,7 @@ function unifiedContentBundlePlugin(): Plugin {
 
       writeFileSync(manifestPath, JSON.stringify(builtManifest, null, 2));
 
-      // 7. Clean any CRXJS loader wrappers
+      // 8. Clean any CRXJS loader wrappers
       if (existsSync(assetsDir)) {
         for (const file of readdirSync(assetsDir)) {
           if (file.includes('-loader-')) {

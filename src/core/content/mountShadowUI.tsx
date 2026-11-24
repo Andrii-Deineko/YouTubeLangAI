@@ -96,6 +96,9 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
             scale={settings.subtitleScale}
             overlayOpacity={settings.overlayOpacity}
             position={settings.subtitlePosition}
+            boxFixed={settings.subtitleBoxFixed}
+            boxSize={settings.subtitleBoxSize}
+            onUpdateSettings={onUpdateSettings}
             onUpdatePosition={(pos) => onUpdateSettings({ subtitlePosition: pos })}
             selectedTarget={selectedTarget}
             onSelectTarget={onSelectTarget}

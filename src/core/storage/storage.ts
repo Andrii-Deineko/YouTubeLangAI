@@ -5,6 +5,7 @@ import {
   type ControlsScale,
   type FontFamily,
   type FontWeight,
+  type SubtitleBoxSize,
   type SubtitlePosition,
   type SubtitleScale,
   type TextOutline,
@@ -140,6 +141,23 @@ export function mergeSettings(
       ? raw.subtitlePosition
       : null;
 
+  const subtitleBoxFixed =
+    typeof raw?.subtitleBoxFixed === 'boolean'
+      ? raw.subtitleBoxFixed
+      : DEFAULT_SETTINGS.subtitleBoxFixed;
+
+  const subtitleBoxSize: SubtitleBoxSize | null =
+    raw?.subtitleBoxSize &&
+    typeof raw.subtitleBoxSize.width === 'number' &&
+    typeof raw.subtitleBoxSize.height === 'number' &&
+    raw.subtitleBoxSize.width > 0 &&
+    raw.subtitleBoxSize.height > 0
+      ? {
+          width: Math.max(260, Math.round(raw.subtitleBoxSize.width)),
+          height: Math.max(56, Math.round(raw.subtitleBoxSize.height))
+        }
+      : null;
+
   const autoPauseAfterCue =
     raw?.autoPauseAfterCue ?? raw?.autoPauseAtCueEnd ?? DEFAULT_SETTINGS.autoPauseAfterCue;
 
@@ -211,6 +229,8 @@ export function mergeSettings(
     autoPauseOnWordClick:
       raw?.autoPauseOnWordClick ?? DEFAULT_SETTINGS.autoPauseOnWordClick,
     subtitlePosition,
+    subtitleBoxFixed,
+    subtitleBoxSize,
     nativeLang: raw?.nativeLang ?? DEFAULT_SETTINGS.nativeLang,
     videoLang: raw?.videoLang ?? DEFAULT_SETTINGS.videoLang,
     fontSize,

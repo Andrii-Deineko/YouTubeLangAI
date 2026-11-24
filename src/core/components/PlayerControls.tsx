@@ -3,6 +3,7 @@ import {
   Eye,
   Ghost,
   Languages,
+  Lock,
   Minus,
   Move,
   PauseCircle,
@@ -874,12 +875,62 @@ export function PlayerControls({
                     />
                   </div>
 
-                  {/* Footer: Reset style */}
-                  <div className="pt-1 border-t border-white/10">
+                  {/* Section 6: Static subtitle box toggle */}
+                  <div className="flex items-center justify-between pt-1 border-t border-white/10">
+                    <div className="flex items-center gap-1.5">
+                      <Lock
+                        size={12}
+                        className={settings.subtitleBoxFixed ? 'text-indigo-400' : 'text-slate-400'}
+                      />
+                      <span className="text-[11px] font-semibold text-slate-300">
+                        Статичное окно
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      title={settings.subtitleBoxFixed ? 'Выключить статичное окно' : 'Включить статичное окно'}
+                      onClick={() => {
+                        const next = !settings.subtitleBoxFixed;
+                        onUpdateSettings({
+                          subtitleBoxFixed: next,
+                          ...(next && !settings.subtitleBoxSize
+                            ? { subtitleBoxSize: { width: 680, height: 112 } }
+                            : {})
+                        });
+                      }}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer ${
+                        settings.subtitleBoxFixed ? 'bg-indigo-600' : 'bg-slate-700'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                          settings.subtitleBoxFixed ? 'translate-x-4.5' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Footer: Reset actions */}
+                  <div className="pt-1 border-t border-white/10 flex flex-col gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onUpdateSettings({
+                          subtitleBoxFixed: false,
+                          subtitleBoxSize: null,
+                          subtitlePosition: null
+                        });
+                        onResetPosition?.();
+                      }}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-lg py-1 text-center text-[11px] font-medium text-slate-400 transition hover:bg-white/5 hover:text-white"
+                    >
+                      <Move size={12} />
+                      <span>Сбросить размер и позицию</span>
+                    </button>
                     <button
                       type="button"
                       onClick={handleResetTypographyStyle}
-                      className="flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-center text-[11px] font-medium text-slate-400 transition hover:bg-white/5 hover:text-white"
+                      className="flex w-full items-center justify-center gap-1.5 rounded-lg py-1 text-center text-[11px] font-medium text-slate-400 transition hover:bg-white/5 hover:text-white"
                     >
                       <RotateCcw size={12} />
                       <span>Сбросить стиль</span>
@@ -890,12 +941,19 @@ export function PlayerControls({
             )}
           </div>
 
-          {/* Reset position button (shown only when position has been customized) */}
-          {settings.subtitlePosition && onResetPosition && (
+          {/* Reset position & box button (shown when position or box size has been customized) */}
+          {(settings.subtitlePosition || settings.subtitleBoxSize || settings.subtitleBoxFixed) && onResetPosition && (
             <button
               type="button"
-              title="Reset subtitle position to default (center bottom)"
-              onClick={onResetPosition}
+              title="Reset subtitle size and position to default"
+              onClick={() => {
+                onUpdateSettings({
+                  subtitleBoxFixed: false,
+                  subtitleBoxSize: null,
+                  subtitlePosition: null
+                });
+                onResetPosition();
+              }}
               style={{ color: 'var(--ytai-accent)' }}
               className={`rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)] hover:text-white`}
             >

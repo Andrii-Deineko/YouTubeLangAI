@@ -22,6 +22,11 @@ export interface SubtitlePosition {
   yPercent: number;
 }
 
+export interface SubtitleBoxSize {
+  width: number;
+  height: number;
+}
+
 export interface LLMConfig {
   baseUrl: string;
   apiKey: string;
@@ -51,6 +56,8 @@ export interface UserSettings {
   textOutline: TextOutline;
   subtitleScale: SubtitleScale;
   subtitlePosition: SubtitlePosition | null;
+  subtitleBoxFixed: boolean;
+  subtitleBoxSize: SubtitleBoxSize | null;
   subtitleOffsetSec: number;
   theme: ThemeId;
   overlayOpacity: number;
@@ -93,6 +100,8 @@ export const DEFAULT_SETTINGS: UserSettings = {
   textOutline: 'shadow',
   subtitleScale: 'md',
   subtitlePosition: null,
+  subtitleBoxFixed: false,
+  subtitleBoxSize: null,
   subtitleOffsetSec: 0,
   theme: 'midnight-glass',
   overlayOpacity: 0.85,

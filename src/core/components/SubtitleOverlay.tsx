@@ -8,14 +8,16 @@ import {
   type MouseEvent,
   type ReactElement
 } from 'react';
-import { GripHorizontal } from 'lucide-react';
+import { GripHorizontal, Lock, Unlock } from 'lucide-react';
 import type {
   ActiveListeningMode,
   FontFamily,
   FontWeight,
+  SubtitleBoxSize,
   SubtitlePosition,
   SubtitleScale,
-  TextOutline
+  TextOutline,
+  UserSettings
 } from '../types/settings';
 import type { SubtitleCue, WordToken } from '../types/subtitles';
 
@@ -66,6 +68,9 @@ interface SubtitleOverlayProps {
   onUpdatePosition: (position: SubtitlePosition | null) => void;
   selectedTarget: string | null;
   onSelectTarget: (selection: WordSelectionPayload) => void;
+  boxFixed?: boolean;
+  boxSize?: SubtitleBoxSize | null;
+  onUpdateSettings?: (partial: Partial<UserSettings>) => void;
 }
 
 const DRAG_THRESHOLD = 5;
@@ -148,6 +153,17 @@ function getDefaultSubtitleBottom(playerEl: HTMLElement | null): number {
   return Math.max(68, ytBottomHeight + 16);
 }
 
+type ResizeHandle =
+  | 'top'
+  | 'bottom'
+  | 'left'
+  | 'right'
+  | 'top-left'
+  | 'top-right'
+  | 'bottom-left'
+  | 'bottom-right'
+  | null;
+
 export function SubtitleOverlay({
   primaryCue,
   translatedCue,
@@ -166,9 +182,15 @@ export function SubtitleOverlay({
   position,
   onUpdatePosition,
   selectedTarget,
-  onSelectTarget
+  onSelectTarget,
+  boxFixed = false,
+  boxSize = null,
+  onUpdateSettings
 }: SubtitleOverlayProps): ReactElement | null {
   const [isDragging, setIsDragging] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
+  const [hoveredHandle, setHoveredHandle] = useState<ResizeHandle>(null);
+
   const [bottomOffset, setBottomOffset] = useState<number>(() => {
     if (typeof document === 'undefined') return 68;
     return getDefaultSubtitleBottom(document.querySelector<HTMLElement>('#movie_player'));
@@ -189,7 +211,23 @@ export function SubtitleOverlay({
     boxHeight: number;
   } | null>(null);
 
-  // Sync external position changes (e.g. reset) to container styling
+  const resizeStartRef = useRef<{
+    handle: ResizeHandle;
+    pointerX: number;
+    pointerY: number;
+    playerRect: DOMRect;
+    boxRect: DOMRect;
+    initialWidth: number;
+    initialHeight: number;
+    initialLeft: number;
+    initialTop: number;
+    hasCustomPosition: boolean;
+  } | null>(null);
+
+  const currentResizedSizeRef = useRef<SubtitleBoxSize | null>(null);
+  const currentResizedPosRef = useRef<SubtitlePosition | null>(null);
+
+  // Sync external position & size changes (e.g. reset) to container styling
   useEffect(() => {
     if (!position && containerRef.current) {
       containerRef.current.style.top = 'auto';
@@ -197,6 +235,164 @@ export function SubtitleOverlay({
       containerRef.current.style.transform = 'translateX(-50%)';
     }
   }, [position]);
+
+  useEffect(() => {
+    if (!boxFixed && containerRef.current) {
+      containerRef.current.style.width = 'auto';
+      containerRef.current.style.height = 'auto';
+    }
+  }, [boxFixed, boxSize]);
+
+  // Window-level capture listener during resize for 100% reliable 60fps dragging
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const onPointerMove = (e: PointerEvent): void => {
+      const start = resizeStartRef.current;
+      if (!start) return;
+      e.stopPropagation();
+      e.preventDefault();
+
+      const dx = e.clientX - start.pointerX;
+      const dy = e.clientY - start.pointerY;
+
+      let newWidth = start.initialWidth;
+      let newHeight = start.initialHeight;
+      let newLeft = start.initialLeft;
+      let newTop = start.initialTop;
+
+      const minWidth = 260;
+      const minHeight = 56;
+      const maxWidth = Math.max(minWidth, start.playerRect.width - 16);
+      const maxHeight = Math.max(minHeight, start.playerRect.height - 16);
+
+      const h = start.handle;
+
+      if (h === 'right' || h === 'top-right' || h === 'bottom-right') {
+        newWidth = Math.max(minWidth, Math.min(maxWidth, start.initialWidth + dx));
+      } else if (h === 'left' || h === 'top-left' || h === 'bottom-left') {
+        newWidth = Math.max(minWidth, Math.min(maxWidth, start.initialWidth - dx));
+        newLeft = start.initialLeft + (start.initialWidth - newWidth);
+      }
+
+      if (h === 'bottom' || h === 'bottom-left' || h === 'bottom-right') {
+        newHeight = Math.max(minHeight, Math.min(maxHeight, start.initialHeight + dy));
+      } else if (h === 'top' || h === 'top-left' || h === 'top-right') {
+        newHeight = Math.max(minHeight, Math.min(maxHeight, start.initialHeight - dy));
+        newTop = start.initialTop + (start.initialHeight - newHeight);
+      }
+
+      currentResizedSizeRef.current = {
+        width: Math.round(newWidth),
+        height: Math.round(newHeight)
+      };
+
+      const boxEl = containerRef.current;
+      if (boxEl) {
+        boxEl.style.width = `${Math.round(newWidth)}px`;
+        boxEl.style.height = `${Math.round(newHeight)}px`;
+
+        if (h?.includes('left') || h?.includes('top') || start.hasCustomPosition) {
+          const centerX = newLeft + newWidth / 2;
+          const centerY = newTop + newHeight / 2;
+          const xPercent = (centerX / start.playerRect.width) * 100;
+          const yPercent = (centerY / start.playerRect.height) * 100;
+          currentResizedPosRef.current = { xPercent, yPercent };
+
+          boxEl.style.left = `${xPercent}%`;
+          boxEl.style.top = `${yPercent}%`;
+          boxEl.style.bottom = 'auto';
+          boxEl.style.right = 'auto';
+          boxEl.style.transform = 'translate3d(-50%, -50%, 0)';
+        }
+      }
+    };
+
+    const onPointerUp = (e: PointerEvent): void => {
+      if (!resizeStartRef.current) return;
+      e.stopPropagation();
+      e.preventDefault();
+
+      const finalSize = currentResizedSizeRef.current;
+      const finalPos = currentResizedPosRef.current;
+
+      resizeStartRef.current = null;
+      setIsResizing(false);
+      setHoveredHandle(null);
+
+      if (finalSize) {
+        if (onUpdateSettings) {
+          onUpdateSettings({
+            subtitleBoxSize: finalSize,
+            subtitleBoxFixed: true,
+            ...(finalPos ? { subtitlePosition: finalPos } : {})
+          });
+        } else if (onUpdatePosition && finalPos) {
+          onUpdatePosition(finalPos);
+        }
+      }
+    };
+
+    window.addEventListener('pointermove', onPointerMove, { capture: true });
+    window.addEventListener('pointerup', onPointerUp, { capture: true });
+    window.addEventListener('pointercancel', onPointerUp, { capture: true });
+
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove, { capture: true });
+      window.removeEventListener('pointerup', onPointerUp, { capture: true });
+      window.removeEventListener('pointercancel', onPointerUp, { capture: true });
+    };
+  }, [isResizing, onUpdateSettings, onUpdatePosition]);
+
+  const handleResizeStart = useCallback(
+    (handle: ResizeHandle, e: React.PointerEvent<HTMLDivElement>): void => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (e.button !== 0) return;
+
+      const boxEl = containerRef.current;
+      if (!boxEl) return;
+      const playerEl = getPlayerContainer(boxEl);
+      if (!playerEl) return;
+
+      const playerRect = playerEl.getBoundingClientRect();
+      const boxRect = boxEl.getBoundingClientRect();
+
+      resizeStartRef.current = {
+        handle,
+        pointerX: e.clientX,
+        pointerY: e.clientY,
+        playerRect,
+        boxRect,
+        initialWidth: boxRect.width,
+        initialHeight: boxRect.height,
+        initialLeft: boxRect.left - playerRect.left,
+        initialTop: boxRect.top - playerRect.top,
+        hasCustomPosition: Boolean(position)
+      };
+
+      currentResizedSizeRef.current = {
+        width: Math.round(boxRect.width),
+        height: Math.round(boxRect.height)
+      };
+
+      setIsResizing(true);
+    },
+    [position]
+  );
+
+  const handleToggleFixed = useCallback(
+    (e: MouseEvent<HTMLButtonElement>): void => {
+      e.stopPropagation();
+      const nextFixed = !boxFixed;
+      const updates: Partial<UserSettings> = { subtitleBoxFixed: nextFixed };
+      if (nextFixed && !boxSize) {
+        updates.subtitleBoxSize = { width: 680, height: 112 };
+      }
+      onUpdateSettings?.(updates);
+    },
+    [boxFixed, boxSize, onUpdateSettings]
+  );
 
   // Dynamically track YouTube controls autohide and bottom bar height with RAF throttle
   useEffect(() => {
@@ -425,8 +621,18 @@ export function SubtitleOverlay({
       containerRef.current.style.top = 'auto';
       containerRef.current.style.left = '50%';
       containerRef.current.style.transform = 'translateX(-50%)';
+      containerRef.current.style.width = 'auto';
+      containerRef.current.style.height = 'auto';
     }
-    onUpdatePosition(null);
+    if (onUpdateSettings) {
+      onUpdateSettings({
+        subtitlePosition: null,
+        subtitleBoxFixed: false,
+        subtitleBoxSize: null
+      });
+    } else {
+      onUpdatePosition(null);
+    }
   };
 
   const handleTokenClick = useCallback(
@@ -538,7 +744,11 @@ export function SubtitleOverlay({
     });
   }, [primaryCue, selectedTarget, handleTokenClick, handleTokenEnter]);
 
-  if (!primaryCue) return null;
+  if (!primaryCue && !boxFixed) return null;
+
+  const defaultFixedSize = { width: 680, height: 112 };
+  const effectiveWidth = boxSize?.width ?? defaultFixedSize.width;
+  const effectiveHeight = boxSize?.height ?? defaultFixedSize.height;
 
   const positionStyle: React.CSSProperties = position
     ? {
@@ -547,8 +757,7 @@ export function SubtitleOverlay({
         top: `${position.yPercent}%`,
         bottom: 'auto',
         right: 'auto',
-        transform: 'translate(-50%, -50%)',
-        maxWidth
+        transform: 'translate(-50%, -50%)'
       }
     : {
         position: 'absolute',
@@ -556,9 +765,11 @@ export function SubtitleOverlay({
         top: 'auto',
         right: 'auto',
         bottom: `${bottomOffset}px`,
-        transform: 'translateX(-50%)',
-        maxWidth
+        transform: 'translateX(-50%)'
       };
+
+  const isDraggingOrResizing = isDragging || isResizing;
+  const isHighlightBorder = isResizing || hoveredHandle !== null;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 overflow-visible">
@@ -567,14 +778,25 @@ export function SubtitleOverlay({
         data-mode={activeListeningMode}
         data-alt-pressed={altPressed ? 'true' : 'false'}
         data-has-selection={Boolean(selectedTarget) ? 'true' : 'false'}
-        className={`ytai-subtitle-overlay text-center shadow-2xl select-none ${
-          isDragging ? '' : 'transition-[bottom,opacity] duration-200 ease-out'
+        className={`ytai-subtitle-overlay text-center shadow-2xl select-none relative ${
+          isDraggingOrResizing ? '' : 'transition-[bottom,opacity] duration-200 ease-out'
         } ${
           isCardVisible ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
         } ${isDragging ? 'cursor-grabbing' : ''}`}
         style={{
           ...positionStyle,
-          transition: isDragging
+          ...(boxFixed
+            ? {
+                width: `min(${effectiveWidth}px, calc(100% - 16px))`,
+                height: `min(${effectiveHeight}px, calc(100% - 16px))`,
+                display: 'flex',
+                flexDirection: 'column',
+                boxSizing: 'border-box'
+              }
+            : {
+                maxWidth
+              }),
+          transition: isDraggingOrResizing
             ? 'none'
             : 'bottom 200ms cubic-bezier(0, 0, 0.2, 1), opacity 150ms ease-out',
           padding: `${dynamicPadY}px ${dynamicPadX}px`,
@@ -583,12 +805,20 @@ export function SubtitleOverlay({
             bgAlpha <= 0
               ? 'transparent'
               : `rgba(var(--ytai-bg-rgb), ${bgAlpha})`,
-          borderColor: bgAlpha <= 0 ? 'transparent' : 'var(--ytai-border)',
-          borderWidth: '1px',
+          borderColor: isHighlightBorder
+            ? 'var(--ytai-accent)'
+            : bgAlpha <= 0
+              ? 'transparent'
+              : 'var(--ytai-border)',
+          borderWidth: '1.5px',
           borderStyle: 'solid',
           backdropFilter: bgAlpha <= 0 ? 'none' : 'blur(var(--ytai-backdrop-blur, 12px))',
           WebkitBackdropFilter: bgAlpha <= 0 ? 'none' : 'blur(var(--ytai-backdrop-blur, 12px))',
-          boxShadow: bgAlpha <= 0 ? 'none' : undefined
+          boxShadow: isHighlightBorder
+            ? '0 0 0 1.5px var(--ytai-accent), 0 8px 32px rgba(0,0,0,0.5)'
+            : bgAlpha <= 0
+              ? 'none'
+              : undefined
         }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -598,18 +828,34 @@ export function SubtitleOverlay({
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Top bar: Drag grip handle + Mode hint */}
-        <div className="mb-1 flex items-center justify-between gap-2 select-none">
-          <button
-            type="button"
-            onDoubleClick={handleResetPosition}
-            title="Перетащите для смещения · Двойной клик для сброса по центру"
-            className="flex items-center gap-1 rounded px-1 py-0.5 text-slate-400 opacity-60 transition hover:bg-white/10 hover:text-white hover:opacity-100 cursor-grab active:cursor-grabbing"
-            style={{ color: 'var(--ytai-text-secondary)' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <GripHorizontal className="h-3.5 w-3.5" />
-          </button>
+        {/* Top bar: Drag grip handle + Lock button + Mode hint */}
+        <div className="mb-1 flex items-center justify-between gap-2 select-none flex-shrink-0 w-full">
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onDoubleClick={handleResetPosition}
+              title="Перетащите для смещения · Двойной клик для сброса по центру"
+              className="flex items-center gap-1 rounded px-1 py-0.5 text-slate-400 opacity-60 transition hover:bg-white/10 hover:text-white hover:opacity-100 cursor-grab active:cursor-grabbing"
+              style={{ color: 'var(--ytai-text-secondary)' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <GripHorizontal className="h-3.5 w-3.5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleToggleFixed}
+              title={
+                boxFixed
+                  ? 'Статичное окно включено (клик — переключить на адаптивный размер)'
+                  : 'Адаптивный размер (клик — зафиксировать размер окна)'
+              }
+              className="flex items-center gap-1 rounded px-1 py-0.5 text-slate-400 opacity-60 transition hover:bg-white/10 hover:text-white hover:opacity-100 cursor-pointer"
+              style={{ color: boxFixed ? 'var(--ytai-accent)' : 'var(--ytai-text-secondary)' }}
+            >
+              {boxFixed ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
+            </button>
+          </div>
 
           {isBlurMode && (
             <div
@@ -631,35 +877,112 @@ export function SubtitleOverlay({
             </div>
           )}
 
-          <div className="w-3.5" aria-hidden="true" />
+          <div className="w-8" aria-hidden="true" />
         </div>
 
-        {/* Primary Subtitle Line */}
+        {/* Subtitle Content (Centered in fixed mode) */}
         <div
-          className="ytai-blur-target leading-snug select-text"
-          style={{
-            color: 'var(--ytai-text-primary)',
-            fontSize: `${primaryFontSize}px`,
-            ...textTypographyStyle
-          }}
+          className={`w-full text-center ${
+            boxFixed
+              ? 'flex-1 flex flex-col items-center justify-center overflow-y-auto min-h-0'
+              : ''
+          }`}
         >
-          {renderedTokens}
-        </div>
-
-        {/* Translated Subtitle Line */}
-        {(showTranslation ?? showDualSubtitles ?? true) &&
-          Boolean(primaryCue?.translation || translatedCue?.translation || translatedCue?.text) && (
+          {primaryCue && (
             <div
-              className="ytai-blur-target mt-1 leading-snug select-none"
+              className="ytai-blur-target leading-snug select-text"
               style={{
-                color: 'var(--ytai-text-secondary)',
-                fontSize: `${translatedFontSize}px`,
+                color: 'var(--ytai-text-primary)',
+                fontSize: `${primaryFontSize}px`,
                 ...textTypographyStyle
               }}
             >
-              {primaryCue?.translation || translatedCue?.translation || translatedCue?.text}
+              {renderedTokens}
             </div>
           )}
+
+          {(showTranslation ?? showDualSubtitles ?? true) &&
+            Boolean(primaryCue?.translation || translatedCue?.translation || translatedCue?.text) && (
+              <div
+                className="ytai-blur-target mt-1 leading-snug select-none"
+                style={{
+                  color: 'var(--ytai-text-secondary)',
+                  fontSize: `${translatedFontSize}px`,
+                  ...textTypographyStyle
+                }}
+              >
+                {primaryCue?.translation || translatedCue?.translation || translatedCue?.text}
+              </div>
+            )}
+        </div>
+
+        {/* Interactive Resize Handles (Edges and Corners) */}
+        <div
+          className="absolute -top-1 left-2 right-2 h-2 cursor-ns-resize z-20"
+          onPointerDown={(e) => handleResizeStart('top', e)}
+          onMouseEnter={() => setHoveredHandle('top')}
+          onMouseLeave={() => setHoveredHandle((h) => (h === 'top' ? null : h))}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
+        <div
+          className="absolute -bottom-1 left-2 right-2 h-2 cursor-ns-resize z-20"
+          onPointerDown={(e) => handleResizeStart('bottom', e)}
+          onMouseEnter={() => setHoveredHandle('bottom')}
+          onMouseLeave={() => setHoveredHandle((h) => (h === 'bottom' ? null : h))}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
+        <div
+          className="absolute -left-1 top-2 bottom-2 w-2 cursor-ew-resize z-20"
+          onPointerDown={(e) => handleResizeStart('left', e)}
+          onMouseEnter={() => setHoveredHandle('left')}
+          onMouseLeave={() => setHoveredHandle((h) => (h === 'left' ? null : h))}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
+        <div
+          className="absolute -right-1 top-2 bottom-2 w-2 cursor-ew-resize z-20"
+          onPointerDown={(e) => handleResizeStart('right', e)}
+          onMouseEnter={() => setHoveredHandle('right')}
+          onMouseLeave={() => setHoveredHandle((h) => (h === 'right' ? null : h))}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
+
+        {/* 4 Corner handles */}
+        <div
+          className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 cursor-nwse-resize z-21"
+          onPointerDown={(e) => handleResizeStart('top-left', e)}
+          onMouseEnter={() => setHoveredHandle('top-left')}
+          onMouseLeave={() => setHoveredHandle((h) => (h === 'top-left' ? null : h))}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
+        <div
+          className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 cursor-nesw-resize z-21"
+          onPointerDown={(e) => handleResizeStart('top-right', e)}
+          onMouseEnter={() => setHoveredHandle('top-right')}
+          onMouseLeave={() => setHoveredHandle((h) => (h === 'top-right' ? null : h))}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
+        <div
+          className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 cursor-nesw-resize z-21"
+          onPointerDown={(e) => handleResizeStart('bottom-left', e)}
+          onMouseEnter={() => setHoveredHandle('bottom-left')}
+          onMouseLeave={() => setHoveredHandle((h) => (h === 'bottom-left' ? null : h))}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
+        <div
+          className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 cursor-nwse-resize z-21"
+          onPointerDown={(e) => handleResizeStart('bottom-right', e)}
+          onMouseEnter={() => setHoveredHandle('bottom-right')}
+          onMouseLeave={() => setHoveredHandle((h) => (h === 'bottom-right' ? null : h))}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
       </div>
     </div>
   );

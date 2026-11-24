@@ -2,7 +2,6 @@ import {
   memo,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -195,7 +194,6 @@ export function SubtitleOverlay({
   const [isResizing, setIsResizing] = useState(false);
   const [hoveredHandle, setHoveredHandle] = useState<ResizeHandle>(null);
   const [isBoxHovered, setIsBoxHovered] = useState(false);
-  const [autoFitScale, setAutoFitScale] = useState<number>(1);
 
   const [bottomOffset, setBottomOffset] = useState<number>(() => {
     if (typeof document === 'undefined') return 68;
@@ -203,7 +201,6 @@ export function SubtitleOverlay({
   });
 
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const contentRef = useRef<HTMLDivElement | null>(null);
   const isDraggingRef = useRef(false);
   const justFinishedDragRef = useRef(false);
   const currentDragPosRef = useRef<SubtitlePosition | null>(null);
@@ -458,65 +455,9 @@ export function SubtitleOverlay({
     primaryFontSize = Math.max(primaryFontSize, 28);
   }
   const effectiveTranslationScale = translationScale ?? 0.85;
-  const rawTranslatedFontSize = isTranslationOnly
+  const translatedFontSize = isTranslationOnly
     ? primaryFontSize
     : Math.max(10, Math.round(primaryFontSize * effectiveTranslationScale));
-
-  // Dynamic auto-fit font scaling when static box is shrunk
-  const effectivePrimaryFontSize = Math.max(11, Math.round(primaryFontSize * autoFitScale));
-  const effectiveTranslatedFontSize = Math.max(11, Math.round(rawTranslatedFontSize * autoFitScale));
-
-  useLayoutEffect(() => {
-    if (!boxFixed) {
-      if (autoFitScale !== 1) setAutoFitScale(1);
-      return;
-    }
-
-    const boxEl = containerRef.current;
-    const contentEl = contentRef.current;
-    if (!boxEl || !contentEl) return;
-
-    const measureAndFit = (): void => {
-      const availH = contentEl.clientHeight;
-      const availW = contentEl.clientWidth;
-      if (availH <= 0 || availW <= 0) return;
-
-      const innerEl = contentEl.firstElementChild as HTMLElement | null;
-      if (!innerEl) return;
-
-      const sh = innerEl.scrollHeight;
-      const sw = innerEl.scrollWidth;
-      if (sh <= 0 || sw <= 0) return;
-
-      const unscaledH = sh / autoFitScale;
-      const unscaledW = sw / autoFitScale;
-      if (unscaledH <= 0 || unscaledW <= 0) return;
-
-      const ratioH = availH / unscaledH;
-      const ratioW = availW / unscaledW;
-      const idealScale = Math.min(ratioH, ratioW);
-      const nextScale = Math.max(0.55, Math.min(1.0, Number((idealScale * 0.97).toFixed(2))));
-      setAutoFitScale((prev) => (Math.abs(prev - nextScale) > 0.03 ? nextScale : prev));
-    };
-
-    measureAndFit();
-
-    const observer = new ResizeObserver(() => {
-      measureAndFit();
-    });
-
-    observer.observe(boxEl);
-    return () => observer.disconnect();
-  }, [
-    boxFixed,
-    primaryCue,
-    translatedCue,
-    primaryFontSize,
-    rawTranslatedFontSize,
-    isTranslationOnly,
-    isAltRevealed,
-    autoFitScale
-  ]);
 
   const textTypographyStyle: React.CSSProperties = {
     fontFamily: FONT_FAMILIES[fontFamily ?? 'sans'] || FONT_FAMILIES.sans,
@@ -968,7 +909,6 @@ export function SubtitleOverlay({
 
         {/* Subtitle Content (Centered in fixed mode without flex top-clipping) */}
         <div
-          ref={contentRef}
           className={`w-full text-center ${
             boxFixed
               ? 'flex-1 flex flex-col items-center overflow-hidden min-h-0'
@@ -984,7 +924,7 @@ export function SubtitleOverlay({
                 }`}
                 style={{
                   color: 'var(--ytai-text-primary)',
-                  fontSize: `${isTranslationOnly ? Math.max(11, Math.round(effectivePrimaryFontSize * 0.9)) : effectivePrimaryFontSize}px`,
+                  fontSize: `${isTranslationOnly ? Math.max(12, Math.round(primaryFontSize * 0.9)) : primaryFontSize}px`,
                   ...textTypographyStyle
                 }}
               >
@@ -1004,7 +944,7 @@ export function SubtitleOverlay({
                       color: isTranslationOnly
                         ? 'var(--ytai-text-primary)'
                         : 'var(--ytai-text-secondary)',
-                      fontSize: `${effectiveTranslatedFontSize}px`,
+                      fontSize: `${translatedFontSize}px`,
                       ...textTypographyStyle
                     }}
                   >
@@ -1014,7 +954,7 @@ export function SubtitleOverlay({
                   <div
                     className="leading-snug select-none text-slate-400 opacity-60 animate-pulse tracking-widest text-center"
                     style={{
-                      fontSize: `${effectiveTranslatedFontSize}px`,
+                      fontSize: `${translatedFontSize}px`,
                       ...textTypographyStyle
                     }}
                   >

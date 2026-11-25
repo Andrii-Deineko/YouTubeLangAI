@@ -22,8 +22,7 @@ import {
   type UserSettings
 } from '../types/settings';
 import type { TranslationRuntimeStatus } from '../types/messages';
-import type { SubtitleCue, WordToken } from '../types/subtitles';
-import { isValidTranslationText } from '../utils/translationCache';
+import { isValidTranslationText, type SubtitleCue, type WordToken } from '../types/subtitles';
 
 const FONT_FAMILIES: Record<FontFamily, string> = {
   sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
@@ -795,7 +794,7 @@ export function SubtitleOverlay({
     !isOriginalOnly &&
     Boolean(primaryCue) &&
     !validTranslation &&
-    (translationStatus?.state === 'cooldown' || translationStatus?.state === 'error');
+    translationStatus?.state === 'cooldown';
   const hasModeHint =
     (isTranslationOnly && isAltRevealed) ||
     (!isTranslationOnly && isBlurMode && !(altPressed || Boolean(selectedTarget))) ||

@@ -4,7 +4,7 @@ import type { AIExplanation, QuickTranslationResult, VocabularyCard } from './vo
 
 export const MAIN_MESSAGE_SOURCE = 'yt-lang-ai-main';
 export const ISOLATED_MESSAGE_SOURCE = 'yt-lang-ai-isolated';
-export const POST_MESSAGE_SOURCE_MAIN = 'cinelingua-main';
+const POST_MESSAGE_SOURCE_MAIN = 'cinelingua-main';
 
 export interface TrackCapturedPayload {
   videoId: string;
@@ -112,10 +112,6 @@ export type RuntimeRequest =
       payload: { url: string };
     }
   | {
-      type: 'CAPTURE_SCREENSHOT';
-      payload: { rect?: { x: number; y: number; width: number; height: number } };
-    }
-  | {
       type: 'FREE_TRANSLATE_CUES';
       payload: {
         videoId: string;
@@ -131,15 +127,6 @@ export type RuntimeRequest =
       payload?: {
         videoId?: string;
         targetLang?: string;
-      };
-    }
-  | {
-      type: 'FREE_TRANSLATE_WORD';
-      payload: {
-        word: string;
-        sentence?: string;
-        sourceLang?: string;
-        targetLang: string;
       };
     }
   | {
@@ -161,35 +148,7 @@ export interface CinemaModuleStatus {
   registered: boolean;
 }
 
-export interface FreeTranslateWordResult {
-  word: string;
-  translation: string;
-  sentenceTranslation: string;
-  alternatives: string[];
-  partOfSpeech?: string;
-  detectedLang?: string;
-  fromCache?: boolean;
-  isZeroConfigMode?: boolean;
-  transcription?: string;
-  sourceLang?: string;
-  targetLang?: string;
-  rawText?: string;
-  synonyms?: string[];
-  contextSentence?: string;
-  contextSentenceTranslation?: string;
-}
-
-export interface RuntimeResponseSuccess<T> {
-  ok: true;
-  data: T;
-}
-
-export interface RuntimeResponseError {
-  ok: false;
-  error: string;
-}
-
-export type RuntimeResponse<T> = RuntimeResponseSuccess<T> | RuntimeResponseError;
+export type RuntimeResponse<T> = { ok: true; data: T } | { ok: false; error: string };
 
 export type QuickTranslateResponse = RuntimeResponse<QuickTranslationResult>;
 export type AIExplainResponse = RuntimeResponse<AIExplanation>;
@@ -205,21 +164,13 @@ export interface LLMTestResult {
 }
 export type LLMTestResponse = RuntimeResponse<LLMTestResult>;
 export type FetchModelsResponse = RuntimeResponse<string[]>;
-export type FetchSubtitleTextResponse = { text?: string; error?: string };
-export type ScreenshotResponse = { dataUrl?: string; error?: string };
-export type InjectMainInterceptorResponse = { ok: boolean; data?: boolean; error?: string };
 export interface TranslationRuntimeStatus {
-  state: 'idle' | 'translating' | 'cooldown' | 'error';
-  provider?: 'google' | 'mymemory' | 'none';
+  state: 'idle' | 'translating' | 'cooldown';
   retryAt?: number;
-  message?: string;
 }
 
-export interface FreeTranslateCuesResult {
+export type FreeTranslateCuesResponse = RuntimeResponse<{
   translations: Array<{ id: string; text: string }>;
   status: TranslationRuntimeStatus;
-}
-
-export type FreeTranslateWordResponse = RuntimeResponse<FreeTranslateWordResult>;
-export type FreeTranslateCuesResponse = RuntimeResponse<FreeTranslateCuesResult>;
+}>;
 export type CinemaModuleStatusResponse = RuntimeResponse<CinemaModuleStatus>;

@@ -9,10 +9,8 @@ import {
 import { exportCardsToAnki, testAnkiConnection } from './export';
 import {
   cancelCueTranslation,
-  detachCueTranslationListener,
-  freeTranslateWord,
   translateCueBatch,
-  translateSingleTextWithCascade
+  translateSingleText
 } from './freeTranslate';
 import {
   fetchAvailableModels,
@@ -28,8 +26,8 @@ import {
 } from './moduleManager';
 import { getSettings } from '../storage/storage';
 import type { RuntimeRequest, RuntimeResponse } from '../types/messages';
+import { isValidTranslationText } from '../types/subtitles';
 import type { AIExplanation, QuickTranslationResult } from '../types/vocabulary';
-import { isValidTranslationText } from '../utils/translationCache';
 
 class ConcurrencyQueue {
   private activeCount = 0;
@@ -79,7 +77,7 @@ async function handleQuickTranslate(
   }
 
   const promise = (async (): Promise<QuickTranslationResult> => {
-    const parsed = await translateSingleTextWithCascade({
+    const parsed = await translateSingleText({
       text: cleanText,
       sourceLang: sl,
       targetLang: nativeLang,
@@ -173,25 +171,27 @@ async function processMessage(
     switch (message.type) {
       case 'FREE_TRANSLATE_CUES': {
         const tabId = sender.tab?.id;
-        const listenerKey = tabId ?? 'default';
         const result = await translateCueBatch({
           videoId: message.payload.videoId,
           cues: message.payload.cues,
           sourceLang: message.payload.sourceLang,
           targetLang: message.payload.targetLang,
           priorityTime: message.payload.priorityTime,
-          awaitHotOnly: true,
           forceRetry: message.payload.forceRetry,
-          listenerKey,
-          onBatchProgress: (progress) => {
+          onBatchProgress: (batchTranslations, status) => {
             if (typeof tabId === 'number') {
               chrome.tabs
                 .sendMessage(tabId, {
                   type: 'FREE_TRANSLATE_CUES_BATCH',
-                  payload: progress
+                  payload: {
+                    videoId: message.payload.videoId,
+                    targetLang: message.payload.targetLang,
+                    batchTranslations,
+                    status
+                  }
                 })
                 .catch(() => {
-                  detachCueTranslationListener(tabId);
+                  cancelCueTranslation(message.payload.videoId);
                 });
             }
           }
@@ -199,16 +199,8 @@ async function processMessage(
         return { ok: true, data: result };
       }
       case 'CANCEL_FREE_TRANSLATION': {
-        if (typeof sender.tab?.id === 'number' && !message.payload?.videoId) {
-          detachCueTranslationListener(sender.tab.id);
-        } else {
-          cancelCueTranslation(message.payload);
-        }
+        cancelCueTranslation(message.payload?.videoId);
         return { ok: true, data: true };
-      }
-      case 'FREE_TRANSLATE_WORD': {
-        const result = await freeTranslateWord(message.payload);
-        return { ok: true, data: result };
       }
       case 'QUICK_TRANSLATE': {
         const result = await handleQuickTranslate(
@@ -248,22 +240,6 @@ async function processMessage(
       case 'FETCH_SUBTITLE_TEXT': {
         const text = await handleFetchSubtitleText(message.payload.url);
         return { ok: true, data: { text } };
-      }
-      case 'CAPTURE_SCREENSHOT': {
-        if (!chrome.tabs?.captureVisibleTab) {
-          return { ok: false, error: 'tabs.captureVisibleTab not available' };
-        }
-        const windowId = sender.tab?.windowId ?? chrome.windows?.WINDOW_ID_CURRENT;
-        const dataUrl = await new Promise<string>((resolve, reject) => {
-          chrome.tabs.captureVisibleTab(windowId, { format: 'png' }, (res) => {
-            if (chrome.runtime.lastError || !res) {
-              reject(new Error(chrome.runtime.lastError?.message || 'Screenshot failed'));
-            } else {
-              resolve(res);
-            }
-          });
-        });
-        return { ok: true, data: { dataUrl } };
       }
       case 'OPEN_EXTENSION_POPUP': {
         if (chrome.action?.openPopup) {
@@ -351,12 +327,6 @@ chrome.runtime.onStartup.addListener(() => {
 if (chrome.permissions?.onRemoved) {
   chrome.permissions.onRemoved.addListener(() => {
     void syncCinemaModuleState();
-  });
-}
-
-if (chrome.tabs?.onRemoved) {
-  chrome.tabs.onRemoved.addListener((tabId) => {
-    detachCueTranslationListener(tabId);
   });
 }
 

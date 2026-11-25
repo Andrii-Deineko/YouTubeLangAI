@@ -3,7 +3,6 @@ import {
   DEFAULT_KEYBINDINGS,
   DEFAULT_SETTINGS,
   type ActiveListeningMode,
-  type ControlsScale,
   type FontFamily,
   type FontWeight,
   type KeybindAction,
@@ -78,13 +77,6 @@ export function parseActiveListeningMode(rawVal: unknown): ActiveListeningMode {
   return 'off';
 }
 
-export function parseControlsScale(rawVal: unknown): ControlsScale {
-  if (rawVal === 'sm' || rawVal === 'md' || rawVal === 'lg' || rawVal === 'xl') {
-    return rawVal;
-  }
-  return 'md';
-}
-
 export function parseSubtitleScale(rawVal: unknown): SubtitleScale {
   if (
     rawVal === 'sm' ||
@@ -112,18 +104,11 @@ export function parseFontWeight(rawVal: unknown): FontWeight {
   return 'normal';
 }
 
-export function parseTextOutline(rawVal: unknown): TextOutline {
+function parseTextOutline(rawVal: unknown): TextOutline {
   if (rawVal === 'none' || rawVal === 'shadow' || rawVal === 'outline') {
     return rawVal;
   }
   return 'shadow';
-}
-
-export function parseSubtitleTrackMode(rawVal: unknown): SubtitleTrackMode {
-  if (rawVal === 'dual' || rawVal === 'translation' || rawVal === 'original') {
-    return rawVal;
-  }
-  return 'dual';
 }
 
 export function mergeSettings(

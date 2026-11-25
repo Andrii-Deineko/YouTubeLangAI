@@ -533,7 +533,7 @@ export function PlayerControls({
 
       {settings.enabled &&
         currentTrackMode !== 'original' &&
-        (translationStatus?.state === 'cooldown' || translationStatus?.state === 'error') && (
+        translationStatus?.state === 'cooldown' && (
           <button
             type="button"
             onClick={(e) => {

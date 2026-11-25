@@ -1,5 +1,4 @@
-import type { Json3Event, Json3Response, SubtitleCue } from '../types/subtitles';
-import { isValidTranslationText } from '../utils/translationCache';
+import { isValidTranslationText, type Json3Event, type Json3Response, type SubtitleCue } from '../types/subtitles';
 import {
   cleanSubtitleText,
   normalizeWord,

@@ -114,7 +114,7 @@ export const THEME_LIST: ThemeDefinition[] = [
   THEMES['emerald-noir']
 ];
 
-export interface SubtitleScaleOption {
+interface SubtitleScaleOption {
   id: SubtitleScale;
   label: string;
   name: string;
@@ -129,44 +129,3 @@ export const SUBTITLE_SCALES: SubtitleScaleOption[] = [
   { id: 'xl', label: 'XL · 32px', name: 'Большой экран', primary: 32, translated: 23 },
   { id: 'tv', label: 'TV · 40px', name: 'TV / Диван', primary: 40, translated: 28 }
 ];
-
-export function getSubtitleFontSizes(
-  baseSize: number,
-  scale: SubtitleScale = 'md'
-): { primary: number; translated: number } {
-  let primary = baseSize || 20;
-
-  if (scale === 'tv') {
-    primary = Math.max(primary, 40);
-  } else if (scale === 'xl') {
-    primary = Math.max(primary, 28);
-  }
-
-  primary = Math.min(56, Math.max(12, primary));
-
-  const translatedRatio = primary >= 32 ? 0.75 : 0.8;
-  const translated = Math.max(12, Math.round(primary * translatedRatio));
-
-  return { primary, translated };
-}
-
-export function getThemeCssVariables(
-  themeId: ThemeId = 'midnight-glass',
-  overlayOpacity = 0.85
-): Record<string, string> {
-  const theme = THEMES[themeId] || THEMES['midnight-glass'];
-
-  return {
-    '--ytai-bg-rgb': theme.bgRgb,
-    '--ytai-bg-opacity': String(overlayOpacity),
-    '--ytai-text-primary': theme.textPrimary,
-    '--ytai-text-secondary': theme.textSecondary,
-    '--ytai-accent': theme.accent,
-    '--ytai-accent-rgb': theme.accentRgb,
-    '--ytai-accent-fg': theme.accentFg || '#ffffff',
-    '--ytai-border': theme.border,
-    '--ytai-surface': theme.surface,
-    '--ytai-text-shadow': theme.textShadow,
-    '--ytai-backdrop-blur': theme.backdropBlur
-  };
-}

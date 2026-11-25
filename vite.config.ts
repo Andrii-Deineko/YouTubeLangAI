@@ -193,7 +193,8 @@ export default defineConfig(() => {
     permissions: ['storage', 'unlimitedStorage', 'scripting'],
     host_permissions: [
       ...YOUTUBE_MATCHES,
-      'https://translate.googleapis.com/*'
+      'https://translate.googleapis.com/*',
+      'https://api.mymemory.translated.net/*'
     ],
     optional_host_permissions: [
       'https://*/*',

@@ -1,4 +1,6 @@
-import type { FreeTranslateWordResult } from '../types/messages';
+import { getCachedCueTranslations, saveCachedCueTranslations } from '../storage/db';
+import type { TranslationRuntimeStatus } from '../types/messages';
+import { isValidTranslationText, normalizeCueText } from '../types/subtitles';
 
 export interface CueItem {
   id: string;
@@ -7,236 +9,316 @@ export interface CueItem {
   endTime?: number;
 }
 
-export interface TranslatedCueItem {
-  id: string;
-  text: string;
-}
-
-interface CachedSubtitleTrack {
-  savedAt: number;
-  translations: Record<string, string>; // cueId -> translatedText
-}
-
-const WORD_CACHE_STORAGE_KEY = 'ytai_free_word_cache';
-const SUBTITLE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const CUE_BATCH_SIZE = 25;
-const BATCH_DELIMITER = '\n|||\n';
-
-// In-memory LRU cache for word translations
-const wordMemoryCache = new Map<string, FreeTranslateWordResult>();
-let isStorageWordCacheLoaded = false;
-let isStorageWordCacheSaving = false;
-let pendingSaveStorageWordCache = false;
-
-// In-flight request deduplication
-const inFlightWordRequests = new Map<string, Promise<FreeTranslateWordResult>>();
-const inFlightCueRequests = new Map<string, Promise<TranslatedCueItem[]>>();
-
-async function loadWordCacheFromStorage(): Promise<void> {
-  if (isStorageWordCacheLoaded) return;
-  try {
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      const res = await chrome.storage.local.get(WORD_CACHE_STORAGE_KEY);
-      const raw = res[WORD_CACHE_STORAGE_KEY];
-      if (Array.isArray(raw)) {
-        for (const item of raw) {
-          if (item && typeof item === 'object' && item.key && item.data) {
-            wordMemoryCache.set(item.key, item.data);
-          }
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('[YT-Lang-AI] Error loading word cache from storage:', err);
-  } finally {
-    isStorageWordCacheLoaded = true;
-  }
-}
-
-async function persistWordCacheToStorage(): Promise<void> {
-  if (isStorageWordCacheSaving) {
-    pendingSaveStorageWordCache = true;
-    return;
-  }
-  isStorageWordCacheSaving = true;
-
-  try {
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      const entries = Array.from(wordMemoryCache.entries()).map(([key, data]) => ({
-        key,
-        data
-      }));
-      await chrome.storage.local.set({ [WORD_CACHE_STORAGE_KEY]: entries });
-    }
-  } catch (err) {
-    console.warn('[YT-Lang-AI] Error saving word cache to storage:', err);
-  } finally {
-    isStorageWordCacheSaving = false;
-    if (pendingSaveStorageWordCache) {
-      pendingSaveStorageWordCache = false;
-      void persistWordCacheToStorage();
-    }
-  }
-}
-
-function buildWordCacheKey(
-  sourceLang: string,
-  targetLang: string,
-  word: string,
-  sentence?: string
-): string {
-  const cleanWord = word.trim().toLowerCase();
-  const cleanSentence = sentence ? sentence.trim().slice(0, 100) : '';
-  return `${sourceLang || 'auto'}:${targetLang}:${cleanWord}:${cleanSentence}`;
-}
-
-interface SingleParseResult {
+export interface SingleParseResult {
   translation: string;
   alternatives: string[];
   partOfSpeech?: string;
   detectedLang?: string;
 }
 
-function parseSingleResponse(raw: unknown, originalText: string): SingleParseResult {
-  if (!Array.isArray(raw)) {
-    return {
-      translation: originalText,
-      alternatives: []
+type ProgressFn = (batch: Array<{ id: string; text: string }>, status: TranslationRuntimeStatus) => void;
+
+const DELIM = '\n|||\n';
+const COOLDOWN_MS = 60_000;
+const BG_DELAY_MS = 600;
+const HOT_AHEAD = 15;
+const BG_BATCH = 14;
+const GTX_MAX_CHARS = 1800;
+const MM_MAX_BYTES = 450;
+
+const utf8 = new TextEncoder();
+const byteLen = (s: string): number => utf8.encode(s).length;
+
+let gtxPausedUntil = 0;
+let mmPausedUntil = 0;
+
+export function clearProviderCooldowns(): void {
+  gtxPausedUntil = 0;
+  mmPausedUntil = 0;
+}
+
+const isPaused = (until: number): boolean => Date.now() < until;
+const sanitize = (raw: string): string => normalizeCueText(raw).replace(/\|\|\|/g, '|').trim();
+
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0 || signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const t = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(t);
+      resolve();
     };
-  }
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
-  // 1. Primary text translation from raw[0]
-  const segments = Array.isArray(raw[0]) ? raw[0] : [];
-  const parts: string[] = [];
-  for (const seg of segments) {
-    if (Array.isArray(seg) && typeof seg[0] === 'string') {
-      parts.push(seg[0]);
-    }
-  }
-  const translation = parts.join('').trim() || originalText;
+function parseGtxJson(raw: unknown): SingleParseResult {
+  if (!Array.isArray(raw) || !Array.isArray(raw[0])) throw new Error('Invalid GTX response');
+  const translation = (raw[0] as Array<[string | null]>)
+    .map((s) => (Array.isArray(s) && typeof s[0] === 'string' ? s[0] : ''))
+    .join('')
+    .trim();
+  if (!isValidTranslationText(translation)) throw new Error('Invalid GTX translation');
 
-  // 2. Detected language from raw[2]
-  const detectedLang = typeof raw[2] === 'string' ? raw[2] : undefined;
-
-  // 3. Dictionary / Synonyms / Alternatives from raw[1]
   const alternatives: string[] = [];
   let partOfSpeech: string | undefined;
-
   if (Array.isArray(raw[1])) {
-    for (const dictEntry of raw[1]) {
-      if (!Array.isArray(dictEntry)) continue;
-      if (!partOfSpeech && typeof dictEntry[0] === 'string' && dictEntry[0].trim()) {
-        partOfSpeech = dictEntry[0].trim();
-      }
-      if (Array.isArray(dictEntry[1])) {
-        for (const candidate of dictEntry[1]) {
-          if (
-            typeof candidate === 'string' &&
-            candidate.trim() &&
-            candidate.trim().toLowerCase() !== translation.toLowerCase() &&
-            !alternatives.includes(candidate.trim())
-          ) {
-            alternatives.push(candidate.trim());
-          }
+    for (const d of raw[1]) {
+      if (!Array.isArray(d)) continue;
+      if (!partOfSpeech && typeof d[0] === 'string' && d[0].trim()) partOfSpeech = d[0].trim();
+      for (const c of Array.isArray(d[1]) ? d[1] : []) {
+        if (typeof c === 'string' && isValidTranslationText(c) && !alternatives.includes(c.trim())) {
+          alternatives.push(c.trim());
         }
       }
     }
   }
-
   return {
     translation,
     alternatives: alternatives.slice(0, 6),
     partOfSpeech,
-    detectedLang
+    detectedLang: typeof raw[2] === 'string' ? raw[2] : undefined
   };
 }
 
-async function fetchSingleText(
-  text: string,
-  sourceLang: string,
-  targetLang: string,
-  includeDictionary: boolean
-): Promise<SingleParseResult> {
-  const cleanText = text.trim();
-  if (!cleanText) {
-    return { translation: '', alternatives: [] };
+async function fetchGtx(q: string, sl: string, tl: string, dict: boolean, signal?: AbortSignal): Promise<SingleParseResult> {
+  if (isPaused(gtxPausedUntil)) throw new Error('GTX cooldown');
+  const dt = dict ? '&dt=t&dt=bd&dt=rm' : '&dt=t';
+  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}${dt}&q=${encodeURIComponent(q)}`;
+  const res = await fetch(url, { signal });
+  if (res.status === 429 || res.status === 403) {
+    gtxPausedUntil = Date.now() + COOLDOWN_MS;
+    throw new Error(`GTX HTTP ${res.status}`);
   }
-
-  const sl = sourceLang && sourceLang !== 'unknown' ? sourceLang : 'auto';
-  const dtParams = includeDictionary ? '&dt=t&dt=bd&dt=rm' : '&dt=t';
-  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(
-    sl
-  )}&tl=${encodeURIComponent(targetLang)}${dtParams}&q=${encodeURIComponent(cleanText)}`;
-
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Google GTX request failed with HTTP ${res.status}`);
+  if (!res.ok) throw new Error(`GTX HTTP ${res.status}`);
+  const body = await res.text();
+  if (!body || /^\s*</.test(body)) {
+    gtxPausedUntil = Date.now() + COOLDOWN_MS;
+    throw new Error('GTX challenge');
   }
-
-  const json: unknown = await res.json();
-  return parseSingleResponse(json, cleanText);
+  return parseGtxJson(JSON.parse(body));
 }
 
-export async function freeTranslateWord(params: {
-  word: string;
-  sentence?: string;
-  sourceLang?: string;
-  targetLang: string;
-}): Promise<FreeTranslateWordResult> {
-  await loadWordCacheFromStorage();
-
-  const sl = params.sourceLang || 'auto';
-  const tl = params.targetLang || 'ru';
-  const cacheKey = buildWordCacheKey(sl, tl, params.word, params.sentence);
-
-  const cached = wordMemoryCache.get(cacheKey);
-  if (cached) {
-    return { ...cached, fromCache: true };
-  }
-
-  const inFlight = inFlightWordRequests.get(cacheKey);
-  if (inFlight) {
-    return inFlight;
-  }
-
-  const task = (async (): Promise<FreeTranslateWordResult> => {
-    let wordRes: SingleParseResult;
-    try {
-      wordRes = await fetchSingleText(params.word, sl, tl, true);
-    } catch {
-      wordRes = { translation: params.word, alternatives: [] };
-    }
-
-    let sentenceTranslation = '';
-    if (params.sentence && params.sentence.trim()) {
-      try {
-        const sRes = await fetchSingleText(params.sentence, sl, tl, false);
-        sentenceTranslation = sRes.translation;
-      } catch {
-        sentenceTranslation = '';
+function splitToMaxBytes(text: string, maxBytes: number): string[] {
+  if (byteLen(text) <= maxBytes) return [text];
+  const chunks: string[] = [];
+  let cur = '';
+  for (const w of text.split(/\s+/)) {
+    const next = cur ? `${cur} ${w}` : w;
+    if (byteLen(next) <= maxBytes) {
+      cur = next;
+    } else {
+      if (cur) chunks.push(cur);
+      if (byteLen(w) <= maxBytes) {
+        cur = w;
+      } else {
+        cur = '';
+        for (const ch of w) {
+          if (byteLen(cur + ch) > maxBytes) {
+            if (cur) chunks.push(cur);
+            cur = ch;
+          } else cur += ch;
+        }
       }
     }
+  }
+  if (cur) chunks.push(cur);
+  return chunks;
+}
 
-    const result: FreeTranslateWordResult = {
-      word: params.word,
-      translation: wordRes.translation || params.word,
-      sentenceTranslation,
-      alternatives: wordRes.alternatives,
-      partOfSpeech: wordRes.partOfSpeech,
-      detectedLang: wordRes.detectedLang
-    };
+async function fetchMyMemory(q: string, sl: string, tl: string, signal?: AbortSignal): Promise<string> {
+  if (isPaused(mmPausedUntil)) throw new Error('MyMemory cooldown');
+  const cleanSl = sl.trim().toLowerCase().split('-')[0];
+  const src =
+    cleanSl && cleanSl !== 'auto' && cleanSl !== 'unknown' && cleanSl !== 'und'
+      ? cleanSl
+      : /[а-яё]/i.test(q) ? 'ru' : /[іїєґ]/i.test(q) ? 'uk' : 'en';
+  const dst = tl.trim().toLowerCase().split('-')[0] || 'ru';
+  if (src === dst) throw new Error('Same language');
 
-    wordMemoryCache.set(cacheKey, result);
-    void persistWordCacheToStorage();
+  const params = new URLSearchParams({ q, langpair: `${src}|${dst}` });
+  const res = await fetch(`https://api.mymemory.translated.net/get?${params}`, { signal });
+  if (res.status === 429 || res.status === 403) {
+    mmPausedUntil = Date.now() + COOLDOWN_MS;
+    throw new Error(`MyMemory HTTP ${res.status}`);
+  }
+  if (!res.ok) throw new Error(`MyMemory HTTP ${res.status}`);
 
-    return result;
-  })();
+  const data = (await res.json()) as {
+    responseData?: { translatedText?: string };
+    responseStatus?: number | string;
+    responseDetails?: string;
+    quotaFinished?: boolean;
+  };
+  const tr = data.responseData?.translatedText?.trim() ?? '';
+  if (
+    data.quotaFinished ||
+    Number(data.responseStatus) === 429 ||
+    /MYMEMORY WARNING|QUOTA EXCEEDED|TOO MANY REQUESTS/i.test(`${data.responseDetails ?? ''} ${tr}`)
+  ) {
+    mmPausedUntil = Date.now() + COOLDOWN_MS;
+    throw new Error('MyMemory quota exceeded');
+  }
+  if (Number(data.responseStatus ?? 200) !== 200 || !isValidTranslationText(tr)) {
+    throw new Error(data.responseDetails || 'Invalid MyMemory response');
+  }
+  return tr;
+}
 
-  inFlightWordRequests.set(cacheKey, task);
+export async function translateSingleText(params: {
+  text: string;
+  sourceLang?: string;
+  targetLang: string;
+  includeDictionary?: boolean;
+}): Promise<SingleParseResult> {
+  const clean = params.text.trim();
+  const sl = params.sourceLang && params.sourceLang !== 'unknown' ? params.sourceLang : 'auto';
+  const tl = params.targetLang || 'ru';
   try {
-    return await task;
-  } finally {
-    inFlightWordRequests.delete(cacheKey);
+    return await fetchGtx(clean, sl, tl, Boolean(params.includeDictionary));
+  } catch {
+    const out: string[] = [];
+    for (const part of splitToMaxBytes(clean, MM_MAX_BYTES)) {
+      if (out.length > 0) await delay(250);
+      out.push(await fetchMyMemory(part, sl, tl));
+    }
+    return { translation: out.join(' ').trim(), alternatives: [] };
+  }
+}
+
+async function translateChunk(
+  items: string[],
+  fetchBatchOrOne: (q: string) => Promise<string>,
+  paused: () => boolean,
+  perItemGapMs: number,
+  signal?: AbortSignal
+): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  if (!items.length || paused() || signal?.aborted) return out;
+
+  if (items.length > 1) {
+    try {
+      const parts = (await fetchBatchOrOne(items.join(DELIM))).split(/\s*\|\s*\|\s*\|\s*/).map((s) => s.trim());
+      if (parts.length === items.length && parts.every(isValidTranslationText)) {
+        items.forEach((t, i) => (out[t] = parts[i]));
+        return out;
+      }
+    } catch (e) {
+      if ((e as Error)?.name === 'AbortError' || paused()) return out;
+    }
+  }
+
+  for (let i = 0; i < items.length; i++) {
+    if (signal?.aborted || paused()) break;
+    if (i > 0) await delay(perItemGapMs, signal);
+    try {
+      const tr = await fetchBatchOrOne(items[i]);
+      if (isValidTranslationText(tr)) out[items[i]] = tr.trim();
+    } catch (e) {
+      if ((e as Error)?.name === 'AbortError' || paused()) break;
+    }
+  }
+  return out;
+}
+
+async function translateBatch(texts: string[], sl: string, tl: string, signal?: AbortSignal) {
+  const map = await translateChunk(
+    texts,
+    async (q) => (await fetchGtx(q, sl, tl, false, signal)).translation,
+    () => isPaused(gtxPausedUntil),
+    120,
+    signal
+  );
+
+  const missing = texts.filter((t) => !map[t]);
+  if (missing.length > 0 && !signal?.aborted && !isPaused(mmPausedUntil)) {
+    const mmChunks: string[][] = [];
+    let cur: string[] = [];
+    let curBytes = 0;
+    const delimBytes = byteLen(DELIM);
+    for (const t of missing) {
+      const b = byteLen(t);
+      if (cur.length > 0 && curBytes + delimBytes + b > MM_MAX_BYTES) {
+        mmChunks.push(cur);
+        cur = [t];
+        curBytes = b;
+      } else {
+        cur.push(t);
+        curBytes = cur.length === 1 ? b : curBytes + delimBytes + b;
+      }
+    }
+    if (cur.length) mmChunks.push(cur);
+
+    for (let i = 0; i < mmChunks.length; i++) {
+      if (signal?.aborted || isPaused(mmPausedUntil)) break;
+      if (i > 0) await delay(250, signal);
+      Object.assign(
+        map,
+        await translateChunk(
+          mmChunks[i],
+          async (q) => {
+            const parts = splitToMaxBytes(q, MM_MAX_BYTES);
+            const res: string[] = [];
+            for (let k = 0; k < parts.length; k++) {
+              if (k > 0) await delay(250, signal);
+              res.push(await fetchMyMemory(parts[k], sl, tl, signal));
+            }
+            return res.join(' ').trim();
+          },
+          () => isPaused(mmPausedUntil),
+          250,
+          signal
+        )
+      );
+    }
+  }
+
+  return { map, failed: Object.keys(map).length === 0 };
+}
+
+interface JobState {
+  version: number;
+  cache: Record<string, string>;
+  controller: AbortController;
+  onProgress?: ProgressFn;
+}
+
+const jobs = new Map<string, JobState>();
+
+function takeBatchTexts(cues: CueItem[], cache: Record<string, string>, maxCues: number): string[] {
+  const out: string[] = [];
+  for (const cue of cues) {
+    const norm = sanitize(cue.text);
+    if (!norm || cache[norm] || out.includes(norm)) continue;
+    const candidate = [...out, norm].join(DELIM);
+    if (out.length > 0 && (out.length >= maxCues || candidate.length > GTX_MAX_CHARS || encodeURIComponent(candidate).length > 3600)) break;
+    out.push(norm);
+  }
+  return out;
+}
+
+function mapCues(cues: CueItem[], map: Record<string, string>): Array<{ id: string; text: string }> {
+  return cues.flatMap((c) => {
+    const tr = map[sanitize(c.text)];
+    return isValidTranslationText(tr) ? [{ id: c.id, text: tr }] : [];
+  });
+}
+
+function cooldownStatus(): TranslationRuntimeStatus {
+  const now = Date.now();
+  const times = [gtxPausedUntil, mmPausedUntil].filter((t) => t > now);
+  return { state: 'cooldown', retryAt: times.length ? Math.min(...times) : now + 15_000 };
+}
+
+export function cancelCueTranslation(videoId?: string): void {
+  for (const [key, job] of jobs.entries()) {
+    if (videoId && !key.startsWith(`${videoId}:`)) continue;
+    job.version++;
+    job.controller.abort();
+    jobs.delete(key);
   }
 }
 
@@ -246,227 +328,85 @@ export async function translateCueBatch(params: {
   sourceLang?: string;
   targetLang: string;
   priorityTime?: number;
-  onBatchProgress?: (batch: TranslatedCueItem[]) => void;
-}): Promise<TranslatedCueItem[]> {
-  const { videoId, cues, priorityTime } = params;
-  if (!cues || cues.length === 0) return [];
+  forceRetry?: boolean;
+  onBatchProgress?: ProgressFn;
+}): Promise<{ translations: Array<{ id: string; text: string }>; status: TranslationRuntimeStatus }> {
+  const { videoId, cues, targetLang, priorityTime = 0, forceRetry = false, onBatchProgress } = params;
+  if (!cues.length) return { translations: [], status: { state: 'idle' } };
+  if (forceRetry) clearProviderCooldowns();
 
   const sl = params.sourceLang && params.sourceLang !== 'unknown' ? params.sourceLang : 'auto';
-  const tl = params.targetLang || 'ru';
-  const cacheKey = `free_sub_tr:${videoId}:${tl}`;
+  const tl = targetLang || 'ru';
+  const key = `${videoId}:${sl}:${tl}`;
+  const stored = await getCachedCueTranslations(videoId, tl);
 
-  let cachedTrack: CachedSubtitleTrack | undefined;
-  if (typeof chrome !== 'undefined' && chrome.storage?.local && videoId && videoId !== 'unknown') {
-    try {
-      const res = await chrome.storage.local.get(cacheKey);
-      const raw = res[cacheKey] as CachedSubtitleTrack | undefined;
-      if (raw && raw.translations && Date.now() - raw.savedAt < SUBTITLE_CACHE_TTL_MS) {
-        cachedTrack = raw;
-      }
-    } catch (err) {
-      console.warn('[YT-Lang-AI] Error checking subtitle cache:', err);
-    }
+  let job = jobs.get(key);
+  if (job) {
+    job.controller.abort();
+    job.version++;
+    job.cache = { ...stored, ...job.cache };
+    job.controller = new AbortController();
+    job.onProgress = onBatchProgress ?? job.onProgress;
+  } else {
+    job = { version: 1, cache: { ...stored }, controller: new AbortController(), onProgress: onBatchProgress };
+    jobs.set(key, job);
   }
 
-  // If already completely cached, return directly
-  if (cachedTrack) {
-    const allFound = cues.every((c) => cachedTrack?.translations[c.id]);
-    if (allFound) {
-      const results = cues.map((c) => ({
-        id: c.id,
-        text: cachedTrack?.translations[c.id] || c.text
-      }));
-      params.onBatchProgress?.(results);
-      return results;
+  const version = job.version;
+  const signal = job.controller.signal;
+  const rawIdx = cues.findIndex((c) => (c.endTime ?? (c.startTime ?? 0) + 4) >= priorityTime);
+  const curIdx = rawIdx >= 0 ? rawIdx : Math.max(0, cues.length - 1);
+
+  const runStep = async (texts: string[], emitNewOnly: boolean): Promise<'ok' | 'cooldown' | 'aborted'> => {
+    if (isPaused(gtxPausedUntil) && isPaused(mmPausedUntil)) {
+      job!.onProgress?.(emitNewOnly ? [] : mapCues(cues, job!.cache), cooldownStatus());
+      return 'cooldown';
     }
+    const { map, failed } = await translateBatch(texts, sl, tl, signal);
+    if (signal.aborted || job!.version !== version) return 'aborted';
+    if (Object.keys(map).length > 0) {
+      Object.assign(job!.cache, map);
+      void saveCachedCueTranslations(videoId, tl, map);
+      if (emitNewOnly) job!.onProgress?.(mapCues(cues, map), { state: 'translating' });
+      return 'ok';
+    }
+    if (failed) {
+      job!.onProgress?.(emitNewOnly ? [] : mapCues(cues, job!.cache), cooldownStatus());
+      return 'cooldown';
+    }
+    return 'ok';
+  };
+
+  const hotTexts = takeBatchTexts(cues.slice(curIdx, curIdx + HOT_AHEAD + 1), job.cache, HOT_AHEAD + 1);
+  if (hotTexts.length > 0) {
+    const res = await runStep(hotTexts, false);
+    if (res === 'cooldown') return { translations: mapCues(cues, job.cache), status: cooldownStatus() };
+    if (res === 'aborted') return { translations: mapCues(cues, job.cache), status: { state: 'translating' } };
   }
 
-  // Deduplicate in-flight requests for the same media & target language
-  const inFlightKey = `${videoId}:${sl}:${tl}`;
-  const existingInFlight = inFlightCueRequests.get(inFlightKey);
-  if (existingInFlight) {
-    return existingInFlight;
+  const translated = mapCues(cues, job.cache);
+  if (!cues.some((c) => sanitize(c.text) && !job!.cache[sanitize(c.text)])) {
+    job.onProgress?.(translated, { state: 'idle' });
+    jobs.delete(key);
+    return { translations: translated, status: { state: 'idle' } };
   }
 
-  const task = (async (): Promise<TranslatedCueItem[]> => {
-    const translationMap: Record<string, string> = {
-      ...(cachedTrack?.translations || {})
-    };
+  job.onProgress?.(translated, { state: 'translating' });
 
-    // If some cues are already in cache, emit initial progress immediately
-    const alreadyCachedItems = cues
-      .filter((c) => translationMap[c.id])
-      .map((c) => ({ id: c.id, text: translationMap[c.id] }));
-    if (alreadyCachedItems.length > 0) {
-      params.onBatchProgress?.(alreadyCachedItems);
-    }
-
-    // Build batches of missing cues
-    const missingCues = cues.filter((c) => !translationMap[c.id]);
-    if (missingCues.length === 0) {
-      return cues.map((c) => ({ id: c.id, text: translationMap[c.id] || c.text }));
-    }
-
-    // Chunk missing cues into batches of CUE_BATCH_SIZE (25)
-    const batches: CueItem[][] = [];
-    for (let i = 0; i < missingCues.length; i += CUE_BATCH_SIZE) {
-      batches.push(missingCues.slice(i, i + CUE_BATCH_SIZE));
-    }
-
-    // Prioritize batches around priorityTime
-    if (typeof priorityTime === 'number' && priorityTime > 0 && batches.length > 1) {
-      // Find the batch closest to priorityTime
-      let closestBatchIdx = 0;
-      let minDistance = Number.POSITIVE_INFINITY;
-
-      for (let i = 0; i < batches.length; i++) {
-        const firstCue = batches[i][0];
-        const lastCue = batches[i][batches[i].length - 1];
-        const cueStart = firstCue.startTime ?? 0;
-        const cueEnd = lastCue.endTime ?? (cueStart + 5);
-
-        if (priorityTime >= cueStart && priorityTime <= cueEnd) {
-          closestBatchIdx = i;
-          break;
-        }
-
-        const dist = Math.min(
-          Math.abs(priorityTime - cueStart),
-          Math.abs(priorityTime - cueEnd)
-        );
-        if (dist < minDistance) {
-          minDistance = dist;
-          closestBatchIdx = i;
-        }
+  void (async () => {
+    const ordered = [...cues.slice(curIdx + HOT_AHEAD + 1), ...cues.slice(0, curIdx).reverse()];
+    while (!signal.aborted && job!.version === version) {
+      const batch = takeBatchTexts(ordered, job!.cache, BG_BATCH);
+      if (!batch.length) {
+        job!.onProgress?.([], { state: 'idle' });
+        break;
       }
-
-      // Reorder batches: closest first, then +1, -1, +2, -2, etc.
-      const prioritizedBatches: CueItem[][] = [];
-      const usedIndices = new Set<number>();
-
-      const addIdx = (idx: number) => {
-        if (idx >= 0 && idx < batches.length && !usedIndices.has(idx)) {
-          usedIndices.add(idx);
-          prioritizedBatches.push(batches[idx]);
-        }
-      };
-
-      addIdx(closestBatchIdx);
-      for (let offset = 1; offset < batches.length; offset++) {
-        addIdx(closestBatchIdx + offset);
-        addIdx(closestBatchIdx - offset);
-      }
-
-      // Process in prioritized order
-      for (const batch of prioritizedBatches) {
-        const batchResult = await translateSingleCueBatch(batch, sl, tl);
-        for (const item of batchResult) {
-          translationMap[item.id] = item.text;
-        }
-        params.onBatchProgress?.(batchResult);
-        saveProgress(videoId, cacheKey, translationMap);
-      }
-    } else {
-      // Process in natural chronological order
-      for (const batch of batches) {
-        const batchResult = await translateSingleCueBatch(batch, sl, tl);
-        for (const item of batchResult) {
-          translationMap[item.id] = item.text;
-        }
-        params.onBatchProgress?.(batchResult);
-        saveProgress(videoId, cacheKey, translationMap);
-      }
+      await delay(BG_DELAY_MS, signal);
+      if (signal.aborted || job!.version !== version) break;
+      if ((await runStep(batch, true)) !== 'ok') break;
     }
-
-    return cues.map((c) => ({
-      id: c.id,
-      text: translationMap[c.id] || c.text
-    }));
+    if (job!.version === version) jobs.delete(key);
   })();
 
-  inFlightCueRequests.set(inFlightKey, task);
-  try {
-    return await task;
-  } finally {
-    inFlightCueRequests.delete(inFlightKey);
-  }
-}
-
-function saveProgress(videoId: string, cacheKey: string, translations: Record<string, string>): void {
-  if (typeof chrome !== 'undefined' && chrome.storage?.local && videoId && videoId !== 'unknown') {
-    const toSave: CachedSubtitleTrack = {
-      savedAt: Date.now(),
-      translations
-    };
-    void chrome.storage.local.set({ [cacheKey]: toSave });
-  }
-}
-
-async function translateSingleCueBatch(
-  batch: CueItem[],
-  sourceLang: string,
-  targetLang: string
-): Promise<TranslatedCueItem[]> {
-  if (batch.length === 0) return [];
-
-  if (batch.length === 1) {
-    try {
-      const res = await fetchSingleText(batch[0].text, sourceLang, targetLang, false);
-      return [{ id: batch[0].id, text: res.translation || batch[0].text }];
-    } catch {
-      return [{ id: batch[0].id, text: batch[0].text }];
-    }
-  }
-
-  // Join batch with delimiter
-  const joinedText = batch.map((c) => c.text.replace(/[\r\n]+/g, ' ')).join(BATCH_DELIMITER);
-
-  try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(
-      sourceLang
-    )}&tl=${encodeURIComponent(targetLang)}&dt=t&q=${encodeURIComponent(joinedText)}`;
-
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Batch request failed with HTTP ${response.status}`);
-    }
-
-    const raw: unknown = await response.json();
-    if (!Array.isArray(raw) || !Array.isArray(raw[0])) {
-      throw new Error('Invalid batch translation format');
-    }
-
-    const fullTranslated = (raw[0] as Array<[string | null]>)
-      .map((seg) => (Array.isArray(seg) && typeof seg[0] === 'string' ? seg[0] : ''))
-      .join('');
-
-    const parts = fullTranslated.split(/\s*\|\|\|\s*/);
-
-    if (parts.length === batch.length) {
-      return batch.map((cue, idx) => ({
-        id: cue.id,
-        text: parts[idx].trim() || cue.text
-      }));
-    }
-
-    console.warn(
-      `[YT-Lang-AI] Batch delimiter mismatch: expected ${batch.length}, got ${parts.length}. Using fallback.`
-    );
-  } catch (err) {
-    console.warn('[YT-Lang-AI] Batch translation failed, executing fallback:', err);
-  }
-
-  // Safe line-by-line fallback for this batch
-  const fallbackResults = await Promise.all(
-    batch.map(async (cue) => {
-      try {
-        const res = await fetchSingleText(cue.text, sourceLang, targetLang, false);
-        return { id: cue.id, text: res.translation || cue.text };
-      } catch {
-        return { id: cue.id, text: cue.text };
-      }
-    })
-  );
-
-  return fallbackResults;
+  return { translations: translated, status: { state: 'translating' } };
 }

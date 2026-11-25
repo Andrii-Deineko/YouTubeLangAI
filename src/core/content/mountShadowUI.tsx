@@ -1,6 +1,7 @@
 import { StrictMode, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import coreCss from '../styles/index.css?inline';
+import type { TranslationRuntimeStatus } from '../types/messages';
 import type { UserSettings } from '../types/settings';
 import type { SubtitleCue, TrackMetadata } from '../types/subtitles';
 import { PlayerControls } from '../components/PlayerControls';
@@ -12,6 +13,7 @@ export interface ShadowUIState {
   trackMeta: TrackMetadata | null;
   cueCount: number;
   captionRateLimitedUntil?: number;
+  translationStatus?: TranslationRuntimeStatus;
   primaryCue: SubtitleCue | null;
   translatedCue: SubtitleCue | null;
   altPressed: boolean;
@@ -20,6 +22,7 @@ export interface ShadowUIState {
   onUpdateSettings: (partial: Partial<UserSettings>) => void;
   onRepeatCue: () => void;
   onResetPosition: () => void;
+  onRetryTranslation?: () => void;
   onSelectTarget: (selection: WordSelectionPayload) => void;
 }
 
@@ -45,6 +48,7 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
     trackMeta,
     cueCount,
     captionRateLimitedUntil,
+    translationStatus,
     primaryCue,
     translatedCue,
     altPressed,
@@ -53,6 +57,7 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
     onUpdateSettings,
     onRepeatCue,
     onResetPosition,
+    onRetryTranslation,
     onSelectTarget
   } = state;
 
@@ -71,11 +76,13 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
         trackMeta={trackMeta}
         cueCount={cueCount}
         captionRateLimitedUntil={captionRateLimitedUntil}
+        translationStatus={translationStatus}
         altPressed={altPressed}
         hasActivePopup={Boolean(selectedTarget || popupElement)}
         onUpdateSettings={onUpdateSettings}
         onRepeatCue={onRepeatCue}
         onResetPosition={onResetPosition}
+        onRetryTranslation={onRetryTranslation}
       />
 
       {settings.enabled && !isAdShowing && (
@@ -83,6 +90,7 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
           <SubtitleOverlay
             primaryCue={primaryCue}
             translatedCue={translatedCue}
+            translationStatus={translationStatus}
             showDualSubtitles={settings.showDualSubtitles}
             showTranslation={settings.showTranslation}
             subtitleTrackMode={settings.subtitleTrackMode}

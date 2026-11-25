@@ -1,4 +1,4 @@
-import type { Json3Event, Json3Response, SubtitleCue } from '../types/subtitles';
+import { isValidTranslationText, type Json3Event, type Json3Response, type SubtitleCue } from '../types/subtitles';
 import {
   cleanSubtitleText,
   normalizeWord,
@@ -75,10 +75,11 @@ export class SubtitleEngine {
     if (!batch || batch.length === 0) return false;
     const map = new Map<string, string>();
     for (const item of batch) {
-      if (item && item.id && item.text) {
-        map.set(item.id, item.text);
+      if (item && item.id && isValidTranslationText(item.text)) {
+        map.set(item.id, item.text.trim());
       }
     }
+    if (map.size === 0) return false;
     let changed = false;
     this.cues = this.cues.map((cue) => {
       const tr = map.get(cue.id);
@@ -99,12 +100,8 @@ export class SubtitleEngine {
     primaryCues: SubtitleCue[]
   ): void {
     if (!batch || batch.length === 0) return;
-    const map = new Map<string, string>();
-    for (const item of batch) {
-      if (item && item.id && item.text) {
-        map.set(item.id, item.text);
-      }
-    }
+    const validItems = batch.filter((item) => item && item.id && isValidTranslationText(item.text));
+    if (validItems.length === 0) return;
 
     const primaryMap = new Map<string, SubtitleCue>();
     for (const c of primaryCues) {
@@ -116,17 +113,19 @@ export class SubtitleEngine {
       existingMap.set(c.id, c);
     }
 
-    for (const item of batch) {
+    for (const item of validItems) {
       const orig = primaryMap.get(item.id);
       if (orig) {
         const cleanText = cleanSubtitleText(item.text);
-        existingMap.set(item.id, {
-          id: `tr-${item.id}`,
+        if (!isValidTranslationText(cleanText)) continue;
+        const translatedId = `tr-${item.id}`;
+        existingMap.set(translatedId, {
+          id: translatedId,
           startTime: orig.startTime,
           endTime: orig.endTime,
           text: cleanText,
           translation: cleanText,
-          tokens: tokenizeCueText(`tr-${item.id}`, cleanText, orig.startTime, orig.endTime)
+          tokens: tokenizeCueText(translatedId, cleanText, orig.startTime, orig.endTime)
         });
       }
     }

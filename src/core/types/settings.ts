@@ -156,7 +156,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
     apiKey: '',
     model: 'gemini-1.5-flash'
   },
-  translationProvider: 'mymemory',
+  translationProvider: 'googleDict',
   myMemoryEmail: '',
   deeplApiKey: '',
   cinemaModuleEnabled: false,

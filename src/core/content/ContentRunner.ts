@@ -43,6 +43,8 @@ export class ContentRunner {
   private savedWordKeys = new Set<string>();
   private captionRateLimitedUntil = 0;
   private pendingLiveTrackData: CapturedTrackData | null = null;
+  private pendingTranslationCueIds = new Set<string>();
+  private lastTranslationWindowCenter = Number.NEGATIVE_INFINITY;
 
   private mountedUI: MountedShadowUI | null = null;
   private currentPlayerEl: HTMLElement | null = null;
@@ -93,6 +95,8 @@ export class ContentRunner {
         newSettings.myMemoryEmail !== prevMyMemoryEmail ||
         newSettings.deeplApiKey !== prevDeepLApiKey
       ) {
+        this.pendingTranslationCueIds.clear();
+        this.lastTranslationWindowCenter = Number.NEGATIVE_INFINITY;
         this.primaryEngine.clearTranslations();
         this.translatedEngine.clear();
         this.triggerSubtitleTranslation();
@@ -236,6 +240,8 @@ export class ContentRunner {
       const nextVideoId = data.primaryMeta?.videoId ?? '';
       if (nextVideoId && nextVideoId !== this.translatedVideoId) {
         this.translatedVideoId = nextVideoId;
+        this.pendingTranslationCueIds.clear();
+        this.lastTranslationWindowCenter = Number.NEGATIVE_INFINITY;
         this.translatedEngine.clear();
         this.activeTranslatedCue = null;
       }
@@ -272,7 +278,9 @@ export class ContentRunner {
     this.syncNativeCaptions();
     this.attachToPlayer();
     this.renderUI();
-    this.triggerSubtitleTranslation();
+    if (!data.skipTranslation) {
+      this.triggerSubtitleTranslation();
+    }
   }
 
   private createVideoController(): VideoController {
@@ -332,10 +340,25 @@ export class ContentRunner {
           }
           this.renderUI();
         }
+
+        if (
+          isTranslationVisible &&
+          this.trackMeta &&
+          !this.translatedEngine.hasNativeCues() &&
+          Math.abs(timeSec - this.lastTranslationWindowCenter) >= 60
+        ) {
+          this.lastTranslationWindowCenter = timeSec;
+          this.requestBackgroundTranslation(
+            this.trackMeta?.videoId || window.location.hostname,
+            this.trackMeta?.lang ?? 'auto',
+            this.settings.nativeLang || 'ru'
+          );
+        }
       },
       onSeeked: () => {
         this.lastAutoPausedCueId = null;
         this.pendingLiveTrackData = null;
+        this.lastTranslationWindowCenter = Number.NEGATIVE_INFINITY;
       },
       onRepeatCue: () => this.handleRepeatCue(),
       onPreviousCue: () => this.handlePreviousCue(),
@@ -500,7 +523,11 @@ export class ContentRunner {
           this.trackMeta?.lang ?? 'auto',
           this.settings.nativeLang
         );
-        if (res.ok) {
+        if (
+          res.ok &&
+          !res.data.translationUnavailable &&
+          Boolean(res.data.translation.trim())
+        ) {
           translation = res.data.translation;
         }
       } catch {
@@ -754,10 +781,21 @@ export class ContentRunner {
     targetLang: string
   ): void {
     const primaryCues = this.primaryEngine.getCues();
-    const untranslated = primaryCues.filter((c) => !c.translation);
+    const currentTime = this.videoController?.getCurrentTime() ?? 0;
+    const windowStart = Math.max(0, currentTime - 30);
+    const windowEnd = currentTime + 180;
+    const untranslated = primaryCues
+      .filter(
+        (cue) =>
+          !cue.translation &&
+          !this.pendingTranslationCueIds.has(cue.id) &&
+          cue.endTime >= windowStart &&
+          cue.startTime <= windowEnd
+      )
+      .slice(0, 50);
     if (untranslated.length === 0) return;
 
-    const curTime = this.videoController?.getCurrentTime() ?? 0;
+    for (const cue of untranslated) this.pendingTranslationCueIds.add(cue.id);
     const request: RuntimeRequest = {
       type: 'FREE_TRANSLATE_CUES',
       payload: {
@@ -773,11 +811,12 @@ export class ContentRunner {
         })),
         sourceLang,
         targetLang,
-        priorityTime: curTime
+        priorityTime: currentTime
       }
     };
 
     chrome.runtime.sendMessage(request, (response: FreeTranslateCuesResponse | undefined) => {
+      for (const cue of untranslated) this.pendingTranslationCueIds.delete(cue.id);
       if (this.isDestroyed || chrome.runtime.lastError || !response || !response.ok) return;
       if (Array.isArray(response.data) && response.data.length > 0) {
         this.primaryEngine.applyTranslations(response.data);

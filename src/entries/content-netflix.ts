@@ -26,7 +26,20 @@ if (!moduleWindow[stateKey]) {
   };
 
   sync();
-  const observer = new MutationObserver(sync);
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  // Netflix is an SPA. A lightweight URL poll avoids observing every mutation
+  // in the player subtree (captions alone can generate many mutations/second).
+  const navigationTimer = window.setInterval(sync, 1000);
   window.addEventListener('popstate', sync);
+  window.addEventListener('hashchange', sync);
+  window.addEventListener(
+    'pagehide',
+    () => {
+      window.clearInterval(navigationTimer);
+      window.removeEventListener('popstate', sync);
+      window.removeEventListener('hashchange', sync);
+      state.teardown?.();
+      state.teardown = null;
+    },
+    { once: true }
+  );
 }

@@ -22,6 +22,7 @@ import type {
   RuntimeRequest
 } from '../types/messages';
 import type { UserSettings } from '../types/settings';
+import type { TranslationProvider } from '../types/settings';
 import type { AIExplanation, QuickTranslationResult } from '../types/vocabulary';
 import type { WordSelectionPayload } from './SubtitleOverlay';
 
@@ -91,9 +92,10 @@ const contentInFlight = new Map<string, Promise<QuickTranslateResponse>>();
 function fetchQuickTranslate(
   text: string,
   sourceLang: string,
-  nativeLang: string
+  nativeLang: string,
+  provider: TranslationProvider
 ): Promise<QuickTranslateResponse> {
-  const cacheKey = `${sourceLang}:${nativeLang}:${text.trim().toLowerCase()}`;
+  const cacheKey = `${provider}:${sourceLang}:${nativeLang}:${text.trim().toLowerCase()}`;
   const cached = contentQuickTranslateCache.get(cacheKey);
   if (cached) {
     return Promise.resolve({ ok: true, data: cached });
@@ -113,7 +115,7 @@ function fetchQuickTranslate(
     }
   })
     .then((res) => {
-      if (res.ok) {
+      if (res.ok && !res.data.translationUnavailable && res.data.translation.trim()) {
         if (contentQuickTranslateCache.size > 200) {
           const firstKey = contentQuickTranslateCache.keys().next().value;
           if (firstKey) contentQuickTranslateCache.delete(firstKey);
@@ -187,7 +189,7 @@ export function WordPopup({
   const activeRequestKeyRef = useRef('');
   const popupRef = useRef<HTMLDivElement | null>(null);
 
-  const requestKey = `${videoId}:${selection.cue.id}:${selection.target}`;
+  const requestKey = `${settings.translationProvider}:${videoId}:${selection.cue.id}:${selection.target}`;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -245,7 +247,12 @@ export function WordPopup({
     }
 
     // 1. Fetch word translation
-    void fetchQuickTranslate(selection.target, sourceLang, settings.nativeLang)
+    void fetchQuickTranslate(
+      selection.target,
+      sourceLang,
+      settings.nativeLang,
+      settings.translationProvider
+    )
       .then((res) => {
         if (activeRequestKeyRef.current !== requestKey) return;
         if (res.ok) {
@@ -271,7 +278,12 @@ export function WordPopup({
       if (cleanCueText.toLowerCase() === cleanWord.toLowerCase()) {
         setSentenceLoading(false);
       } else {
-        void fetchQuickTranslate(cleanCueText, sourceLang, settings.nativeLang)
+        void fetchQuickTranslate(
+          cleanCueText,
+          sourceLang,
+          settings.nativeLang,
+          settings.translationProvider
+        )
           .then((res) => {
             if (activeRequestKeyRef.current !== requestKey) return;
             if (res.ok && res.data.translation) {
@@ -292,6 +304,7 @@ export function WordPopup({
     selection.cue.text,
     sourceLang,
     settings.nativeLang,
+    settings.translationProvider,
     initialContextTranslation
   ]);
 

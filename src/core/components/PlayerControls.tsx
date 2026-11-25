@@ -183,11 +183,20 @@ function useClampedPopover(
         setStyle({
           left: left - p.left,
           top: top - p.top,
+          right: 'auto',
+          bottom: 'auto',
           maxWidth: 'calc(100vw - 16px)',
           visibility: 'visible'
         });
       } else {
-        setStyle({ left, top, maxWidth: 'calc(100vw - 16px)', visibility: 'visible' });
+        setStyle({
+          left,
+          top,
+          right: 'auto',
+          bottom: 'auto',
+          maxWidth: 'calc(100vw - 16px)',
+          visibility: 'visible'
+        });
       }
     };
 
@@ -240,6 +249,13 @@ export function PlayerControls({
   const timerLeaveTimeoutRef = useRef<number | null>(null);
   const fontLeaveTimeoutRef = useRef<number | null>(null);
 
+  const clearLeaveTimeout = (ref: { current: number | null }): void => {
+    if (ref.current !== null) {
+      window.clearTimeout(ref.current);
+      ref.current = null;
+    }
+  };
+
   useEffect(() => {
     return () => {
       if (trackLeaveTimeoutRef.current !== null) {
@@ -262,6 +278,12 @@ export function PlayerControls({
       window.clearTimeout(trackLeaveTimeoutRef.current);
       trackLeaveTimeoutRef.current = null;
     }
+    clearLeaveTimeout(modeLeaveTimeoutRef);
+    clearLeaveTimeout(timerLeaveTimeoutRef);
+    clearLeaveTimeout(fontLeaveTimeoutRef);
+    setIsModeMenuOpen(false);
+    setIsTimerMenuOpen(false);
+    setIsFontMenuOpen(false);
     setIsTrackMenuOpen(true);
   };
 
@@ -281,6 +303,12 @@ export function PlayerControls({
       window.clearTimeout(modeLeaveTimeoutRef.current);
       modeLeaveTimeoutRef.current = null;
     }
+    clearLeaveTimeout(trackLeaveTimeoutRef);
+    clearLeaveTimeout(timerLeaveTimeoutRef);
+    clearLeaveTimeout(fontLeaveTimeoutRef);
+    setIsTrackMenuOpen(false);
+    setIsTimerMenuOpen(false);
+    setIsFontMenuOpen(false);
     setIsModeMenuOpen(true);
   };
 
@@ -300,6 +328,12 @@ export function PlayerControls({
       window.clearTimeout(timerLeaveTimeoutRef.current);
       timerLeaveTimeoutRef.current = null;
     }
+    clearLeaveTimeout(trackLeaveTimeoutRef);
+    clearLeaveTimeout(modeLeaveTimeoutRef);
+    clearLeaveTimeout(fontLeaveTimeoutRef);
+    setIsTrackMenuOpen(false);
+    setIsModeMenuOpen(false);
+    setIsFontMenuOpen(false);
     setIsTimerMenuOpen(true);
   };
 
@@ -318,6 +352,12 @@ export function PlayerControls({
       window.clearTimeout(fontLeaveTimeoutRef.current);
       fontLeaveTimeoutRef.current = null;
     }
+    clearLeaveTimeout(trackLeaveTimeoutRef);
+    clearLeaveTimeout(modeLeaveTimeoutRef);
+    clearLeaveTimeout(timerLeaveTimeoutRef);
+    setIsTrackMenuOpen(false);
+    setIsModeMenuOpen(false);
+    setIsTimerMenuOpen(false);
     setIsFontMenuOpen(true);
   };
 
@@ -592,7 +632,7 @@ export function PlayerControls({
 
   return (
     <div
-      className={`absolute right-3 top-3 z-20 flex items-center rounded-full shadow-lg select-none transition-opacity duration-300 ${scale.containerClass} ${
+      className={`absolute right-3 top-3 z-50 flex items-center rounded-full shadow-lg select-none transition-opacity duration-300 ${scale.containerClass} ${
         isVisible ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
       }`}
       style={{
@@ -662,7 +702,7 @@ export function PlayerControls({
                   trackDropdown.popoverRef.current = node;
                   trackDropdownRef.current = node;
                 }}
-                className={`absolute left-0 top-full z-30 flex items-center gap-1.5 rounded-2xl border ${scale.dropdownPadClass} shadow-2xl backdrop-blur-md select-none`}
+                className={`absolute left-0 top-full z-50 flex items-center gap-1.5 rounded-2xl border ${scale.dropdownPadClass} shadow-2xl backdrop-blur-md select-none before:absolute before:-top-1.5 before:left-0 before:h-1.5 before:w-full before:content-['']`}
                 style={{
                   backgroundColor: 'rgba(15, 17, 23, 0.95)',
                   borderColor: 'rgba(255, 255, 255, 0.16)',
@@ -760,7 +800,7 @@ export function PlayerControls({
                   modeDropdown.popoverRef.current = node;
                   modeDropdownRef.current = node;
                 }}
-                className={`absolute right-0 top-full z-30 flex items-center gap-1.5 rounded-2xl border ${scale.dropdownPadClass} shadow-2xl backdrop-blur-md select-none`}
+                className={`absolute right-0 top-full z-50 flex items-center gap-1.5 rounded-2xl border ${scale.dropdownPadClass} shadow-2xl backdrop-blur-md select-none before:absolute before:-top-1.5 before:left-0 before:h-1.5 before:w-full before:content-['']`}
                 style={{
                   backgroundColor: 'rgba(15, 17, 23, 0.95)',
                   borderColor: 'rgba(255, 255, 255, 0.16)',
@@ -856,7 +896,7 @@ export function PlayerControls({
             {isTimerMenuOpen && (
               <div
                 ref={timerDropdown.popoverRef}
-                className={`absolute right-0 top-full z-30 w-44 rounded-2xl border ${scale.dropdownPadClass} p-2 shadow-2xl backdrop-blur-md select-none`}
+                className={`absolute right-0 top-full z-50 w-44 rounded-2xl border ${scale.dropdownPadClass} p-2 shadow-2xl backdrop-blur-md select-none before:absolute before:-top-1.5 before:left-0 before:h-1.5 before:w-full before:content-['']`}
                 style={{
                   backgroundColor: 'rgba(15, 17, 23, 0.96)',
                   borderColor: 'rgba(255, 255, 255, 0.16)',
@@ -971,7 +1011,7 @@ export function PlayerControls({
             {isFontMenuOpen && (
               <div
                 ref={fontDropdown.popoverRef}
-                className="absolute right-0 top-full z-30 select-none animate-in fade-in duration-150"
+                className="absolute right-0 top-full z-50 select-none animate-in fade-in duration-150 before:absolute before:-top-1.5 before:left-0 before:h-1.5 before:w-full before:content-['']"
                 style={fontDropdown.style}
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}

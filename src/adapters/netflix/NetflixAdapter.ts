@@ -13,13 +13,6 @@ function readCaptionText(): string {
   return [...new Set(lines)].join('\n');
 }
 
-function touchesCaptions(node: Node): boolean {
-  const element = node instanceof Element ? node : node.parentElement;
-  return Boolean(
-    element?.matches(CAPTION_ROOT_SELECTOR) || element?.closest(CAPTION_ROOT_SELECTOR)
-  );
-}
-
 export class NetflixAdapter implements PlatformAdapter {
   readonly id = 'netflix' as const;
   readonly name = 'Netflix';
@@ -27,6 +20,8 @@ export class NetflixAdapter implements PlatformAdapter {
 
   private cues: SubtitleCue[] = [];
   private cueSequence = 0;
+  private timelineGeneration = 0;
+  private lastObservedTime = 0;
   private currentVideoId = '';
   private nativeCaptionsSuppressed = false;
 
@@ -86,23 +81,54 @@ export class NetflixAdapter implements PlatformAdapter {
   init(callbacks: PlatformSessionCallbacks): () => void {
     let lastText = '';
     let debounceTimer: number | null = null;
+    let observedVideo: HTMLVideoElement | null = null;
+
+    const handleSeeking = (): void => {
+      if (!observedVideo || observedVideo.currentTime >= this.lastObservedTime - 0.05) return;
+      this.cues = [];
+      this.cueSequence = 0;
+      this.timelineGeneration += 1;
+      this.lastObservedTime = observedVideo.currentTime;
+      // Force the current caption to be emitted again even if the text before and
+      // after the seek happens to be identical.
+      lastText = '';
+    };
+
+    const observeVideo = (video: HTMLVideoElement | null): void => {
+      if (video === observedVideo) return;
+      observedVideo?.removeEventListener('seeking', handleSeeking);
+      observedVideo = video;
+      observedVideo?.addEventListener('seeking', handleSeeking);
+    };
 
     const emitText = (text: string): void => {
       const video = this.findVideoElement();
+      observeVideo(video);
       const time = video?.currentTime ?? 0;
       const videoId = this.getVideoId();
       if (videoId !== this.currentVideoId) {
         this.currentVideoId = videoId;
         this.cues = [];
         this.cueSequence = 0;
+        this.timelineGeneration = 0;
+        this.lastObservedTime = time;
+      } else if (time < this.lastObservedTime - 0.05) {
+        // A backward seek starts a fresh live timeline. Keeping future cues in the
+        // same sorted array creates overlaps and duplicate cue ids after rewind.
+        this.cues = [];
+        this.cueSequence = 0;
+        this.timelineGeneration += 1;
       }
+      this.lastObservedTime = time;
 
       const previous = this.cues[this.cues.length - 1];
+      const nextCueStart =
+        text && previous ? Math.max(time, previous.startTime + 0.06) : time;
       if (previous) {
         this.cues[this.cues.length - 1] = this.createCue(
           previous.text,
           previous.startTime,
-          Math.max(time - 0.02, previous.startTime + 0.2),
+          Math.max(nextCueStart - 0.01, previous.startTime + 0.05),
           previous.index ?? this.cues.length - 1,
           previous.id,
           previous.translation
@@ -110,7 +136,9 @@ export class NetflixAdapter implements PlatformAdapter {
       }
 
       if (text) {
-        this.cues.push(this.createCue(text, time, time + 30, this.cues.length));
+        this.cues.push(
+          this.createCue(text, nextCueStart, nextCueStart + 30, this.cues.length)
+        );
       }
 
       const metadata: TrackMetadata = {
@@ -125,7 +153,10 @@ export class NetflixAdapter implements PlatformAdapter {
       callbacks.onTracksLoaded({
         primaryCues: [...this.cues],
         primaryMeta: metadata,
-        liveCueBoundary: Boolean(previous)
+        liveCueBoundary: Boolean(previous),
+        // An empty caption only closes the active cue. Its translation already
+        // exists, so do not restart cache reads and provider requests.
+        skipTranslation: !text
       });
       callbacks.onVideoElementChange?.(video);
     };
@@ -137,12 +168,7 @@ export class NetflixAdapter implements PlatformAdapter {
       emitText(text);
     };
 
-    const observer = new MutationObserver((mutations) => {
-      const relevant = mutations.some((mutation) => {
-        if (touchesCaptions(mutation.target)) return true;
-        return [...mutation.addedNodes, ...mutation.removedNodes].some(touchesCaptions);
-      });
-      if (!relevant) return;
+    const observer = new MutationObserver(() => {
       if (debounceTimer !== null) window.clearTimeout(debounceTimer);
       debounceTimer = window.setTimeout(() => {
         debounceTimer = null;
@@ -150,17 +176,31 @@ export class NetflixAdapter implements PlatformAdapter {
       }, 50);
     });
 
-    observer.observe(document.documentElement, {
-      subtree: true,
-      childList: true,
-      characterData: true
-    });
-
-    lastText = readCaptionText();
-    if (lastText) emitText(lastText);
+    let observedCaptionRoot: Element | null = null;
+    const syncCaptionObserver = (): void => {
+      const captionRoot = document.querySelector(CAPTION_ROOT_SELECTOR);
+      if (captionRoot !== observedCaptionRoot) {
+        observer.disconnect();
+        observedCaptionRoot = captionRoot;
+        if (captionRoot) {
+          observer.observe(captionRoot, {
+            subtree: true,
+            childList: true,
+            characterData: true
+          });
+        }
+      }
+      observeVideo(this.findVideoElement());
+      emitIfChanged();
+    };
+    const captionRootTimer = window.setInterval(syncCaptionObserver, 500);
+    syncCaptionObserver();
 
     return () => {
       observer.disconnect();
+      window.clearInterval(captionRootTimer);
+      observedVideo?.removeEventListener('seeking', handleSeeking);
+      observedVideo = null;
       if (debounceTimer !== null) window.clearTimeout(debounceTimer);
       this.suppressNativeSubtitles(false);
     };
@@ -194,8 +234,10 @@ export class NetflixAdapter implements PlatformAdapter {
     id?: string,
     translation?: string
   ): SubtitleCue {
-    const cueId = id ?? `netflix-cue-${this.cueSequence++}-${Math.round(startTime * 1000)}`;
-    const safeEnd = Math.max(endTime, startTime + 0.2);
+    const cueId =
+      id ??
+      `netflix-cue-${this.timelineGeneration}-${this.cueSequence++}-${Math.round(startTime * 1000)}`;
+    const safeEnd = Math.max(endTime, startTime + 0.05);
     return {
       id: cueId,
       index,

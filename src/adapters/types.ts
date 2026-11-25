@@ -7,6 +7,8 @@ export interface CapturedTrackData {
   translatedMeta?: TrackMetadata;
   rateLimitedUntil?: number;
   liveCueBoundary?: boolean;
+  /** Update cue timing/UI without starting another translation request. */
+  skipTranslation?: boolean;
 }
 
 export interface PlatformSessionCallbacks {

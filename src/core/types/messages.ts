@@ -123,6 +123,14 @@ export type RuntimeRequest =
         sourceLang?: string;
         targetLang: string;
         priorityTime?: number;
+        forceRetry?: boolean;
+      };
+    }
+  | {
+      type: 'CANCEL_FREE_TRANSLATION';
+      payload?: {
+        videoId?: string;
+        targetLang?: string;
       };
     }
   | {
@@ -200,6 +208,18 @@ export type FetchModelsResponse = RuntimeResponse<string[]>;
 export type FetchSubtitleTextResponse = { text?: string; error?: string };
 export type ScreenshotResponse = { dataUrl?: string; error?: string };
 export type InjectMainInterceptorResponse = { ok: boolean; data?: boolean; error?: string };
+export interface TranslationRuntimeStatus {
+  state: 'idle' | 'translating' | 'cooldown' | 'error';
+  provider?: 'google' | 'mymemory' | 'none';
+  retryAt?: number;
+  message?: string;
+}
+
+export interface FreeTranslateCuesResult {
+  translations: Array<{ id: string; text: string }>;
+  status: TranslationRuntimeStatus;
+}
+
 export type FreeTranslateWordResponse = RuntimeResponse<FreeTranslateWordResult>;
-export type FreeTranslateCuesResponse = RuntimeResponse<Array<{ id: string; text: string }>>;
+export type FreeTranslateCuesResponse = RuntimeResponse<FreeTranslateCuesResult>;
 export type CinemaModuleStatusResponse = RuntimeResponse<CinemaModuleStatus>;

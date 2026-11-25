@@ -21,7 +21,9 @@ import {
   type TextOutline,
   type UserSettings
 } from '../types/settings';
+import type { TranslationRuntimeStatus } from '../types/messages';
 import type { SubtitleCue, WordToken } from '../types/subtitles';
+import { isValidTranslationText } from '../utils/translationCache';
 
 const FONT_FAMILIES: Record<FontFamily, string> = {
   sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
@@ -54,6 +56,7 @@ export interface WordSelectionPayload {
 interface SubtitleOverlayProps {
   primaryCue: SubtitleCue | null;
   translatedCue: SubtitleCue | null;
+  translationStatus?: TranslationRuntimeStatus;
   showDualSubtitles?: boolean;
   showTranslation?: boolean;
   subtitleTrackMode?: SubtitleTrackMode;
@@ -170,6 +173,7 @@ type ResizeHandle =
 export function SubtitleOverlay({
   primaryCue,
   translatedCue,
+  translationStatus,
   showDualSubtitles,
   showTranslation,
   subtitleTrackMode,
@@ -782,6 +786,20 @@ export function SubtitleOverlay({
 
   const isDraggingOrResizing = isDragging || isResizing;
   const showResizeFrame = isBoxHovered || isDragging || isResizing || hoveredHandle !== null;
+  const candidateTranslation =
+    primaryCue?.translation || translatedCue?.translation || translatedCue?.text;
+  const validTranslation = isValidTranslationText(candidateTranslation)
+    ? candidateTranslation
+    : null;
+  const isTranslationCooldown =
+    !isOriginalOnly &&
+    Boolean(primaryCue) &&
+    !validTranslation &&
+    (translationStatus?.state === 'cooldown' || translationStatus?.state === 'error');
+  const hasModeHint =
+    (isTranslationOnly && isAltRevealed) ||
+    (!isTranslationOnly && isBlurMode && !(altPressed || Boolean(selectedTarget))) ||
+    (isHiddenMode && isRevealedInHidden);
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 overflow-visible">
@@ -901,6 +919,12 @@ export function SubtitleOverlay({
             </div>
           )}
 
+          {!hasModeHint && isTranslationCooldown && (
+            <div className="text-[11px] leading-tight text-slate-400 opacity-75 select-none">
+              Повтор перевода…
+            </div>
+          )}
+
           <div className="w-8" aria-hidden="true" />
         </div>
 
@@ -933,7 +957,7 @@ export function SubtitleOverlay({
             {/* Translation Line: shown in dual mode and translation-only mode */}
             {!isOriginalOnly && (
               <>
-                {Boolean(primaryCue?.translation || translatedCue?.translation || translatedCue?.text) ? (
+                {validTranslation ? (
                   <div
                     className={`ytai-blur-target select-none ${
                       isTranslationOnly ? 'font-medium' : ''
@@ -948,19 +972,23 @@ export function SubtitleOverlay({
                       ...textTypographyStyle
                     }}
                   >
-                    {primaryCue?.translation || translatedCue?.translation || translatedCue?.text}
+                    {validTranslation}
                   </div>
                 ) : primaryCue && isTranslationOnly ? (
                   <div
-                    className="select-none text-slate-400 opacity-60 animate-pulse tracking-widest text-center"
+                    className={`select-none text-slate-400 text-center ${
+                      isTranslationCooldown
+                        ? 'opacity-70 text-xs'
+                        : 'opacity-60 animate-pulse tracking-widest'
+                    }`}
                     style={{
-                      fontSize: `${translatedFontSize}px`,
+                      fontSize: isTranslationCooldown ? '12px' : `${translatedFontSize}px`,
                       lineHeight: 1.22,
                       marginTop: (primaryCue && (!isTranslationOnly || isAltRevealed)) ? '4px' : '0px',
                       ...textTypographyStyle
                     }}
                   >
-                    ···
+                    {isTranslationCooldown ? 'Повтор перевода…' : '···'}
                   </div>
                 ) : null}
               </>

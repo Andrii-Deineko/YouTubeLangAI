@@ -7,7 +7,13 @@ import {
   setCachedTranslation
 } from '../storage/db';
 import { exportCardsToAnki, testAnkiConnection } from './export';
-import { freeTranslateWord, translateCueBatch } from './freeTranslate';
+import {
+  cancelCueTranslation,
+  detachCueTranslationListener,
+  freeTranslateWord,
+  translateCueBatch,
+  translateSingleTextWithCascade
+} from './freeTranslate';
 import {
   fetchAvailableModels,
   requestAIExplanation,
@@ -23,6 +29,7 @@ import {
 import { getSettings } from '../storage/storage';
 import type { RuntimeRequest, RuntimeResponse } from '../types/messages';
 import type { AIExplanation, QuickTranslationResult } from '../types/vocabulary';
+import { isValidTranslationText } from '../utils/translationCache';
 
 class ConcurrencyQueue {
   private activeCount = 0;
@@ -52,58 +59,6 @@ const llmQueue = new ConcurrencyQueue(2);
 const inFlightTranslations = new Map<string, Promise<QuickTranslationResult>>();
 const inFlightAI = new Map<string, Promise<AIExplanation>>();
 
-function parseGoogleTranslateResponse(
-  raw: unknown,
-  originalWord: string
-): Omit<QuickTranslationResult, 'fromCache'> {
-  if (!Array.isArray(raw)) {
-    throw new Error('Unexpected translation response format');
-  }
-
-  const segments = Array.isArray(raw[0]) ? raw[0] : [];
-  const translatedParts: string[] = [];
-  for (const seg of segments) {
-    if (Array.isArray(seg) && typeof seg[0] === 'string') {
-      translatedParts.push(seg[0]);
-    }
-  }
-
-  const primaryTranslation = translatedParts.join('').trim() || originalWord;
-  const detectedLang = typeof raw[2] === 'string' ? raw[2] : 'auto';
-
-  const alternatives: string[] = [];
-  let partOfSpeech: string | undefined;
-
-  if (Array.isArray(raw[1])) {
-    for (const dictEntry of raw[1]) {
-      if (!Array.isArray(dictEntry)) continue;
-      if (!partOfSpeech && typeof dictEntry[0] === 'string' && dictEntry[0].trim()) {
-        partOfSpeech = dictEntry[0].trim();
-      }
-      if (Array.isArray(dictEntry[1])) {
-        for (const candidate of dictEntry[1]) {
-          if (
-            typeof candidate === 'string' &&
-            candidate.trim() &&
-            candidate.trim().toLowerCase() !== primaryTranslation.toLowerCase() &&
-            !alternatives.includes(candidate.trim())
-          ) {
-            alternatives.push(candidate.trim());
-          }
-        }
-      }
-    }
-  }
-
-  return {
-    word: originalWord,
-    translation: primaryTranslation,
-    alternatives: alternatives.slice(0, 6),
-    detectedLang,
-    partOfSpeech
-  };
-}
-
 async function handleQuickTranslate(
   text: string,
   sourceLang: string | undefined,
@@ -114,7 +69,7 @@ async function handleQuickTranslate(
   const cacheKey = buildTranslationCacheKey(sl, nativeLang, cleanText);
 
   const cached = await getCachedTranslation(cacheKey);
-  if (cached) {
+  if (cached && isValidTranslationText(cached.translation)) {
     return { ...cached, fromCache: true };
   }
 
@@ -124,18 +79,23 @@ async function handleQuickTranslate(
   }
 
   const promise = (async (): Promise<QuickTranslationResult> => {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(
-      sl
-    )}&tl=${encodeURIComponent(nativeLang)}&dt=t&dt=bd&q=${encodeURIComponent(cleanText)}`;
-
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Translation failed with HTTP ${response.status}`);
+    const parsed = await translateSingleTextWithCascade({
+      text: cleanText,
+      sourceLang: sl,
+      targetLang: nativeLang,
+      includeDictionary: true
+    });
+    if (!isValidTranslationText(parsed.translation)) {
+      throw new Error('Translation unavailable');
     }
-
-    const json: unknown = await response.json();
-    const parsed = parseGoogleTranslateResponse(json, cleanText);
-    const result: QuickTranslationResult = { ...parsed, fromCache: false };
+    const result: QuickTranslationResult = {
+      word: cleanText,
+      translation: parsed.translation,
+      alternatives: parsed.alternatives,
+      detectedLang: parsed.detectedLang ?? 'auto',
+      partOfSpeech: parsed.partOfSpeech,
+      fromCache: false
+    };
     await setCachedTranslation(cacheKey, result);
     return result;
   })();
@@ -212,27 +172,39 @@ async function processMessage(
   try {
     switch (message.type) {
       case 'FREE_TRANSLATE_CUES': {
+        const tabId = sender.tab?.id;
+        const listenerKey = tabId ?? 'default';
         const result = await translateCueBatch({
           videoId: message.payload.videoId,
           cues: message.payload.cues,
           sourceLang: message.payload.sourceLang,
           targetLang: message.payload.targetLang,
           priorityTime: message.payload.priorityTime,
-          onBatchProgress: (batchTranslations) => {
-            if (sender.tab?.id) {
+          awaitHotOnly: true,
+          forceRetry: message.payload.forceRetry,
+          listenerKey,
+          onBatchProgress: (progress) => {
+            if (typeof tabId === 'number') {
               chrome.tabs
-                .sendMessage(sender.tab.id, {
+                .sendMessage(tabId, {
                   type: 'FREE_TRANSLATE_CUES_BATCH',
-                  payload: {
-                    videoId: message.payload.videoId,
-                    batchTranslations
-                  }
+                  payload: progress
                 })
-                .catch(() => undefined);
+                .catch(() => {
+                  detachCueTranslationListener(tabId);
+                });
             }
           }
         });
         return { ok: true, data: result };
+      }
+      case 'CANCEL_FREE_TRANSLATION': {
+        if (typeof sender.tab?.id === 'number' && !message.payload?.videoId) {
+          detachCueTranslationListener(sender.tab.id);
+        } else {
+          cancelCueTranslation(message.payload);
+        }
+        return { ok: true, data: true };
       }
       case 'FREE_TRANSLATE_WORD': {
         const result = await freeTranslateWord(message.payload);
@@ -379,6 +351,12 @@ chrome.runtime.onStartup.addListener(() => {
 if (chrome.permissions?.onRemoved) {
   chrome.permissions.onRemoved.addListener(() => {
     void syncCinemaModuleState();
+  });
+}
+
+if (chrome.tabs?.onRemoved) {
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    detachCueTranslationListener(tabId);
   });
 }
 

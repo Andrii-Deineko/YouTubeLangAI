@@ -22,6 +22,7 @@ import {
   type SubtitleTrackMode,
   type UserSettings
 } from '../types/settings';
+import type { TranslationRuntimeStatus } from '../types/messages';
 import type { TrackMetadata } from '../types/subtitles';
 
 interface PlayerControlsProps {
@@ -29,11 +30,13 @@ interface PlayerControlsProps {
   trackMeta: TrackMetadata | null;
   cueCount: number;
   captionRateLimitedUntil?: number;
+  translationStatus?: TranslationRuntimeStatus;
   altPressed?: boolean;
   hasActivePopup?: boolean;
   onUpdateSettings: (partial: Partial<UserSettings>) => void;
   onRepeatCue: () => void;
   onResetPosition?: () => void;
+  onRetryTranslation?: () => void;
 }
 
 interface ScaleConfig {
@@ -144,11 +147,13 @@ export function PlayerControls({
   trackMeta,
   cueCount,
   captionRateLimitedUntil,
+  translationStatus,
   altPressed,
   hasActivePopup,
   onUpdateSettings,
   onRepeatCue,
-  onResetPosition
+  onResetPosition,
+  onRetryTranslation
 }: PlayerControlsProps): ReactElement {
   const [isHovered, setIsHovered] = useState(false);
   const [isYtAutohide, setIsYtAutohide] = useState(false);
@@ -160,6 +165,23 @@ export function PlayerControls({
   const [isTimerMenuOpen, setIsTimerMenuOpen] = useState(false);
   const [customTimerInput, setCustomTimerInput] = useState('');
   const [isFontMenuOpen, setIsFontMenuOpen] = useState(false);
+  const [cooldownSecLeft, setCooldownSecLeft] = useState(0);
+
+  useEffect(() => {
+    const retryAt = translationStatus?.retryAt ?? 0;
+    if (translationStatus?.state !== 'cooldown' || retryAt <= Date.now()) {
+      setCooldownSecLeft(0);
+      return;
+    }
+
+    const updateRemaining = (): void => {
+      const diff = Math.max(0, Math.ceil((retryAt - Date.now()) / 1000));
+      setCooldownSecLeft(diff);
+    };
+    updateRemaining();
+    const id = window.setInterval(updateRemaining, 1000);
+    return () => window.clearInterval(id);
+  }, [translationStatus?.state, translationStatus?.retryAt]);
 
   const trackMenuRef = useRef<HTMLDivElement | null>(null);
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
@@ -508,6 +530,27 @@ export function PlayerControls({
           429
         </span>
       )}
+
+      {settings.enabled &&
+        currentTrackMode !== 'original' &&
+        (translationStatus?.state === 'cooldown' || translationStatus?.state === 'error') && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRetryTranslation?.();
+            }}
+            title={
+              cooldownSecLeft > 0
+                ? `Временный лимит сети переводчика · автоповтор через ${cooldownSecLeft}с (клик — повторить сейчас)`
+                : 'Перевод временно недоступен · клик — повторить'
+            }
+            className="flex items-center gap-1 rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] font-medium text-slate-300 border border-white/15 hover:bg-white/10 hover:text-white transition select-none cursor-pointer"
+          >
+            <RotateCcw size={10} className="opacity-80" />
+            <span>{cooldownSecLeft > 0 ? `${cooldownSecLeft}с` : 'Повтор'}</span>
+          </button>
+        )}
 
       {settings.enabled && (
         <>

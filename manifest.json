@@ -41,7 +41,8 @@
   "host_permissions": [
     "*://*.youtube.com/*",
     "*://youtube.com/*",
-    "https://translate.googleapis.com/*"
+    "https://translate.googleapis.com/*",
+    "https://api.mymemory.translated.net/*"
   ],
   "optional_host_permissions": ["https://*/*", "http://*/*"]
 }

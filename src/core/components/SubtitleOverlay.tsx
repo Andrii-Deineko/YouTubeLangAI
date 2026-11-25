@@ -784,7 +784,8 @@ export function SubtitleOverlay({
       };
 
   const isDraggingOrResizing = isDragging || isResizing;
-  const showResizeFrame = isBoxHovered || isDragging || isResizing || hoveredHandle !== null;
+  const isResizeHovered = isResizing || hoveredHandle !== null;
+  const showResizeFrame = isBoxHovered || isDragging || isResizeHovered;
   const candidateTranslation =
     primaryCue?.translation || translatedCue?.translation || translatedCue?.text;
   const validTranslation = isValidTranslationText(candidateTranslation)
@@ -997,73 +998,64 @@ export function SubtitleOverlay({
 
         {/* HUD Resize Frame (visible on hover, drag, or resize) */}
         <div
-          className={`pointer-events-none absolute inset-0 transition-opacity duration-200 ${
+          className={`pointer-events-none absolute inset-0 transition-[opacity,border-color] duration-200 ${
             showResizeFrame ? 'opacity-100' : 'opacity-0'
           }`}
           style={{
             borderRadius: `${dynamicRadius}px`,
-            border: '1px solid color-mix(in srgb, var(--ytai-accent) 35%, transparent)'
+            border: `1px solid color-mix(in srgb, var(--ytai-accent) ${isResizeHovered ? 50 : 35}%, transparent)`
           }}
         >
-          {/* Active edge highlights */}
-          {hoveredHandle === 'top' && (
-            <div className="absolute -top-[1px] left-3 right-3 h-[2px] bg-[var(--ytai-accent)] shadow-[0_0_8px_var(--ytai-accent)]" />
-          )}
-          {hoveredHandle === 'bottom' && (
-            <div className="absolute -bottom-[1px] left-3 right-3 h-[2px] bg-[var(--ytai-accent)] shadow-[0_0_8px_var(--ytai-accent)]" />
-          )}
-          {hoveredHandle === 'left' && (
-            <div className="absolute -left-[1px] top-3 bottom-3 w-[2px] bg-[var(--ytai-accent)] shadow-[0_0_8px_var(--ytai-accent)]" />
-          )}
-          {hoveredHandle === 'right' && (
-            <div className="absolute -right-[1px] top-3 bottom-3 w-[2px] bg-[var(--ytai-accent)] shadow-[0_0_8px_var(--ytai-accent)]" />
-          )}
-
-          {/* 4 Thick Accent Corners (L-shaped brackets) */}
-          <div
-            className={`absolute -top-[1px] -left-[1px] w-[14px] h-[14px] transition-transform duration-150 ${
-              hoveredHandle === 'top-left' ? 'scale-110' : ''
-            }`}
-            style={{
-              borderTop: '2.5px solid var(--ytai-accent)',
-              borderLeft: '2.5px solid var(--ytai-accent)',
-              borderTopLeftRadius: `${dynamicRadius}px`,
-              filter: hoveredHandle === 'top-left' ? 'drop-shadow(0 0 4px var(--ytai-accent))' : undefined
-            }}
-          />
-          <div
-            className={`absolute -top-[1px] -right-[1px] w-[14px] h-[14px] transition-transform duration-150 ${
-              hoveredHandle === 'top-right' ? 'scale-110' : ''
-            }`}
-            style={{
-              borderTop: '2.5px solid var(--ytai-accent)',
-              borderRight: '2.5px solid var(--ytai-accent)',
-              borderTopRightRadius: `${dynamicRadius}px`,
-              filter: hoveredHandle === 'top-right' ? 'drop-shadow(0 0 4px var(--ytai-accent))' : undefined
-            }}
-          />
-          <div
-            className={`absolute -bottom-[1px] -left-[1px] w-[14px] h-[14px] transition-transform duration-150 ${
-              hoveredHandle === 'bottom-left' ? 'scale-110' : ''
-            }`}
-            style={{
-              borderBottom: '2.5px solid var(--ytai-accent)',
-              borderLeft: '2.5px solid var(--ytai-accent)',
-              borderBottomLeftRadius: `${dynamicRadius}px`,
-              filter: hoveredHandle === 'bottom-left' ? 'drop-shadow(0 0 4px var(--ytai-accent))' : undefined
-            }}
-          />
-          <div
-            className={`absolute -bottom-[1px] -right-[1px] w-[14px] h-[14px] transition-transform duration-150 ${
-              hoveredHandle === 'bottom-right' ? 'scale-110' : ''
-            }`}
-            style={{
-              borderBottom: '2.5px solid var(--ytai-accent)',
-              borderRight: '2.5px solid var(--ytai-accent)',
-              borderBottomRightRadius: `${dynamicRadius}px`,
-              filter: hoveredHandle === 'bottom-right' ? 'drop-shadow(0 0 4px var(--ytai-accent))' : undefined
-            }}
-          />
+          {/* 4 Thick Accent Corners (L-shaped brackets, uniform glow without single-edge highlights) */}
+          {[
+            {
+              key: 'top-left',
+              posClass: '-top-[1px] -left-[1px]',
+              style: {
+                borderTop: '2.5px solid var(--ytai-accent)',
+                borderLeft: '2.5px solid var(--ytai-accent)',
+                borderTopLeftRadius: `${dynamicRadius}px`
+              }
+            },
+            {
+              key: 'top-right',
+              posClass: '-top-[1px] -right-[1px]',
+              style: {
+                borderTop: '2.5px solid var(--ytai-accent)',
+                borderRight: '2.5px solid var(--ytai-accent)',
+                borderTopRightRadius: `${dynamicRadius}px`
+              }
+            },
+            {
+              key: 'bottom-left',
+              posClass: '-bottom-[1px] -left-[1px]',
+              style: {
+                borderBottom: '2.5px solid var(--ytai-accent)',
+                borderLeft: '2.5px solid var(--ytai-accent)',
+                borderBottomLeftRadius: `${dynamicRadius}px`
+              }
+            },
+            {
+              key: 'bottom-right',
+              posClass: '-bottom-[1px] -right-[1px]',
+              style: {
+                borderBottom: '2.5px solid var(--ytai-accent)',
+                borderRight: '2.5px solid var(--ytai-accent)',
+                borderBottomRightRadius: `${dynamicRadius}px`
+              }
+            }
+          ].map((corner) => (
+            <div
+              key={corner.key}
+              className={`absolute ${corner.posClass} w-[14px] h-[14px] transition-[filter] duration-150`}
+              style={{
+                ...corner.style,
+                filter: isResizeHovered
+                  ? 'drop-shadow(0 0 5px var(--ytai-accent))'
+                  : 'drop-shadow(0 0 3px color-mix(in srgb, var(--ytai-accent) 45%, transparent))'
+              }}
+            />
+          ))}
         </div>
 
         {/* Interactive Resize Handles (Edges and Corners) */}

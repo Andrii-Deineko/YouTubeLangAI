@@ -167,7 +167,10 @@ export function PlayerControls({
   const [isTimerMenuOpen, setIsTimerMenuOpen] = useState(false);
   const [customTimerInput, setCustomTimerInput] = useState('');
   const [isFontMenuOpen, setIsFontMenuOpen] = useState(false);
-  const [fontPopoverRightOffset, setFontPopoverRightOffset] = useState<number | null>(null);
+  const [fontPopoverLayout, setFontPopoverLayout] = useState<{
+    offsetX: number | null;
+    maxHeight: number | null;
+  }>({ offsetX: null, maxHeight: null });
 
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const trackMenuRef = useRef<HTMLDivElement | null>(null);
@@ -183,7 +186,7 @@ export function PlayerControls({
     const btnWrap = fontMenuRef.current;
     const toolbarEl = toolbarRef.current;
     if (!btnWrap || !toolbarEl) {
-      setFontPopoverRightOffset(null);
+      setFontPopoverLayout({ offsetX: null, maxHeight: null });
       return;
     }
 
@@ -193,22 +196,38 @@ export function PlayerControls({
     const playerEl =
       toolbarEl.closest<HTMLElement>('#movie_player, .html5-video-player') ??
       toolbarEl.parentElement;
-    const containerRight = playerEl
-      ? playerEl.getBoundingClientRect().right
-      : window.innerWidth;
-    const maxAllowedRight = Math.min(containerRight - 8, window.innerWidth - 8);
+    const playerRect = playerEl ? playerEl.getBoundingClientRect() : null;
+
+    const minLeft = Math.max(8, (playerRect?.left ?? 0) + 8);
+    const maxRight = Math.min(
+      window.innerWidth - 8,
+      playerRect ? playerRect.right - 8 : window.innerWidth - 8
+    );
+    const maxBottom = Math.min(
+      window.innerHeight,
+      playerRect ? playerRect.bottom : window.innerHeight
+    );
+
+    const availableHeight = Math.round(maxBottom - btnRect.bottom - 10);
+    const maxHeight = Math.max(200, availableHeight);
 
     const btnCenter = btnRect.left + btnRect.width / 2;
-    const centeredRight = btnCenter + POPOVER_WIDTH / 2;
     const centeredLeft = btnCenter - POPOVER_WIDTH / 2;
+    const centeredRight = btnCenter + POPOVER_WIDTH / 2;
 
-    if (centeredRight <= maxAllowedRight && centeredLeft >= 8) {
-      setFontPopoverRightOffset(null);
-    } else {
-      const targetRight = Math.min(toolbarRect.right, maxAllowedRight);
-      const rightShift = Math.max(0, Math.round(targetRight - btnRect.right));
-      setFontPopoverRightOffset(rightShift);
+    let offsetX: number | null = null;
+    if (centeredLeft < minLeft || centeredRight > maxRight) {
+      const targetRight = Math.min(toolbarRect.right, maxRight);
+      const preferredLeft =
+        centeredRight > maxRight ? targetRight - POPOVER_WIDTH : minLeft;
+      const clampedLeft = Math.max(
+        minLeft,
+        Math.min(preferredLeft, maxRight - POPOVER_WIDTH)
+      );
+      offsetX = Math.round(clampedLeft - btnRect.left);
     }
+
+    setFontPopoverLayout({ offsetX, maxHeight });
   }, []);
 
   useLayoutEffect(() => {
@@ -606,7 +625,7 @@ export function PlayerControls({
           >
             <button
               type="button"
-              title={getTrackModeTitle()}
+              title={isTrackMenuOpen ? undefined : getTrackModeTitle()}
               onClick={cycleTrackMode}
               style={currentTrackMode !== 'original' ? activeStyle : inactiveStyle}
               className={`flex items-center justify-center rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)]`}
@@ -635,7 +654,6 @@ export function PlayerControls({
                       <button
                         key={mode.id}
                         type="button"
-                        title={mode.label}
                         onClick={() => {
                           onUpdateSettings({ subtitleTrackMode: mode.id });
                           setIsTrackMenuOpen(false);
@@ -689,7 +707,7 @@ export function PlayerControls({
           >
             <button
               type="button"
-              title={getListeningModeTitle()}
+              title={isModeMenuOpen ? undefined : getListeningModeTitle()}
               onClick={cycleListeningMode}
               style={
                 settings.activeListeningMode !== 'off'
@@ -782,11 +800,13 @@ export function PlayerControls({
             <button
               type="button"
               title={
-                settings.autoPauseAfterCue
-                  ? settings.pauseTimerSeconds > 0
-                    ? `Автопауза субтитров включена с возобновлением через ${settings.pauseTimerSeconds}с (клик — выключить, наведите для таймера)`
-                    : 'Автопауза субтитров включена (клик — выключить, наведите для таймера)'
-                  : 'Автопауза в конце субтитров (клик — включить, наведите для таймера)'
+                isTimerMenuOpen
+                  ? undefined
+                  : settings.autoPauseAfterCue
+                    ? settings.pauseTimerSeconds > 0
+                      ? `Автопауза субтитров включена с возобновлением через ${settings.pauseTimerSeconds}с (клик — выключить, наведите для таймера)`
+                      : 'Автопауза субтитров включена (клик — выключить, наведите для таймера)'
+                    : 'Автопауза в конце субтитров (клик — включить, наведите для таймера)'
               }
               onClick={() =>
                 onUpdateSettings({ autoPauseAfterCue: !settings.autoPauseAfterCue })
@@ -908,7 +928,11 @@ export function PlayerControls({
           >
             <button
               type="button"
-              title={`Шрифт и стиль субтитров: ${currentFontSize}px (наведите для настройки)`}
+              title={
+                isFontMenuOpen
+                  ? undefined
+                  : `Шрифт и стиль субтитров: ${currentFontSize}px (наведите для настройки)`
+              }
               onClick={() => setIsFontMenuOpen((prev) => !prev)}
               style={isFontMenuOpen ? activeStyle : inactiveStyle}
               className={`flex items-center justify-center rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)] hover:text-white`}
@@ -919,11 +943,11 @@ export function PlayerControls({
             {isFontMenuOpen && (
               <div
                 className={`absolute top-full pt-1.5 z-50 select-none animate-in fade-in duration-150 ${
-                  fontPopoverRightOffset === null ? 'left-1/2 -translate-x-1/2' : ''
+                  fontPopoverLayout.offsetX === null ? 'left-1/2 -translate-x-1/2' : ''
                 }`}
                 style={
-                  fontPopoverRightOffset !== null
-                    ? { right: `-${fontPopoverRightOffset}px` }
+                  fontPopoverLayout.offsetX !== null
+                    ? { left: `${fontPopoverLayout.offsetX}px`, right: 'auto' }
                     : undefined
                 }
                 onClick={(e) => e.stopPropagation()}
@@ -931,16 +955,23 @@ export function PlayerControls({
                 onKeyDown={(e) => e.stopPropagation()}
               >
                 <div
-                  className="w-[296px] rounded-2xl border p-3 shadow-2xl backdrop-blur-md flex flex-col gap-3 text-xs"
+                  className="w-[296px] rounded-2xl border p-3 shadow-2xl backdrop-blur-md flex flex-col gap-2.5 text-xs"
                   style={{
                     backgroundColor: 'rgba(15, 17, 23, 0.96)',
                     borderColor: 'rgba(255, 255, 255, 0.16)',
-                    color: 'var(--ytai-text-primary)'
+                    color: 'var(--ytai-text-primary)',
+                    maxHeight:
+                      fontPopoverLayout.maxHeight !== null
+                        ? `${fontPopoverLayout.maxHeight}px`
+                        : undefined,
+                    overflowY: 'auto',
+                    scrollbarWidth: 'thin',
+                    scrollbarColor: 'rgba(255, 255, 255, 0.22) transparent'
                   }}
                 >
                   {/* Section 1: Subtitle font size */}
                   <div>
-                    <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center justify-between mb-1">
                       <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                         Размер субтитров
                       </span>
@@ -990,7 +1021,7 @@ export function PlayerControls({
 
                   {/* Section 2: Translation size */}
                   <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
                       Размер перевода
                     </div>
                     <div className="grid grid-cols-4 gap-1">
@@ -1006,7 +1037,7 @@ export function PlayerControls({
                             key={s}
                             type="button"
                             onClick={() => onUpdateSettings({ translationScale: s })}
-                            className={`rounded-lg py-1 text-center font-mono text-[11px] font-medium transition ${
+                            className={`rounded-lg h-7 flex items-center justify-center text-center font-mono text-[11.5px] font-medium transition ${
                               isActive
                                 ? 'text-white shadow-sm'
                                 : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white'
@@ -1022,7 +1053,7 @@ export function PlayerControls({
 
                   {/* Section 3: Font family */}
                   <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
                       Шрифт
                     </div>
                     <div className="grid grid-cols-3 gap-1">
@@ -1037,7 +1068,7 @@ export function PlayerControls({
                             key={id}
                             type="button"
                             onClick={() => onUpdateSettings({ fontFamily: id })}
-                            className={`rounded-lg py-1 text-center text-[11px] font-medium transition ${fontClass} ${
+                            className={`rounded-lg h-7 flex items-center justify-center text-center text-[11.5px] font-medium transition ${fontClass} ${
                               isActive
                                 ? 'text-white shadow-sm'
                                 : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white'
@@ -1052,7 +1083,7 @@ export function PlayerControls({
                   </div>
 
                   {/* Section 4: Font weight and Outline */}
-                  <div className="grid grid-cols-[minmax(0,114px)_1fr] gap-2">
+                  <div className="grid grid-cols-[minmax(0,112px)_1fr] gap-1.5">
                     <div>
                       <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
                         Начертание
@@ -1068,7 +1099,7 @@ export function PlayerControls({
                               key={id}
                               type="button"
                               onClick={() => onUpdateSettings({ fontWeight: id })}
-                              className={`rounded-lg px-1 py-1 text-center text-[10px] font-medium whitespace-nowrap transition ${
+                              className={`rounded-lg h-7 flex items-center justify-center px-1 text-center text-[11.5px] font-medium whitespace-nowrap transition ${
                                 isActive
                                   ? 'text-white shadow-sm'
                                   : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white'
@@ -1098,7 +1129,7 @@ export function PlayerControls({
                               key={id}
                               type="button"
                               onClick={() => onUpdateSettings({ textOutline: id })}
-                              className={`rounded-lg px-1 py-1 text-center text-[10px] font-medium whitespace-nowrap transition ${
+                              className={`rounded-lg h-7 flex items-center justify-center px-1 text-center text-[11.5px] font-medium whitespace-nowrap transition ${
                                 isActive
                                   ? 'text-white shadow-sm'
                                   : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white'
@@ -1115,7 +1146,7 @@ export function PlayerControls({
 
                   {/* Section 5: Backdrop Opacity */}
                   <div>
-                    <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center justify-between mb-1">
                       <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                         Подложка
                       </span>
@@ -1173,9 +1204,10 @@ export function PlayerControls({
                   </div>
 
                   {/* Footer: Reset actions */}
-                  <div className="pt-1 border-t border-white/10 flex flex-col gap-1">
+                  <div className="pt-1.5 border-t border-white/10 grid grid-cols-2 gap-1.5">
                     <button
                       type="button"
+                      title="Сбросить размер и позицию субтитров"
                       onClick={() => {
                         onUpdateSettings({
                           subtitleBoxFixed: false,
@@ -1184,17 +1216,17 @@ export function PlayerControls({
                         });
                         onResetPosition?.();
                       }}
-                      className="flex w-full items-center justify-center gap-1.5 rounded-lg py-1 text-center text-[11px] font-medium text-slate-400 transition hover:bg-white/5 hover:text-white"
+                      className="flex items-center justify-center gap-1 rounded-lg h-7 px-1.5 text-center text-[11px] font-medium whitespace-nowrap text-slate-400 transition hover:bg-white/5 hover:text-white"
                     >
-                      <Move size={12} />
-                      <span>Сбросить размер и позицию</span>
+                      <Move size={11} />
+                      <span>Сбросить размер</span>
                     </button>
                     <button
                       type="button"
                       onClick={handleResetTypographyStyle}
-                      className="flex w-full items-center justify-center gap-1.5 rounded-lg py-1 text-center text-[11px] font-medium text-slate-400 transition hover:bg-white/5 hover:text-white"
+                      className="flex items-center justify-center gap-1 rounded-lg h-7 px-1.5 text-center text-[11px] font-medium whitespace-nowrap text-slate-400 transition hover:bg-white/5 hover:text-white"
                     >
-                      <RotateCcw size={12} />
+                      <RotateCcw size={11} />
                       <span>Сбросить стиль</span>
                     </button>
                   </div>

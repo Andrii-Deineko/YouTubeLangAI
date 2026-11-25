@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactElement
+} from 'react';
 import {
   Captions,
   Eye,
@@ -165,6 +172,10 @@ export function PlayerControls({
   const [isTimerMenuOpen, setIsTimerMenuOpen] = useState(false);
   const [customTimerInput, setCustomTimerInput] = useState('');
   const [isFontMenuOpen, setIsFontMenuOpen] = useState(false);
+  const [fontPopoverLayout, setFontPopoverLayout] = useState<{
+    offsetX: number | null;
+    maxHeight: number | null;
+  }>({ offsetX: null, maxHeight: null });
   const [cooldownSecLeft, setCooldownSecLeft] = useState(0);
 
   useEffect(() => {
@@ -183,6 +194,7 @@ export function PlayerControls({
     return () => window.clearInterval(id);
   }, [translationStatus?.state, translationStatus?.retryAt]);
 
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
   const trackMenuRef = useRef<HTMLDivElement | null>(null);
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const timerMenuRef = useRef<HTMLDivElement | null>(null);
@@ -191,6 +203,72 @@ export function PlayerControls({
   const modeLeaveTimeoutRef = useRef<number | null>(null);
   const timerLeaveTimeoutRef = useRef<number | null>(null);
   const fontLeaveTimeoutRef = useRef<number | null>(null);
+
+  const updateFontPopoverPosition = useCallback((): void => {
+    const btnWrap = fontMenuRef.current;
+    const toolbarEl = toolbarRef.current;
+    if (!btnWrap || !toolbarEl) {
+      setFontPopoverLayout({ offsetX: null, maxHeight: null });
+      return;
+    }
+
+    const POPOVER_WIDTH = 296;
+    const btnRect = btnWrap.getBoundingClientRect();
+    const toolbarRect = toolbarEl.getBoundingClientRect();
+    const playerEl =
+      toolbarEl.closest<HTMLElement>('#movie_player, .html5-video-player') ??
+      toolbarEl.parentElement;
+    const playerRect = playerEl ? playerEl.getBoundingClientRect() : null;
+
+    const minLeft = Math.max(8, (playerRect?.left ?? 0) + 8);
+    const maxRight = Math.min(
+      window.innerWidth - 8,
+      playerRect ? playerRect.right - 8 : window.innerWidth - 8
+    );
+    const maxBottom = Math.min(
+      window.innerHeight,
+      playerRect ? playerRect.bottom : window.innerHeight
+    );
+
+    const availableHeight = Math.round(maxBottom - btnRect.bottom - 10);
+    const maxHeight = Math.max(200, availableHeight);
+
+    const btnCenter = btnRect.left + btnRect.width / 2;
+    const centeredLeft = btnCenter - POPOVER_WIDTH / 2;
+    const centeredRight = btnCenter + POPOVER_WIDTH / 2;
+
+    let offsetX: number | null = null;
+    if (centeredLeft < minLeft || centeredRight > maxRight) {
+      const targetRight = Math.min(toolbarRect.right, maxRight);
+      const preferredLeft =
+        centeredRight > maxRight ? targetRight - POPOVER_WIDTH : minLeft;
+      const clampedLeft = Math.max(
+        minLeft,
+        Math.min(preferredLeft, maxRight - POPOVER_WIDTH)
+      );
+      offsetX = Math.round(clampedLeft - btnRect.left);
+    }
+
+    setFontPopoverLayout({ offsetX, maxHeight });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isFontMenuOpen) return;
+    updateFontPopoverPosition();
+    window.addEventListener('resize', updateFontPopoverPosition);
+    return () => {
+      window.removeEventListener('resize', updateFontPopoverPosition);
+    };
+  }, [
+    isFontMenuOpen,
+    trackMeta,
+    cueCount,
+    settings.subtitlePosition,
+    settings.subtitleBoxSize,
+    settings.subtitleBoxFixed,
+    settings.controlsScale,
+    updateFontPopoverPosition
+  ]);
 
   useEffect(() => {
     return () => {
@@ -209,12 +287,50 @@ export function PlayerControls({
     };
   }, []);
 
-  const handleTrackMouseEnter = (): void => {
+  const clearAllLeaveTimeouts = (): void => {
     if (trackLeaveTimeoutRef.current !== null) {
       window.clearTimeout(trackLeaveTimeoutRef.current);
       trackLeaveTimeoutRef.current = null;
     }
-    setIsTrackMenuOpen(true);
+    if (modeLeaveTimeoutRef.current !== null) {
+      window.clearTimeout(modeLeaveTimeoutRef.current);
+      modeLeaveTimeoutRef.current = null;
+    }
+    if (timerLeaveTimeoutRef.current !== null) {
+      window.clearTimeout(timerLeaveTimeoutRef.current);
+      timerLeaveTimeoutRef.current = null;
+    }
+    if (fontLeaveTimeoutRef.current !== null) {
+      window.clearTimeout(fontLeaveTimeoutRef.current);
+      fontLeaveTimeoutRef.current = null;
+    }
+  };
+
+  const openMenuExclusive = (target: 'track' | 'mode' | 'timer' | 'font'): void => {
+    clearAllLeaveTimeouts();
+    if (target !== 'track') {
+      setIsTrackMenuOpen(false);
+      setHoveredTrackModeId(null);
+    }
+    if (target !== 'mode') {
+      setIsModeMenuOpen(false);
+      setHoveredModeId(null);
+    }
+    if (target !== 'timer') {
+      setIsTimerMenuOpen(false);
+    }
+    if (target !== 'font') {
+      setIsFontMenuOpen(false);
+    }
+
+    if (target === 'track') setIsTrackMenuOpen(true);
+    if (target === 'mode') setIsModeMenuOpen(true);
+    if (target === 'timer') setIsTimerMenuOpen(true);
+    if (target === 'font') setIsFontMenuOpen(true);
+  };
+
+  const handleTrackMouseEnter = (): void => {
+    openMenuExclusive('track');
   };
 
   const handleTrackMouseLeave = (): void => {
@@ -229,11 +345,7 @@ export function PlayerControls({
   };
 
   const handleModeMouseEnter = (): void => {
-    if (modeLeaveTimeoutRef.current !== null) {
-      window.clearTimeout(modeLeaveTimeoutRef.current);
-      modeLeaveTimeoutRef.current = null;
-    }
-    setIsModeMenuOpen(true);
+    openMenuExclusive('mode');
   };
 
   const handleModeMouseLeave = (): void => {
@@ -248,11 +360,7 @@ export function PlayerControls({
   };
 
   const handleTimerMouseEnter = (): void => {
-    if (timerLeaveTimeoutRef.current !== null) {
-      window.clearTimeout(timerLeaveTimeoutRef.current);
-      timerLeaveTimeoutRef.current = null;
-    }
-    setIsTimerMenuOpen(true);
+    openMenuExclusive('timer');
   };
 
   const handleTimerMouseLeave = (): void => {
@@ -266,11 +374,7 @@ export function PlayerControls({
   };
 
   const handleFontMouseEnter = (): void => {
-    if (fontLeaveTimeoutRef.current !== null) {
-      window.clearTimeout(fontLeaveTimeoutRef.current);
-      fontLeaveTimeoutRef.current = null;
-    }
-    setIsFontMenuOpen(true);
+    openMenuExclusive('font');
   };
 
   const handleFontMouseLeave = (): void => {
@@ -487,7 +591,8 @@ export function PlayerControls({
 
   return (
     <div
-      className={`absolute right-3 top-3 z-20 flex items-center rounded-full shadow-lg select-none transition-opacity duration-300 ${scale.containerClass} ${
+      ref={toolbarRef}
+      className={`absolute right-3 top-3 z-50 flex items-center rounded-full shadow-lg select-none transition-opacity duration-300 ${scale.containerClass} ${
         isVisible ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
       }`}
       style={{
@@ -556,14 +661,14 @@ export function PlayerControls({
         <>
           {/* Subtitle Track Mode (文A button: click = cycle, hover = 3-icon menu) */}
           <div
-            className="relative"
+            className="relative inline-flex items-center justify-center"
             ref={trackMenuRef}
             onMouseEnter={handleTrackMouseEnter}
             onMouseLeave={handleTrackMouseLeave}
           >
             <button
               type="button"
-              title={getTrackModeTitle()}
+              title={isTrackMenuOpen ? undefined : getTrackModeTitle()}
               onClick={cycleTrackMode}
               style={currentTrackMode !== 'original' ? activeStyle : inactiveStyle}
               className={`flex items-center justify-center rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)]`}
@@ -571,78 +676,81 @@ export function PlayerControls({
               <Languages size={scale.iconSize} />
             </button>
 
-            {/* Dropdown Menu: 3 icons with rich hover tooltips */}
+            {/* Dropdown Menu: centered directly under trigger with unbroken hover bridge */}
             {isTrackMenuOpen && (
               <div
-                className={`absolute left-0 top-full mt-1.5 z-30 flex items-center gap-1.5 rounded-2xl border ${scale.dropdownPadClass} shadow-2xl backdrop-blur-md select-none`}
-                style={{
-                  backgroundColor: 'rgba(15, 17, 23, 0.95)',
-                  borderColor: 'rgba(255, 255, 255, 0.16)'
-                }}
+                className="absolute left-1/2 -translate-x-1/2 top-full pt-1.5 z-50 select-none animate-in fade-in duration-150"
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
               >
-                {TRACK_MODES.map((mode) => {
-                  const Icon = mode.icon;
-                  const isActive = currentTrackMode === mode.id;
-                  return (
-                    <button
-                      key={mode.id}
-                      type="button"
-                      title={mode.label}
-                      onClick={() => {
-                        onUpdateSettings({ subtitleTrackMode: mode.id });
-                        setIsTrackMenuOpen(false);
-                        setHoveredTrackModeId(null);
-                      }}
-                      onMouseEnter={() => setHoveredTrackModeId(mode.id)}
-                      onMouseLeave={() =>
-                        setHoveredTrackModeId((prev) => (prev === mode.id ? null : prev))
-                      }
-                      style={isActive ? activeStyle : inactiveStyle}
-                      className={`flex items-center justify-center rounded-xl ${scale.iconBtnPadClass} transition hover:bg-white/10`}
-                    >
-                      <Icon size={scale.iconSize} />
-                    </button>
-                  );
-                })}
+                <div
+                  className={`relative flex items-center gap-1.5 rounded-2xl border ${scale.dropdownPadClass} shadow-2xl backdrop-blur-md`}
+                  style={{
+                    backgroundColor: 'rgba(15, 17, 23, 0.95)',
+                    borderColor: 'rgba(255, 255, 255, 0.16)'
+                  }}
+                >
+                  {TRACK_MODES.map((mode) => {
+                    const Icon = mode.icon;
+                    const isActive = currentTrackMode === mode.id;
+                    return (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        onClick={() => {
+                          onUpdateSettings({ subtitleTrackMode: mode.id });
+                          setIsTrackMenuOpen(false);
+                          setHoveredTrackModeId(null);
+                        }}
+                        onMouseEnter={() => setHoveredTrackModeId(mode.id)}
+                        onMouseLeave={() =>
+                          setHoveredTrackModeId((prev) => (prev === mode.id ? null : prev))
+                        }
+                        style={isActive ? activeStyle : inactiveStyle}
+                        className={`flex items-center justify-center rounded-xl ${scale.iconBtnPadClass} transition hover:bg-white/10`}
+                      >
+                        <Icon size={scale.iconSize} />
+                      </button>
+                    );
+                  })}
 
-                {/* Rich Hover Tooltip */}
-                {(() => {
-                  const hovered = TRACK_MODES.find((m) => m.id === hoveredTrackModeId);
-                  if (!hovered) return null;
-                  return (
-                    <div
-                      className="absolute left-0 top-full mt-2 w-64 rounded-xl border p-2.5 text-xs shadow-2xl backdrop-blur-md pointer-events-none z-50 select-none animate-in fade-in duration-150"
-                      style={{
-                        backgroundColor: 'rgba(15, 17, 23, 0.96)',
-                        borderColor: 'rgba(255, 255, 255, 0.16)',
-                        color: 'var(--ytai-text-primary)'
-                      }}
-                    >
-                      <div className="font-semibold text-white">
-                        {hovered.label}
+                  {/* Rich Hover Tooltip */}
+                  {(() => {
+                    const hovered = TRACK_MODES.find((m) => m.id === hoveredTrackModeId);
+                    if (!hovered) return null;
+                    return (
+                      <div
+                        className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-60 rounded-xl border p-2.5 text-xs shadow-2xl backdrop-blur-md pointer-events-none z-[60] select-none animate-in fade-in duration-150"
+                        style={{
+                          backgroundColor: 'rgba(15, 17, 23, 0.96)',
+                          borderColor: 'rgba(255, 255, 255, 0.16)',
+                          color: 'var(--ytai-text-primary)'
+                        }}
+                      >
+                        <div className="font-semibold text-white">
+                          {hovered.label}
+                        </div>
+                        <p className="mt-1 text-[11px] leading-relaxed text-slate-300">
+                          {hovered.description}
+                        </p>
                       </div>
-                      <p className="mt-1 text-[11px] leading-relaxed text-slate-300">
-                        {hovered.description}
-                      </p>
-                    </div>
-                  );
-                })()}
+                    );
+                  })()}
+                </div>
               </div>
             )}
           </div>
 
           {/* Subtitle Perception Mode (Icon click = cycle, Hover = dropdown) */}
           <div
-            className="relative"
+            className="relative inline-flex items-center justify-center"
             ref={modeMenuRef}
             onMouseEnter={handleModeMouseEnter}
             onMouseLeave={handleModeMouseLeave}
           >
             <button
               type="button"
-              title={getListeningModeTitle()}
+              title={isModeMenuOpen ? undefined : getListeningModeTitle()}
               onClick={cycleListeningMode}
               style={
                 settings.activeListeningMode !== 'off'
@@ -660,70 +768,74 @@ export function PlayerControls({
               )}
             </button>
 
-            {/* Dropdown Menu: STRICTLY 3 icons with rich hover tooltips */}
+            {/* Dropdown Menu: centered directly under trigger with unbroken hover bridge */}
             {isModeMenuOpen && (
               <div
-                className={`absolute right-0 top-full mt-1.5 z-30 flex items-center gap-1.5 rounded-2xl border ${scale.dropdownPadClass} shadow-2xl backdrop-blur-md select-none`}
-                style={{
-                  backgroundColor: 'rgba(15, 17, 23, 0.95)',
-                  borderColor: 'rgba(255, 255, 255, 0.16)'
-                }}
+                className="absolute left-1/2 -translate-x-1/2 top-full pt-1.5 z-50 select-none animate-in fade-in duration-150"
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
               >
-                {LISTENING_MODES.map((mode) => {
-                  const Icon = mode.icon;
-                  const isActive = settings.activeListeningMode === mode.id;
-                  return (
-                    <button
-                      key={mode.id}
-                      type="button"
-                      onClick={() => {
-                        onUpdateSettings({ activeListeningMode: mode.id });
-                        setIsModeMenuOpen(false);
-                        setHoveredModeId(null);
-                      }}
-                      onMouseEnter={() => setHoveredModeId(mode.id)}
-                      onMouseLeave={() =>
-                        setHoveredModeId((prev) => (prev === mode.id ? null : prev))
-                      }
-                      style={isActive ? activeStyle : inactiveStyle}
-                      className={`flex items-center justify-center rounded-xl ${scale.iconBtnPadClass} transition hover:bg-white/10`}
-                    >
-                      <Icon size={scale.iconSize} />
-                    </button>
-                  );
-                })}
+                <div
+                  className={`relative flex items-center gap-1.5 rounded-2xl border ${scale.dropdownPadClass} shadow-2xl backdrop-blur-md`}
+                  style={{
+                    backgroundColor: 'rgba(15, 17, 23, 0.95)',
+                    borderColor: 'rgba(255, 255, 255, 0.16)'
+                  }}
+                >
+                  {LISTENING_MODES.map((mode) => {
+                    const Icon = mode.icon;
+                    const isActive = settings.activeListeningMode === mode.id;
+                    return (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        onClick={() => {
+                          onUpdateSettings({ activeListeningMode: mode.id });
+                          setIsModeMenuOpen(false);
+                          setHoveredModeId(null);
+                        }}
+                        onMouseEnter={() => setHoveredModeId(mode.id)}
+                        onMouseLeave={() =>
+                          setHoveredModeId((prev) => (prev === mode.id ? null : prev))
+                        }
+                        style={isActive ? activeStyle : inactiveStyle}
+                        className={`flex items-center justify-center rounded-xl ${scale.iconBtnPadClass} transition hover:bg-white/10`}
+                      >
+                        <Icon size={scale.iconSize} />
+                      </button>
+                    );
+                  })}
 
-                {/* Rich Hover Tooltip */}
-                {(() => {
-                  const hoveredMode = LISTENING_MODES.find((m) => m.id === hoveredModeId);
-                  if (!hoveredMode) return null;
-                  return (
-                    <div
-                      className="absolute right-0 top-full mt-2 w-64 rounded-xl border p-2.5 text-xs shadow-2xl backdrop-blur-md pointer-events-none z-50 select-none animate-in fade-in duration-150"
-                      style={{
-                        backgroundColor: 'rgba(15, 17, 23, 0.96)',
-                        borderColor: 'rgba(255, 255, 255, 0.16)',
-                        color: 'var(--ytai-text-primary)'
-                      }}
-                    >
-                      <div className="font-semibold text-white">
-                        {hoveredMode.label}
+                  {/* Rich Hover Tooltip */}
+                  {(() => {
+                    const hoveredMode = LISTENING_MODES.find((m) => m.id === hoveredModeId);
+                    if (!hoveredMode) return null;
+                    return (
+                      <div
+                        className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-60 rounded-xl border p-2.5 text-xs shadow-2xl backdrop-blur-md pointer-events-none z-[60] select-none animate-in fade-in duration-150"
+                        style={{
+                          backgroundColor: 'rgba(15, 17, 23, 0.96)',
+                          borderColor: 'rgba(255, 255, 255, 0.16)',
+                          color: 'var(--ytai-text-primary)'
+                        }}
+                      >
+                        <div className="font-semibold text-white">
+                          {hoveredMode.label}
+                        </div>
+                        <p className="mt-1 text-[11px] leading-relaxed text-slate-300">
+                          {hoveredMode.description}
+                        </p>
                       </div>
-                      <p className="mt-1 text-[11px] leading-relaxed text-slate-300">
-                        {hoveredMode.description}
-                      </p>
-                    </div>
-                  );
-                })()}
+                    );
+                  })()}
+                </div>
               </div>
             )}
           </div>
 
           {/* Auto-pause toggle (click) + Pause Timer dropdown (hover) */}
           <div
-            className="relative"
+            className="relative inline-flex items-center justify-center"
             ref={timerMenuRef}
             onMouseEnter={handleTimerMouseEnter}
             onMouseLeave={handleTimerMouseLeave}
@@ -731,11 +843,13 @@ export function PlayerControls({
             <button
               type="button"
               title={
-                settings.autoPauseAfterCue
-                  ? settings.pauseTimerSeconds > 0
-                    ? `Автопауза субтитров включена с возобновлением через ${settings.pauseTimerSeconds}с (клик — выключить, наведите для таймера)`
-                    : 'Автопауза субтитров включена (клик — выключить, наведите для таймера)'
-                  : 'Автопауза в конце субтитров (клик — включить, наведите для таймера)'
+                isTimerMenuOpen
+                  ? undefined
+                  : settings.autoPauseAfterCue
+                    ? settings.pauseTimerSeconds > 0
+                      ? `Автопауза субтитров включена с возобновлением через ${settings.pauseTimerSeconds}с (клик — выключить, наведите для таймера)`
+                      : 'Автопауза субтитров включена (клик — выключить, наведите для таймера)'
+                    : 'Автопауза в конце субтитров (клик — включить, наведите для таймера)'
               }
               onClick={() =>
                 onUpdateSettings({ autoPauseAfterCue: !settings.autoPauseAfterCue })
@@ -753,82 +867,86 @@ export function PlayerControls({
 
             {isTimerMenuOpen && (
               <div
-                className={`absolute right-0 top-full mt-1.5 z-30 w-44 rounded-2xl border ${scale.dropdownPadClass} p-2 shadow-2xl backdrop-blur-md select-none`}
-                style={{
-                  backgroundColor: 'rgba(15, 17, 23, 0.96)',
-                  borderColor: 'rgba(255, 255, 255, 0.16)',
-                  color: 'var(--ytai-text-primary)'
-                }}
+                className="absolute left-1/2 -translate-x-1/2 top-full pt-1.5 z-50 select-none animate-in fade-in duration-150"
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
               >
-                <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                  Снятие автопаузы
-                </div>
+                <div
+                  className={`w-44 rounded-2xl border ${scale.dropdownPadClass} p-2 shadow-2xl backdrop-blur-md`}
+                  style={{
+                    backgroundColor: 'rgba(15, 17, 23, 0.96)',
+                    borderColor: 'rgba(255, 255, 255, 0.16)',
+                    color: 'var(--ytai-text-primary)'
+                  }}
+                >
+                  <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Снятие автопаузы
+                  </div>
 
-                <div className="space-y-0.5">
-                  {[
-                    { label: 'Выкл', sec: 0 },
-                    { label: '3 сек', sec: 3 },
-                    { label: '5 сек', sec: 5 },
-                    { label: '10 сек', sec: 10 }
-                  ].map((opt) => {
-                    const isSelected = (settings.pauseTimerSeconds ?? 0) === opt.sec;
-                    return (
-                      <button
-                        key={opt.label}
-                        type="button"
-                        onClick={() => {
-                          onUpdateSettings({
-                            pauseTimerSeconds: opt.sec,
-                            ...(opt.sec > 0 ? { autoPauseAfterCue: true } : {})
-                          });
-                          setIsTimerMenuOpen(false);
-                        }}
-                        className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-xs transition hover:bg-white/10"
-                        style={
-                          isSelected
-                            ? { color: 'var(--ytai-accent)', fontWeight: 600 }
-                            : { color: 'var(--ytai-text-primary)' }
-                        }
-                      >
-                        <span>{opt.label}</span>
-                        {isSelected && <span className="text-[10px] font-bold">✓</span>}
-                      </button>
-                    );
-                  })}
-                </div>
+                  <div className="space-y-0.5">
+                    {[
+                      { label: 'Выкл', sec: 0 },
+                      { label: '3 сек', sec: 3 },
+                      { label: '5 сек', sec: 5 },
+                      { label: '10 сек', sec: 10 }
+                    ].map((opt) => {
+                      const isSelected = (settings.pauseTimerSeconds ?? 0) === opt.sec;
+                      return (
+                        <button
+                          key={opt.label}
+                          type="button"
+                          onClick={() => {
+                            onUpdateSettings({
+                              pauseTimerSeconds: opt.sec,
+                              ...(opt.sec > 0 ? { autoPauseAfterCue: true } : {})
+                            });
+                            setIsTimerMenuOpen(false);
+                          }}
+                          className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-xs transition hover:bg-white/10"
+                          style={
+                            isSelected
+                              ? { color: 'var(--ytai-accent)', fontWeight: 600 }
+                              : { color: 'var(--ytai-text-primary)' }
+                          }
+                        >
+                          <span>{opt.label}</span>
+                          {isSelected && <span className="text-[10px] font-bold">✓</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
 
-                {/* Custom duration option */}
-                <div className="mt-1.5 border-t border-white/10 pt-1.5">
-                  <div className="mb-1 px-2 text-[10px] text-slate-400">Свой вариант:</div>
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      handleCustomTimerSubmit();
-                    }}
-                    className="flex items-center gap-1 px-1"
-                  >
-                    <input
-                      type="number"
-                      min={1}
-                      max={300}
-                      placeholder="сек"
-                      value={customTimerInput}
-                      onChange={(e) => setCustomTimerInput(e.target.value)}
-                      onKeyDown={(e) => e.stopPropagation()}
-                      onKeyUp={(e) => e.stopPropagation()}
-                      onKeyPress={(e) => e.stopPropagation()}
-                      className="w-16 rounded-lg border border-white/10 bg-slate-900/90 px-2 py-1 text-xs text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
-                    />
-                    <button
-                      type="submit"
-                      className="rounded-lg px-2.5 py-1 text-xs font-semibold text-white transition hover:opacity-90"
-                      style={{ backgroundColor: 'var(--ytai-accent)' }}
+                  {/* Custom duration option */}
+                  <div className="mt-1.5 border-t border-white/10 pt-1.5">
+                    <div className="mb-1 px-2 text-[10px] text-slate-400">Свой вариант:</div>
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        handleCustomTimerSubmit();
+                      }}
+                      className="flex items-center gap-1 px-1"
                     >
-                      OK
-                    </button>
-                  </form>
+                      <input
+                        type="number"
+                        min={1}
+                        max={300}
+                        placeholder="сек"
+                        value={customTimerInput}
+                        onChange={(e) => setCustomTimerInput(e.target.value)}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        onKeyUp={(e) => e.stopPropagation()}
+                        onKeyPress={(e) => e.stopPropagation()}
+                        className="w-16 rounded-lg border border-white/10 bg-slate-900/90 px-2 py-1 text-xs text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
+                      />
+                      <button
+                        type="submit"
+                        className="rounded-lg px-2.5 py-1 text-xs font-semibold text-white transition hover:opacity-90"
+                        style={{ backgroundColor: 'var(--ytai-accent)' }}
+                      >
+                        OK
+                      </button>
+                    </form>
+                  </div>
                 </div>
               </div>
             )}
@@ -846,14 +964,18 @@ export function PlayerControls({
 
           {/* Subtitle Font Sizing Popover (Single compact button + hover popover) */}
           <div
-            className="relative inline-flex items-center"
+            className="relative inline-flex items-center justify-center"
             ref={fontMenuRef}
             onMouseEnter={handleFontMouseEnter}
             onMouseLeave={handleFontMouseLeave}
           >
             <button
               type="button"
-              title={`Шрифт и стиль субтитров: ${currentFontSize}px (наведите для настройки)`}
+              title={
+                isFontMenuOpen
+                  ? undefined
+                  : `Шрифт и стиль субтитров: ${currentFontSize}px (наведите для настройки)`
+              }
               onClick={() => setIsFontMenuOpen((prev) => !prev)}
               style={isFontMenuOpen ? activeStyle : inactiveStyle}
               className={`flex items-center justify-center rounded-full ${scale.iconBtnPadClass} transition hover:bg-[rgba(var(--ytai-accent-rgb),0.2)] hover:text-white`}
@@ -863,24 +985,36 @@ export function PlayerControls({
 
             {isFontMenuOpen && (
               <div
-                className="absolute right-0 top-full pt-1.5 z-30 select-none animate-in fade-in duration-150"
+                className={`absolute top-full pt-1.5 z-50 select-none animate-in fade-in duration-150 ${
+                  fontPopoverLayout.offsetX === null ? 'left-1/2 -translate-x-1/2' : ''
+                }`}
+                style={
+                  fontPopoverLayout.offsetX !== null
+                    ? { left: `${fontPopoverLayout.offsetX}px`, right: 'auto' }
+                    : undefined
+                }
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
                 onKeyDown={(e) => e.stopPropagation()}
-                onMouseEnter={handleFontMouseEnter}
-                onMouseLeave={handleFontMouseLeave}
               >
                 <div
-                  className="w-[268px] rounded-2xl border p-3 shadow-2xl backdrop-blur-md flex flex-col gap-3 text-xs"
+                  className="w-[296px] rounded-2xl border p-3 shadow-2xl backdrop-blur-md flex flex-col gap-2.5 text-xs"
                   style={{
                     backgroundColor: 'rgba(15, 17, 23, 0.96)',
                     borderColor: 'rgba(255, 255, 255, 0.16)',
-                    color: 'var(--ytai-text-primary)'
+                    color: 'var(--ytai-text-primary)',
+                    maxHeight:
+                      fontPopoverLayout.maxHeight !== null
+                        ? `${fontPopoverLayout.maxHeight}px`
+                        : undefined,
+                    overflowY: 'auto',
+                    scrollbarWidth: 'thin',
+                    scrollbarColor: 'rgba(255, 255, 255, 0.22) transparent'
                   }}
                 >
                   {/* Section 1: Subtitle font size */}
                   <div>
-                    <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center justify-between mb-1">
                       <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                         Размер субтитров
                       </span>
@@ -930,7 +1064,7 @@ export function PlayerControls({
 
                   {/* Section 2: Translation size */}
                   <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
                       Размер перевода
                     </div>
                     <div className="grid grid-cols-4 gap-1">
@@ -946,7 +1080,7 @@ export function PlayerControls({
                             key={s}
                             type="button"
                             onClick={() => onUpdateSettings({ translationScale: s })}
-                            className={`rounded-lg py-1 text-center font-mono text-[11px] font-medium transition ${
+                            className={`rounded-lg h-7 flex items-center justify-center text-center font-mono text-[11.5px] font-medium transition ${
                               isActive
                                 ? 'text-white shadow-sm'
                                 : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white'
@@ -962,7 +1096,7 @@ export function PlayerControls({
 
                   {/* Section 3: Font family */}
                   <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
                       Шрифт
                     </div>
                     <div className="grid grid-cols-3 gap-1">
@@ -977,7 +1111,7 @@ export function PlayerControls({
                             key={id}
                             type="button"
                             onClick={() => onUpdateSettings({ fontFamily: id })}
-                            className={`rounded-lg py-1 text-center text-[11px] font-medium transition ${fontClass} ${
+                            className={`rounded-lg h-7 flex items-center justify-center text-center text-[11.5px] font-medium transition ${fontClass} ${
                               isActive
                                 ? 'text-white shadow-sm'
                                 : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white'
@@ -992,7 +1126,7 @@ export function PlayerControls({
                   </div>
 
                   {/* Section 4: Font weight and Outline */}
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-[minmax(0,112px)_1fr] gap-1.5">
                     <div>
                       <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
                         Начертание
@@ -1008,7 +1142,7 @@ export function PlayerControls({
                               key={id}
                               type="button"
                               onClick={() => onUpdateSettings({ fontWeight: id })}
-                              className={`rounded-lg py-1 text-center text-[10px] font-medium transition ${
+                              className={`rounded-lg h-7 flex items-center justify-center px-1 text-center text-[11.5px] font-medium whitespace-nowrap transition ${
                                 isActive
                                   ? 'text-white shadow-sm'
                                   : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white'
@@ -1038,7 +1172,7 @@ export function PlayerControls({
                               key={id}
                               type="button"
                               onClick={() => onUpdateSettings({ textOutline: id })}
-                              className={`rounded-lg py-1 text-center text-[10px] font-medium transition ${
+                              className={`rounded-lg h-7 flex items-center justify-center px-1 text-center text-[11.5px] font-medium whitespace-nowrap transition ${
                                 isActive
                                   ? 'text-white shadow-sm'
                                   : 'bg-white/5 text-slate-300 hover:bg-white/10 hover:text-white'
@@ -1055,7 +1189,7 @@ export function PlayerControls({
 
                   {/* Section 5: Backdrop Opacity */}
                   <div>
-                    <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center justify-between mb-1">
                       <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                         Подложка
                       </span>
@@ -1113,9 +1247,10 @@ export function PlayerControls({
                   </div>
 
                   {/* Footer: Reset actions */}
-                  <div className="pt-1 border-t border-white/10 flex flex-col gap-1">
+                  <div className="pt-1.5 border-t border-white/10 grid grid-cols-2 gap-1.5">
                     <button
                       type="button"
+                      title="Сбросить размер и позицию субтитров"
                       onClick={() => {
                         onUpdateSettings({
                           subtitleBoxFixed: false,
@@ -1124,17 +1259,17 @@ export function PlayerControls({
                         });
                         onResetPosition?.();
                       }}
-                      className="flex w-full items-center justify-center gap-1.5 rounded-lg py-1 text-center text-[11px] font-medium text-slate-400 transition hover:bg-white/5 hover:text-white"
+                      className="flex items-center justify-center gap-1 rounded-lg h-7 px-1.5 text-center text-[11px] font-medium whitespace-nowrap text-slate-400 transition hover:bg-white/5 hover:text-white"
                     >
-                      <Move size={12} />
-                      <span>Сбросить размер и позицию</span>
+                      <Move size={11} />
+                      <span>Сбросить размер</span>
                     </button>
                     <button
                       type="button"
                       onClick={handleResetTypographyStyle}
-                      className="flex w-full items-center justify-center gap-1.5 rounded-lg py-1 text-center text-[11px] font-medium text-slate-400 transition hover:bg-white/5 hover:text-white"
+                      className="flex items-center justify-center gap-1 rounded-lg h-7 px-1.5 text-center text-[11px] font-medium whitespace-nowrap text-slate-400 transition hover:bg-white/5 hover:text-white"
                     >
-                      <RotateCcw size={12} />
+                      <RotateCcw size={11} />
                       <span>Сбросить стиль</span>
                     </button>
                   </div>

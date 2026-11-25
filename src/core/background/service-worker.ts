@@ -7,7 +7,11 @@ import {
   setCachedTranslation
 } from '../storage/db';
 import { exportCardsToAnki, testAnkiConnection } from './export';
-import { freeTranslateWord, translateCueBatch } from './freeTranslate';
+import {
+  cancelCueTranslation,
+  translateCueBatch,
+  translateSingleText
+} from './freeTranslate';
 import {
   fetchAvailableModels,
   requestAIExplanation,
@@ -27,6 +31,7 @@ import {
 } from './moduleManager';
 import { getSettings } from '../storage/storage';
 import type { RuntimeRequest, RuntimeResponse } from '../types/messages';
+import { isValidTranslationText } from '../types/subtitles';
 import type { AIExplanation, QuickTranslationResult } from '../types/vocabulary';
 
 class ConcurrencyQueue {
@@ -72,7 +77,7 @@ async function handleQuickTranslate(
   );
 
   const cached = await getCachedTranslation(cacheKey);
-  if (cached && !cached.translationUnavailable && cached.translation.trim()) {
+  if (cached && isValidTranslationText(cached.translation)) {
     return { ...cached, fromCache: true };
   }
 
@@ -82,27 +87,27 @@ async function handleQuickTranslate(
   }
 
   const promise = (async (): Promise<QuickTranslationResult> => {
-    const translated = await freeTranslateWord({
-      word: cleanText,
+    const parsed = await translateSingleText({
+      text: cleanText,
       sourceLang: sl,
       targetLang: nativeLang,
+      includeDictionary: true,
       provider: settings.translationProvider,
       myMemoryEmail: settings.myMemoryEmail,
       deeplApiKey: settings.deeplApiKey
     });
+    if (!isValidTranslationText(parsed.translation)) {
+      throw new Error('Translation unavailable');
+    }
     const result: QuickTranslationResult = {
       word: cleanText,
-      translation: translated.translation,
-      alternatives: translated.alternatives,
-      detectedLang: translated.detectedLang,
-      partOfSpeech: translated.partOfSpeech,
-      fromCache: false,
-      translationUnavailable: translated.translationUnavailable,
-      errorProvider: translated.errorProvider
+      translation: parsed.translation,
+      alternatives: parsed.alternatives,
+      detectedLang: parsed.detectedLang ?? 'auto',
+      partOfSpeech: parsed.partOfSpeech,
+      fromCache: false
     };
-    if (!result.translationUnavailable && result.translation.trim()) {
-      await setCachedTranslation(cacheKey, result);
-    }
+    await setCachedTranslation(cacheKey, result);
     return result;
   })();
 
@@ -178,6 +183,7 @@ async function processMessage(
   try {
     switch (message.type) {
       case 'FREE_TRANSLATE_CUES': {
+        const tabId = sender.tab?.id;
         const settings = await getSettings();
         const result = await translateCueBatch({
           videoId: message.payload.videoId,
@@ -188,31 +194,30 @@ async function processMessage(
           myMemoryEmail: settings.myMemoryEmail,
           deeplApiKey: settings.deeplApiKey,
           priorityTime: message.payload.priorityTime,
-          onBatchProgress: (batchTranslations) => {
-            if (sender.tab?.id) {
+          forceRetry: message.payload.forceRetry,
+          onBatchProgress: (batchTranslations, status) => {
+            if (typeof tabId === 'number') {
               chrome.tabs
-                .sendMessage(sender.tab.id, {
+                .sendMessage(tabId, {
                   type: 'FREE_TRANSLATE_CUES_BATCH',
                   payload: {
                     videoId: message.payload.videoId,
-                    batchTranslations
+                    targetLang: message.payload.targetLang,
+                    batchTranslations,
+                    status
                   }
                 })
-                .catch(() => undefined);
+                .catch(() => {
+                  cancelCueTranslation(message.payload.videoId);
+                });
             }
           }
         });
         return { ok: true, data: result };
       }
-      case 'FREE_TRANSLATE_WORD': {
-        const settings = await getSettings();
-        const result = await freeTranslateWord({
-          ...message.payload,
-          provider: settings.translationProvider,
-          myMemoryEmail: settings.myMemoryEmail,
-          deeplApiKey: settings.deeplApiKey
-        });
-        return { ok: true, data: result };
+      case 'CANCEL_FREE_TRANSLATION': {
+        cancelCueTranslation(message.payload?.videoId);
+        return { ok: true, data: true };
       }
       case 'QUICK_TRANSLATE': {
         const result = await handleQuickTranslate(
@@ -252,22 +257,6 @@ async function processMessage(
       case 'FETCH_SUBTITLE_TEXT': {
         const text = await handleFetchSubtitleText(message.payload.url);
         return { ok: true, data: { text } };
-      }
-      case 'CAPTURE_SCREENSHOT': {
-        if (!chrome.tabs?.captureVisibleTab) {
-          return { ok: false, error: 'tabs.captureVisibleTab not available' };
-        }
-        const windowId = sender.tab?.windowId ?? chrome.windows?.WINDOW_ID_CURRENT;
-        const dataUrl = await new Promise<string>((resolve, reject) => {
-          chrome.tabs.captureVisibleTab(windowId, { format: 'png' }, (res) => {
-            if (chrome.runtime.lastError || !res) {
-              reject(new Error(chrome.runtime.lastError?.message || 'Screenshot failed'));
-            } else {
-              resolve(res);
-            }
-          });
-        });
-        return { ok: true, data: { dataUrl } };
       }
       case 'OPEN_EXTENSION_POPUP': {
         if (chrome.action?.openPopup) {
@@ -340,19 +329,16 @@ async function processMessage(
           : { ok: false, error: result.error || 'Failed to register Netflix script' };
       }
       case 'DISABLE_NETFLIX_MODULE': {
-        const result = await disableNetflixModule();
-        return { ok: true, data: result };
+        return { ok: true, data: await disableNetflixModule() };
       }
       case 'GET_NETFLIX_MODULE_STATUS': {
         const settings = await getSettings();
-        const hasPermission = await hasNetflixPermissions();
-        const registered = await isNetflixScriptRegistered();
         return {
           ok: true,
           data: {
             enabled: settings.netflixModuleEnabled,
-            hasPermission,
-            registered
+            hasPermission: await hasNetflixPermissions(),
+            registered: await isNetflixScriptRegistered()
           }
         };
       }

@@ -1,4 +1,4 @@
-import type { Json3Event, Json3Response, SubtitleCue } from '../types/subtitles';
+import { isValidTranslationText, type Json3Event, type Json3Response, type SubtitleCue } from '../types/subtitles';
 import {
   cleanSubtitleText,
   normalizeWord,
@@ -71,28 +71,24 @@ export class SubtitleEngine {
     return this.isAsrTrack;
   }
 
-  public applyTranslations(
-    batch: Array<{ id: string; text: string; errorProvider?: string }>
-  ): boolean {
+  public applyTranslations(batch: Array<{ id: string; text: string }>): boolean {
     if (!batch || batch.length === 0) return false;
     const map = new Map<string, string>();
-    const errors = new Map<string, string>();
     for (const item of batch) {
-      if (!item?.id) continue;
-      if (item.text) map.set(item.id, item.text);
-      if (item.errorProvider) errors.set(item.id, item.errorProvider);
+      if (item && item.id && isValidTranslationText(item.text)) {
+        map.set(item.id, item.text.trim());
+      }
     }
+    if (map.size === 0) return false;
     let changed = false;
     this.cues = this.cues.map((cue) => {
       const tr = map.get(cue.id);
-      const error = errors.get(cue.id);
       if (tr !== undefined && cue.translation !== tr) {
         changed = true;
-        return { ...cue, translation: tr, translationError: undefined };
-      }
-      if (error && cue.translationError !== error) {
-        changed = true;
-        return { ...cue, translationError: error };
+        return {
+          ...cue,
+          translation: tr
+        };
       }
       return cue;
     });
@@ -104,72 +100,58 @@ export class SubtitleEngine {
     primaryCues: SubtitleCue[]
   ): void {
     if (!batch || batch.length === 0) return;
+    const validItems = batch.filter((item) => item && item.id && isValidTranslationText(item.text));
+    if (validItems.length === 0) return;
 
     const primaryMap = new Map<string, SubtitleCue>();
     for (const c of primaryCues) {
       primaryMap.set(c.id, c);
     }
 
-    // Keep native translated cues and previously generated ones, but index them by
-    // their real cue id. The old implementation stored generated cues under the
-    // primary id while assigning them `tr-<id>` as cue.id, so every repeated batch
-    // (a cached load plus every progress update on Netflix) added another copy of
-    // the same translated cue. Binary search could then return a stale copy.
-    const cueMap = new Map<string, SubtitleCue>();
+    const existingMap = new Map<string, SubtitleCue>();
     for (const c of this.cues) {
-      cueMap.set(c.id, c);
+      existingMap.set(c.id, c);
     }
 
-    for (const item of batch) {
+    for (const item of validItems) {
       const orig = primaryMap.get(item.id);
-      if (!orig || !item.text) continue;
-      const cleanText = cleanSubtitleText(item.text);
-      const translatedId = `tr-${item.id}`;
-      cueMap.set(translatedId, {
-        id: translatedId,
-        startTime: orig.startTime,
-        endTime: orig.endTime,
-        text: cleanText,
-        translation: cleanText,
-        tokens: tokenizeCueText(translatedId, cleanText, orig.startTime, orig.endTime)
-      });
+      if (orig) {
+        const cleanText = cleanSubtitleText(item.text);
+        if (!isValidTranslationText(cleanText)) continue;
+        const translatedId = `tr-${item.id}`;
+        existingMap.set(translatedId, {
+          id: translatedId,
+          startTime: orig.startTime,
+          endTime: orig.endTime,
+          text: cleanText,
+          translation: cleanText,
+          tokens: tokenizeCueText(translatedId, cleanText, orig.startTime, orig.endTime)
+        });
+      }
     }
 
-    this.cues = Array.from(cueMap.values()).sort((a, b) => a.startTime - b.startTime);
+    this.cues = Array.from(existingMap.values()).sort((a, b) => a.startTime - b.startTime);
   }
 
-  /**
-   * Keep generated (`tr-<id>`) cues in sync with their primary cues. Netflix
-   * shortens the last cue as soon as captions disappear (empty text), but no new
-   * translation batch is sent in that case — without this sync the generated cue
-   * keeps its old 30s end time and the translation lingers until the next line.
-   */
+  /** Keep generated Netflix translations aligned when a live cue is closed. */
   public syncGeneratedCueTimings(primaryCues: SubtitleCue[]): void {
-    const primaryMap = new Map<string, SubtitleCue>();
-    for (const c of primaryCues) {
-      primaryMap.set(c.id, c);
-    }
-
+    const primaryMap = new Map(primaryCues.map((cue) => [cue.id, cue]));
     let changed = false;
     const updated = this.cues.map((cue) => {
       if (!cue.id.startsWith('tr-')) return cue;
-      const orig = primaryMap.get(cue.id.slice(3));
-      if (!orig) return cue;
-      if (cue.startTime === orig.startTime && cue.endTime === orig.endTime) return cue;
+      const primary = primaryMap.get(cue.id.slice(3));
+      if (!primary) return cue;
+      if (cue.startTime === primary.startTime && cue.endTime === primary.endTime) return cue;
       changed = true;
-      return { ...cue, startTime: orig.startTime, endTime: orig.endTime };
+      return { ...cue, startTime: primary.startTime, endTime: primary.endTime };
     });
-
-    if (!changed) return;
-    this.cues = updated.sort((a, b) => a.startTime - b.startTime);
+    if (changed) this.cues = updated.sort((a, b) => a.startTime - b.startTime);
   }
 
-  /** Exact lookup of the generated translation for a primary cue id. */
   public getGeneratedCue(primaryId: string): SubtitleCue | null {
     return this.cues.find((cue) => cue.id === `tr-${primaryId}`) ?? null;
   }
 
-  /** True when the engine holds a real native translated track, not generated cues. */
   public hasNativeCues(): boolean {
     return this.cues.some((cue) => !cue.id.startsWith('tr-'));
   }

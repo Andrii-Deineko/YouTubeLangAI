@@ -1,4 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import { isValidTranslationText } from '../types/subtitles';
 import type { AIExplanation, QuickTranslationResult } from '../types/vocabulary';
 
 interface CachedTranslationEntry {
@@ -16,7 +17,7 @@ interface CachedAIEntry {
 interface YTLangAIDBSchema extends DBSchema {
   subtitles: {
     key: string;
-    value: unknown;
+    value: { key: string; translations: Record<string, string>; updatedAt: number };
   };
   translations: {
     key: string;
@@ -79,7 +80,10 @@ export async function getCachedTranslation(
   const db = await getDB();
   const entry = await db.get('translations', key);
   if (!entry) return null;
-  if (Date.now() - entry.updatedAt > TRANSLATION_CACHE_TTL_MS) {
+  if (
+    Date.now() - entry.updatedAt > TRANSLATION_CACHE_TTL_MS ||
+    !isValidTranslationText(entry.result?.translation)
+  ) {
     void db.delete('translations', key);
     return null;
   }
@@ -90,6 +94,7 @@ export async function setCachedTranslation(
   key: string,
   result: QuickTranslationResult
 ): Promise<void> {
+  if (!isValidTranslationText(result?.translation)) return;
   const db = await getDB();
   const now = Date.now();
   await db.put('translations', {
@@ -107,7 +112,10 @@ export async function setCachedTranslation(
     const validEntries: CachedTranslationEntry[] = [];
 
     for (const item of all) {
-      if (now - item.updatedAt > TRANSLATION_CACHE_TTL_MS) {
+      if (
+        now - item.updatedAt > TRANSLATION_CACHE_TTL_MS ||
+        !isValidTranslationText(item.result?.translation)
+      ) {
         expiredKeys.push(item.key);
       } else {
         validEntries.push(item);
@@ -128,6 +136,57 @@ export async function setCachedTranslation(
     await tx.done;
   } catch {
     // Ignore eviction errors
+  }
+}
+
+export async function getCachedCueTranslations(
+  videoId: string,
+  targetLang: string,
+  provider = 'google'
+): Promise<Record<string, string>> {
+  if (!videoId || videoId === 'unknown' || !targetLang) return {};
+  try {
+    const db = await getDB();
+    const entry = await db.get(
+      'subtitles',
+      `tr:${provider}:${videoId}:${targetLang.toLowerCase()}`
+    );
+    if (!entry?.translations || Date.now() - entry.updatedAt > 30 * 24 * 60 * 60 * 1000) return {};
+    return Object.fromEntries(
+      Object.entries(entry.translations).filter(([, tr]) => isValidTranslationText(tr))
+    );
+  } catch {
+    return {};
+  }
+}
+
+export async function saveCachedCueTranslations(
+  videoId: string,
+  targetLang: string,
+  updates: Record<string, string>,
+  provider = 'google'
+): Promise<void> {
+  if (!videoId || videoId === 'unknown' || !targetLang) return;
+  const clean = Object.fromEntries(
+    Object.entries(updates)
+      .filter(([text, tr]) => Boolean(text) && isValidTranslationText(tr))
+      .map(([text, tr]) => [text, tr.trim()])
+  );
+  if (Object.keys(clean).length === 0) return;
+
+  try {
+    const db = await getDB();
+    const key = `tr:${provider}:${videoId}:${targetLang.toLowerCase()}`;
+    const existing = await db.get('subtitles', key);
+    const merged: Record<string, string> = {};
+    if (existing?.translations) {
+      for (const [k, v] of Object.entries(existing.translations)) {
+        if (isValidTranslationText(v)) merged[k] = v;
+      }
+    }
+    await db.put('subtitles', { key, translations: { ...merged, ...clean }, updatedAt: Date.now() });
+  } catch {
+    // Ignore
   }
 }
 

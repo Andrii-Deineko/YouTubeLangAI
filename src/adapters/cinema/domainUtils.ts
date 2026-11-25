@@ -29,26 +29,6 @@ export const DEFAULT_CINEMA_DOMAINS: readonly string[] = [
 ];
 
 /**
- * Builds Chrome Match Patterns compliant with MV3 specification.
- * Never uses invalid wildcards in TLD (*.hdrezka.* is strictly forbidden in Chrome).
- */
-export function buildCinemaMatchPatterns(
-  domains: readonly string[] = DEFAULT_CINEMA_DOMAINS
-): string[] {
-  const patterns: string[] = [];
-  for (const domain of domains) {
-    const clean = domain.trim().toLowerCase();
-    if (!clean) continue;
-    if (clean === 'localhost' || clean === '127.0.0.1') {
-      patterns.push(`*://${clean}/*`);
-    } else {
-      patterns.push(`*://*.${clean}/*`, `*://${clean}/*`);
-    }
-  }
-  return Array.from(new Set(patterns));
-}
-
-/**
  * Normalizes a domain/URL string into a clean lowercase hostname without protocol, www., path, query, or port.
  */
 export function normalizeDomain(input: string): string {

@@ -224,8 +224,8 @@ export default defineConfig(() => {
     host_permissions: [
       ...YOUTUBE_MATCHES,
       'https://translate.googleapis.com/*',
-      'https://clients5.google.com/*',
       'https://api.mymemory.translated.net/*',
+      'https://clients5.google.com/*',
       'https://api-free.deepl.com/*',
       'https://api.deepl.com/*'
     ],

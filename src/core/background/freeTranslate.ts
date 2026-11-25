@@ -1,4 +1,7 @@
-import type { FreeTranslateWordResult } from '../types/messages';
+import { getCachedCueTranslations, saveCachedCueTranslations } from '../storage/db';
+import type { TranslationRuntimeStatus } from '../types/messages';
+import type { TranslationProvider } from '../types/settings';
+import { isValidTranslationText, normalizeCueText } from '../types/subtitles';
 
 export interface CueItem {
   id: string;
@@ -7,171 +10,210 @@ export interface CueItem {
   endTime?: number;
 }
 
-export interface TranslatedCueItem {
-  id: string;
-  text: string;
-  /** Set when the selected provider failed for this cue. */
-  errorProvider?: string;
+export interface SingleParseResult {
+  translation: string;
+  alternatives: string[];
+  partOfSpeech?: string;
+  detectedLang?: string;
 }
 
-type TranslationProviderId = 'mymemory' | 'deepl' | 'google' | 'googleDict';
+type ProgressFn = (batch: Array<{ id: string; text: string }>, status: TranslationRuntimeStatus) => void;
 
-const providerCooldownUntil: Partial<Record<TranslationProviderId, number>> = {};
-const RATE_LIMIT_COOLDOWN_MS = 60_000;
-const QUOTA_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const DELIM = '\n|||\n';
+const COOLDOWN_MS = 60_000;
+const BG_DELAY_MS = 600;
+const HOT_AHEAD = 15;
+const BG_BATCH = 14;
+const GTX_MAX_CHARS = 1800;
+const MM_MAX_BYTES = 450;
 
-function assertProviderAvailable(provider: TranslationProviderId): void {
-  const until = providerCooldownUntil[provider] ?? 0;
-  if (until > Date.now()) {
-    throw new Error(`${providerLabel(provider)} is temporarily unavailable`);
-  }
+const utf8 = new TextEncoder();
+const byteLen = (s: string): number => utf8.encode(s).length;
+
+let gtxPausedUntil = 0;
+let mmPausedUntil = 0;
+let dictPausedUntil = 0;
+let deepLPausedUntil = 0;
+
+export function clearProviderCooldowns(): void {
+  gtxPausedUntil = 0;
+  mmPausedUntil = 0;
+  dictPausedUntil = 0;
+  deepLPausedUntil = 0;
 }
 
-function pauseProvider(provider: TranslationProviderId, durationMs: number): void {
-  providerCooldownUntil[provider] = Math.max(
-    providerCooldownUntil[provider] ?? 0,
-    Date.now() + durationMs
-  );
+const isPaused = (until: number): boolean => Date.now() < until;
+const sanitize = (raw: string): string => normalizeCueText(raw).replace(/\|\|\|/g, '|').trim();
+
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0 || signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const t = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(t);
+      resolve();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
-function providerLabel(provider?: string): string {
-  if (provider === 'deepl') return 'DeepL';
-  if (provider === 'google') return 'Google Translate';
-  if (provider === 'googleDict') return 'Google Dict';
-  return 'MyMemory';
-}
+function parseGtxJson(raw: unknown): SingleParseResult {
+  if (!Array.isArray(raw) || !Array.isArray(raw[0])) throw new Error('Invalid GTX response');
+  const translation = (raw[0] as Array<[string | null]>)
+    .map((s) => (Array.isArray(s) && typeof s[0] === 'string' ? s[0] : ''))
+    .join('')
+    .trim();
+  if (!isValidTranslationText(translation)) throw new Error('Invalid GTX translation');
 
-interface CachedSubtitleTrack {
-  savedAt: number;
-  translations: Record<string, string>; // cueId -> translatedText
-}
-
-const WORD_CACHE_STORAGE_KEY = 'ytai_free_word_cache';
-const SUBTITLE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const CUE_BATCH_SIZE = 25;
-const BATCH_DELIMITER = '\n|||\n';
-
-// Google's unauthenticated `gtx` endpoint allows roughly one request per second.
-// Two rapid requests get HTTP 429 with an HTML "Sorry..." page even though a
-// single request from the address bar works fine.
-const GOOGLE_MIN_INTERVAL_MS = 1200;
-let googleLastRequestAt = 0;
-let googleQueue: Promise<unknown> = Promise.resolve();
-
-function fetchGoogleSpaced(url: string): Promise<Response> {
-  const run = googleQueue.then(async () => {
-    assertProviderAvailable('google');
-    const waitMs = Math.max(0, GOOGLE_MIN_INTERVAL_MS - (Date.now() - googleLastRequestAt));
-    if (waitMs > 0) {
-      await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
+  const alternatives: string[] = [];
+  let partOfSpeech: string | undefined;
+  if (Array.isArray(raw[1])) {
+    for (const d of raw[1]) {
+      if (!Array.isArray(d)) continue;
+      if (!partOfSpeech && typeof d[0] === 'string' && d[0].trim()) partOfSpeech = d[0].trim();
+      for (const c of Array.isArray(d[1]) ? d[1] : []) {
+        if (typeof c === 'string' && isValidTranslationText(c) && !alternatives.includes(c.trim())) {
+          alternatives.push(c.trim());
+        }
+      }
     }
-    googleLastRequestAt = Date.now();
-    const response = await fetch(url);
-    if (response.status === 429) {
-      pauseProvider('google', RATE_LIMIT_COOLDOWN_MS);
-      throw new Error('Google GTX request failed with HTTP 429');
+  }
+  return {
+    translation,
+    alternatives: alternatives.slice(0, 6),
+    partOfSpeech,
+    detectedLang: typeof raw[2] === 'string' ? raw[2] : undefined
+  };
+}
+
+async function fetchGtx(q: string, sl: string, tl: string, dict: boolean, signal?: AbortSignal): Promise<SingleParseResult> {
+  if (isPaused(gtxPausedUntil)) throw new Error('GTX cooldown');
+  const dt = dict ? '&dt=t&dt=bd&dt=rm' : '&dt=t';
+  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(sl)}&tl=${encodeURIComponent(tl)}${dt}&q=${encodeURIComponent(q)}`;
+  const res = await fetch(url, { signal });
+  if (res.status === 429 || res.status === 403) {
+    gtxPausedUntil = Date.now() + COOLDOWN_MS;
+    throw new Error(`GTX HTTP ${res.status}`);
+  }
+  if (!res.ok) throw new Error(`GTX HTTP ${res.status}`);
+  const body = await res.text();
+  if (!body || /^\s*</.test(body)) {
+    gtxPausedUntil = Date.now() + COOLDOWN_MS;
+    throw new Error('GTX challenge');
+  }
+  return parseGtxJson(JSON.parse(body));
+}
+
+function splitToMaxBytes(text: string, maxBytes: number): string[] {
+  if (byteLen(text) <= maxBytes) return [text];
+  const chunks: string[] = [];
+  let cur = '';
+  for (const w of text.split(/\s+/)) {
+    const next = cur ? `${cur} ${w}` : w;
+    if (byteLen(next) <= maxBytes) {
+      cur = next;
+    } else {
+      if (cur) chunks.push(cur);
+      if (byteLen(w) <= maxBytes) {
+        cur = w;
+      } else {
+        cur = '';
+        for (const ch of w) {
+          if (byteLen(cur + ch) > maxBytes) {
+            if (cur) chunks.push(cur);
+            cur = ch;
+          } else cur += ch;
+        }
+      }
     }
-    return response;
-  });
-  googleQueue = run.then(
-    () => undefined,
-    () => undefined
-  );
-  return run;
+  }
+  if (cur) chunks.push(cur);
+  return chunks;
 }
 
-async function fetchGoogle(url: string): Promise<Response> {
-  return fetchGoogleSpaced(url);
-}
+async function fetchMyMemory(
+  q: string,
+  sl: string,
+  tl: string,
+  email?: string,
+  signal?: AbortSignal
+): Promise<string> {
+  if (isPaused(mmPausedUntil)) throw new Error('MyMemory cooldown');
+  const cleanSl = sl.trim().toLowerCase().split('-')[0];
+  const src =
+    cleanSl && cleanSl !== 'auto' && cleanSl !== 'unknown' && cleanSl !== 'und'
+      ? cleanSl
+      : /[а-яё]/i.test(q) ? 'ru' : /[іїєґ]/i.test(q) ? 'uk' : 'en';
+  const dst = tl.trim().toLowerCase().split('-')[0] || 'ru';
+  if (src === dst) throw new Error('Same language');
 
-/**
- * Free endpoint used by Chrome's dictionary. No key, no daily quota,
- * and unlike the `gtx` endpoint it tolerates rapid sequential requests.
- * Multiple `q` parameters are translated in a single request.
- */
-async function fetchGoogleDictTexts(
-  texts: string[],
-  sourceLang: string,
-  targetLang: string
-): Promise<string[]> {
-  if (texts.length === 0) return [];
-  assertProviderAvailable('googleDict');
-  const sl = !sourceLang || sourceLang === 'unknown' ? 'auto' : sourceLang;
-  const params = new URLSearchParams({ client: 'dict-chrome-ex', sl, tl: targetLang });
-  for (const text of texts) params.append('q', text);
-
-  const response = await fetch(`https://clients5.google.com/translate_a/t?${params.toString()}`);
-  if (response.status === 429) {
-    pauseProvider('googleDict', RATE_LIMIT_COOLDOWN_MS);
+  const params = new URLSearchParams({ q, langpair: `${src}|${dst}` });
+  if (email?.trim()) params.set('de', email.trim());
+  const res = await fetch(`https://api.mymemory.translated.net/get?${params}`, { signal });
+  if (res.status === 429 || res.status === 403) {
+    mmPausedUntil = Date.now() + COOLDOWN_MS;
+    throw new Error(`MyMemory HTTP ${res.status}`);
   }
-  if (!response.ok) throw new Error(`Google Dict request failed with HTTP ${response.status}`);
-  const json: unknown = await response.json();
-  if (!Array.isArray(json)) throw new Error('Invalid Google Dict response');
+  if (!res.ok) throw new Error(`MyMemory HTTP ${res.status}`);
 
-  const results = json.map((item) => {
-    if (Array.isArray(item)) return typeof item[0] === 'string' ? item[0] : '';
-    return typeof item === 'string' ? item : '';
-  });
-  if (results.length !== texts.length) throw new Error('Google Dict response length mismatch');
-  if (results.some((text) => !text.trim())) {
-    throw new Error('Google Dict returned an empty translation');
-  }
-  return results;
-}
-
-export interface TranslationProviderConfig {
-  provider?: TranslationProviderId;
-  myMemoryEmail?: string;
-  deeplApiKey?: string;
-}
-
-async function fetchMyMemoryText(
-  text: string,
-  sourceLang: string,
-  targetLang: string,
-  email?: string
-): Promise<{ text: string; detectedSourceLanguage?: string }> {
-  assertProviderAvailable('mymemory');
-  const source =
-    !sourceLang || sourceLang === 'auto' || sourceLang === 'unknown'
-      ? 'autodetect'
-      : sourceLang;
-  const params = new URLSearchParams({
-    q: text,
-    langpair: `${source}|${targetLang}`
-  });
-  const cleanEmail = email?.trim();
-  if (cleanEmail) params.set('de', cleanEmail);
-
-  const response = await fetch(`https://api.mymemory.translated.net/get?${params.toString()}`);
-  if (response.status === 429) {
-    pauseProvider('mymemory', RATE_LIMIT_COOLDOWN_MS);
-  }
-  if (!response.ok) {
-    throw new Error(`MyMemory request failed with HTTP ${response.status}`);
-  }
-  const payload = (await response.json()) as {
-    responseData?: { translatedText?: string; detectedLanguage?: string };
+  const data = (await res.json()) as {
+    responseData?: { translatedText?: string };
     responseStatus?: number | string;
     responseDetails?: string;
     quotaFinished?: boolean;
   };
-  if (payload.quotaFinished) {
-    pauseProvider('mymemory', QUOTA_COOLDOWN_MS);
-    throw new Error('MyMemory daily quota is exhausted');
+  const tr = data.responseData?.translatedText?.trim() ?? '';
+  if (
+    data.quotaFinished ||
+    Number(data.responseStatus) === 429 ||
+    /MYMEMORY WARNING|QUOTA EXCEEDED|TOO MANY REQUESTS/i.test(`${data.responseDetails ?? ''} ${tr}`)
+  ) {
+    mmPausedUntil = Date.now() + COOLDOWN_MS;
+    throw new Error('MyMemory quota exceeded');
   }
-  if (Number(payload.responseStatus ?? 200) !== 200) {
-    if (/quota|limit|too many/i.test(payload.responseDetails ?? '')) {
-      pauseProvider('mymemory', QUOTA_COOLDOWN_MS);
-    }
-    throw new Error(payload.responseDetails || 'MyMemory translation failed');
+  if (Number(data.responseStatus ?? 200) !== 200 || !isValidTranslationText(tr)) {
+    throw new Error(data.responseDetails || 'Invalid MyMemory response');
   }
-  const translated = payload.responseData?.translatedText?.trim();
-  if (!translated) throw new Error('MyMemory returned an empty translation');
-  return {
-    text: translated,
-    detectedSourceLanguage: payload.responseData?.detectedLanguage
-  };
+  return tr;
+}
+
+async function fetchGoogleDict(
+  texts: string[],
+  sl: string,
+  tl: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  if (isPaused(dictPausedUntil)) throw new Error('Google Dict cooldown');
+  const params = new URLSearchParams({
+    client: 'dict-chrome-ex',
+    sl: sl && sl !== 'unknown' ? sl : 'auto',
+    tl
+  });
+  for (const text of texts) params.append('q', text);
+  const res = await fetch(`https://clients5.google.com/translate_a/t?${params}`, { signal });
+  if (res.status === 429 || res.status === 403) {
+    dictPausedUntil = Date.now() + COOLDOWN_MS;
+    throw new Error(`Google Dict HTTP ${res.status}`);
+  }
+  if (!res.ok) throw new Error(`Google Dict HTTP ${res.status}`);
+  const raw: unknown = await res.json();
+  if (!Array.isArray(raw) || raw.length !== texts.length) {
+    throw new Error('Invalid Google Dict response');
+  }
+  const translated = raw.map((item) =>
+    Array.isArray(item) && typeof item[0] === 'string'
+      ? item[0].trim()
+      : typeof item === 'string'
+        ? item.trim()
+        : ''
+  );
+  if (!translated.every(isValidTranslationText)) {
+    throw new Error('Invalid Google Dict translation');
+  }
+  return translated;
 }
 
 function mapDeepLLanguage(language: string, target: boolean): string | undefined {
@@ -184,23 +226,23 @@ function mapDeepLLanguage(language: string, target: boolean): string | undefined
   return clean.toUpperCase();
 }
 
-async function fetchDeepLTexts(
+async function fetchDeepL(
   texts: string[],
-  sourceLang: string,
-  targetLang: string,
-  apiKey: string
-): Promise<Array<{ text: string; detectedSourceLanguage?: string }>> {
-  assertProviderAvailable('deepl');
+  sl: string,
+  tl: string,
+  apiKey: string,
+  signal?: AbortSignal
+): Promise<string[]> {
+  if (isPaused(deepLPausedUntil)) throw new Error('DeepL cooldown');
   const cleanKey = apiKey.trim();
   if (!cleanKey) throw new Error('DeepL API key is not configured');
+  const target = mapDeepLLanguage(tl, true);
+  if (!target) throw new Error(`Invalid DeepL target language: ${tl}`);
   const endpoint = cleanKey.endsWith(':fx')
     ? 'https://api-free.deepl.com/v2/translate'
     : 'https://api.deepl.com/v2/translate';
-  const source = mapDeepLLanguage(sourceLang, false);
-  const target = mapDeepLLanguage(targetLang, true);
-  if (!target) throw new Error(`DeepL target language is invalid: ${targetLang}`);
-
-  const response = await fetch(endpoint, {
+  const source = mapDeepLLanguage(sl, false);
+  const res = await fetch(endpoint, {
     method: 'POST',
     headers: {
       Authorization: `DeepL-Auth-Key ${cleanKey}`,
@@ -210,306 +252,224 @@ async function fetchDeepLTexts(
       text: texts,
       target_lang: target,
       ...(source ? { source_lang: source } : {})
-    })
+    }),
+    signal
   });
-  if (response.status === 429 || response.status === 456) {
-    pauseProvider(
-      'deepl',
-      response.status === 456 ? QUOTA_COOLDOWN_MS : RATE_LIMIT_COOLDOWN_MS
-    );
+  if (res.status === 429 || res.status === 456) {
+    deepLPausedUntil = Date.now() + (res.status === 456 ? 24 * 60 * 60 * 1000 : COOLDOWN_MS);
+    throw new Error(`DeepL HTTP ${res.status}`);
   }
-  if (!response.ok) {
-    throw new Error(`DeepL request failed with HTTP ${response.status}`);
+  if (!res.ok) throw new Error(`DeepL HTTP ${res.status}`);
+  const raw = (await res.json()) as { translations?: Array<{ text?: string }> };
+  const translated = raw.translations?.map((item) => item.text?.trim() ?? '') ?? [];
+  if (translated.length !== texts.length || !translated.every(isValidTranslationText)) {
+    throw new Error('Invalid DeepL response');
   }
-  const payload = (await response.json()) as {
-    translations?: Array<{ text?: string; detected_source_language?: string }>;
-  };
-  if (!Array.isArray(payload.translations) || payload.translations.length !== texts.length) {
-    throw new Error('DeepL returned an invalid translation response');
-  }
-  return payload.translations.map((item) => {
-    const translatedText = item.text?.trim();
-    if (!translatedText) throw new Error('DeepL returned an empty translation');
-    return {
-      text: translatedText,
-      detectedSourceLanguage: item.detected_source_language
-    };
-  });
+  return translated;
 }
 
-// In-memory LRU cache for word translations
-const wordMemoryCache = new Map<string, FreeTranslateWordResult>();
-let isStorageWordCacheLoaded = false;
-let isStorageWordCacheSaving = false;
-let pendingSaveStorageWordCache = false;
-
-// In-flight request deduplication
-const inFlightWordRequests = new Map<string, Promise<FreeTranslateWordResult>>();
-const inFlightCueRequests = new Map<string, Promise<TranslatedCueItem[]>>();
-
-async function loadWordCacheFromStorage(): Promise<void> {
-  if (isStorageWordCacheLoaded) return;
-  try {
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      const res = await chrome.storage.local.get(WORD_CACHE_STORAGE_KEY);
-      const raw = res[WORD_CACHE_STORAGE_KEY];
-      if (Array.isArray(raw)) {
-        for (const item of raw) {
-          if (item && typeof item === 'object' && item.key && item.data) {
-            wordMemoryCache.set(item.key, item.data);
-          }
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('[YT-Lang-AI] Error loading word cache from storage:', err);
-  } finally {
-    isStorageWordCacheLoaded = true;
-  }
-}
-
-async function persistWordCacheToStorage(): Promise<void> {
-  if (isStorageWordCacheSaving) {
-    pendingSaveStorageWordCache = true;
-    return;
-  }
-  isStorageWordCacheSaving = true;
-
-  try {
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      const entries = Array.from(wordMemoryCache.entries()).map(([key, data]) => ({
-        key,
-        data
-      }));
-      await chrome.storage.local.set({ [WORD_CACHE_STORAGE_KEY]: entries });
-    }
-  } catch (err) {
-    console.warn('[YT-Lang-AI] Error saving word cache to storage:', err);
-  } finally {
-    isStorageWordCacheSaving = false;
-    if (pendingSaveStorageWordCache) {
-      pendingSaveStorageWordCache = false;
-      void persistWordCacheToStorage();
-    }
-  }
-}
-
-function buildWordCacheKey(
-  sourceLang: string,
-  targetLang: string,
-  word: string,
-  sentence?: string
-): string {
-  const cleanWord = word.trim().toLowerCase();
-  const cleanSentence = sentence ? sentence.trim().slice(0, 100) : '';
-  return `${sourceLang || 'auto'}:${targetLang}:${cleanWord}:${cleanSentence}`;
-}
-
-interface SingleParseResult {
-  translation: string;
-  alternatives: string[];
-  partOfSpeech?: string;
-  detectedLang?: string;
-  /** Selected provider failed — do not present the original text as a translation. */
-  unavailable?: boolean;
-  errorProvider?: string;
-}
-
-function parseSingleResponse(raw: unknown): SingleParseResult {
-  if (!Array.isArray(raw)) {
-    throw new Error('Google GTX returned an invalid translation response');
-  }
-
-  // 1. Primary text translation from raw[0]
-  const segments = Array.isArray(raw[0]) ? raw[0] : [];
-  const parts: string[] = [];
-  for (const seg of segments) {
-    if (Array.isArray(seg) && typeof seg[0] === 'string') {
-      parts.push(seg[0]);
-    }
-  }
-  const translation = parts.join('').trim();
-  if (!translation) throw new Error('Google GTX returned an empty translation');
-
-  // 2. Detected language from raw[2]
-  const detectedLang = typeof raw[2] === 'string' ? raw[2] : undefined;
-
-  // 3. Dictionary / Synonyms / Alternatives from raw[1]
-  const alternatives: string[] = [];
-  let partOfSpeech: string | undefined;
-
-  if (Array.isArray(raw[1])) {
-    for (const dictEntry of raw[1]) {
-      if (!Array.isArray(dictEntry)) continue;
-      if (!partOfSpeech && typeof dictEntry[0] === 'string' && dictEntry[0].trim()) {
-        partOfSpeech = dictEntry[0].trim();
-      }
-      if (Array.isArray(dictEntry[1])) {
-        for (const candidate of dictEntry[1]) {
-          if (
-            typeof candidate === 'string' &&
-            candidate.trim() &&
-            candidate.trim().toLowerCase() !== translation.toLowerCase() &&
-            !alternatives.includes(candidate.trim())
-          ) {
-            alternatives.push(candidate.trim());
-          }
-        }
-      }
-    }
-  }
-
-  return {
-    translation,
-    alternatives: alternatives.slice(0, 6),
-    partOfSpeech,
-    detectedLang
-  };
-}
-
-async function fetchSingleText(
-  text: string,
-  sourceLang: string,
-  targetLang: string,
-  includeDictionary: boolean,
-  config: TranslationProviderConfig
-): Promise<SingleParseResult> {
-  const cleanText = text.trim();
-  if (!cleanText) {
-    return { translation: '', alternatives: [] };
-  }
-
-  if ((config.provider ?? 'mymemory') === 'mymemory') {
-    const result = await fetchMyMemoryText(
-      cleanText,
-      sourceLang,
-      targetLang,
-      config.myMemoryEmail
-    );
-    return {
-      translation: result.text,
-      alternatives: [],
-      detectedLang: result.detectedSourceLanguage?.toLowerCase()
-    };
-  }
-
-  if (config.provider === 'deepl') {
-    const [result] = await fetchDeepLTexts(
-      [cleanText],
-      sourceLang,
-      targetLang,
-      config.deeplApiKey ?? ''
-    );
-    return {
-      translation: result.text,
-      alternatives: [],
-      detectedLang: result.detectedSourceLanguage?.toLowerCase()
-    };
-  }
-
-  if (config.provider === 'googleDict') {
-    const [result] = await fetchGoogleDictTexts([cleanText], sourceLang, targetLang);
-    return { translation: result, alternatives: [] };
-  }
-
-  const sl = sourceLang && sourceLang !== 'unknown' ? sourceLang : 'auto';
-  const dtParams = includeDictionary ? '&dt=t&dt=bd&dt=rm' : '&dt=t';
-  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(
-    sl
-  )}&tl=${encodeURIComponent(targetLang)}${dtParams}&q=${encodeURIComponent(cleanText)}`;
-
-  const res = await fetchGoogle(url);
-  if (!res.ok) {
-    throw new Error(`Google GTX request failed with HTTP ${res.status}`);
-  }
-
-  const json: unknown = await res.json();
-  return parseSingleResponse(json);
-}
-
-export async function freeTranslateWord(params: {
-  word: string;
-  sentence?: string;
-  sourceLang?: string;
-  targetLang: string;
-  provider?: 'mymemory' | 'deepl' | 'google' | 'googleDict';
+interface ProviderConfig {
+  provider: TranslationProvider;
   myMemoryEmail?: string;
   deeplApiKey?: string;
-}): Promise<FreeTranslateWordResult> {
-  await loadWordCacheFromStorage();
+}
 
-  const sl = params.sourceLang || 'auto';
+export async function translateSingleText(params: {
+  text: string;
+  sourceLang?: string;
+  targetLang: string;
+  includeDictionary?: boolean;
+  provider: TranslationProvider;
+  myMemoryEmail?: string;
+  deeplApiKey?: string;
+}): Promise<SingleParseResult> {
+  const clean = params.text.trim();
+  const sl = params.sourceLang && params.sourceLang !== 'unknown' ? params.sourceLang : 'auto';
   const tl = params.targetLang || 'ru';
-  const provider = params.provider ?? 'mymemory';
-  const config: TranslationProviderConfig = {
-    provider,
-    myMemoryEmail: params.myMemoryEmail,
-    deeplApiKey: params.deeplApiKey
-  };
-  const cacheKey = `${provider}:${buildWordCacheKey(sl, tl, params.word, params.sentence)}`;
-
-  const cached = wordMemoryCache.get(cacheKey);
-  if (cached) {
-    return { ...cached, fromCache: true };
+  if (params.provider === 'google') {
+    return fetchGtx(clean, sl, tl, Boolean(params.includeDictionary));
+  }
+  if (params.provider === 'googleDict') {
+    const [translation] = await fetchGoogleDict([clean], sl, tl);
+    return { translation, alternatives: [] };
+  }
+  if (params.provider === 'deepl') {
+    const [translation] = await fetchDeepL([clean], sl, tl, params.deeplApiKey ?? '');
+    return { translation, alternatives: [] };
   }
 
-  const inFlight = inFlightWordRequests.get(cacheKey);
-  if (inFlight) {
-    return inFlight;
-  }
-
-  const task = (async (): Promise<FreeTranslateWordResult> => {
-    let wordRes: SingleParseResult;
-    try {
-      wordRes = await fetchSingleText(params.word, sl, tl, true, config);
-    } catch (err) {
-      console.warn(`[YT-Lang-AI] ${providerLabel(provider)} translation failed:`, err);
-      wordRes = {
-        translation: '',
-        alternatives: [],
-        unavailable: true,
-        errorProvider: providerLabel(provider)
-      };
+  {
+    const out: string[] = [];
+    for (const part of splitToMaxBytes(clean, MM_MAX_BYTES)) {
+      if (out.length > 0) await delay(250);
+      out.push(await fetchMyMemory(part, sl, tl, params.myMemoryEmail));
     }
+    return { translation: out.join(' ').trim(), alternatives: [] };
+  }
+}
 
-    let sentenceTranslation = '';
-    if (params.sentence && params.sentence.trim()) {
-      const sentenceText = params.sentence.trim();
-      try {
-        const sRes = await fetchSingleText(sentenceText, sl, tl, false, config);
-        sentenceTranslation = sRes.translation;
-      } catch (err) {
-        console.warn(`[YT-Lang-AI] ${providerLabel(provider)} sentence translation failed:`, err);
-        sentenceTranslation = '';
+async function translateChunk(
+  items: string[],
+  fetchBatchOrOne: (q: string) => Promise<string>,
+  paused: () => boolean,
+  perItemGapMs: number,
+  signal?: AbortSignal
+): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  if (!items.length || paused() || signal?.aborted) return out;
+
+  if (items.length > 1) {
+    try {
+      const parts = (await fetchBatchOrOne(items.join(DELIM))).split(/\s*\|\s*\|\s*\|\s*/).map((s) => s.trim());
+      if (parts.length === items.length && parts.every(isValidTranslationText)) {
+        items.forEach((t, i) => (out[t] = parts[i]));
+        return out;
+      }
+    } catch (e) {
+      if ((e as Error)?.name === 'AbortError' || paused()) return out;
+    }
+  }
+
+  for (let i = 0; i < items.length; i++) {
+    if (signal?.aborted || paused()) break;
+    if (i > 0) await delay(perItemGapMs, signal);
+    try {
+      const tr = await fetchBatchOrOne(items[i]);
+      if (isValidTranslationText(tr)) out[items[i]] = tr.trim();
+    } catch (e) {
+      if ((e as Error)?.name === 'AbortError' || paused()) break;
+    }
+  }
+  return out;
+}
+
+async function translateBatch(
+  texts: string[],
+  sl: string,
+  tl: string,
+  config: ProviderConfig,
+  signal?: AbortSignal
+) {
+  if (config.provider === 'google') {
+    const map = await translateChunk(
+      texts,
+      async (q) => (await fetchGtx(q, sl, tl, false, signal)).translation,
+      () => isPaused(gtxPausedUntil),
+      120,
+      signal
+    );
+    return { map, failed: Object.keys(map).length === 0 };
+  }
+
+  if (config.provider === 'googleDict' || config.provider === 'deepl') {
+    const map: Record<string, string> = {};
+    try {
+      const translated =
+        config.provider === 'googleDict'
+          ? await fetchGoogleDict(texts, sl, tl, signal)
+          : await fetchDeepL(texts, sl, tl, config.deeplApiKey ?? '', signal);
+      texts.forEach((text, index) => {
+        if (isValidTranslationText(translated[index])) map[text] = translated[index];
+      });
+    } catch (error) {
+      if ((error as Error)?.name === 'AbortError') return { map, failed: false };
+    }
+    return { map, failed: Object.keys(map).length === 0 };
+  }
+
+  const map: Record<string, string> = {};
+  if (!signal?.aborted && !isPaused(mmPausedUntil)) {
+    const mmChunks: string[][] = [];
+    let cur: string[] = [];
+    let curBytes = 0;
+    const delimBytes = byteLen(DELIM);
+    for (const t of texts) {
+      const b = byteLen(t);
+      if (cur.length > 0 && curBytes + delimBytes + b > MM_MAX_BYTES) {
+        mmChunks.push(cur);
+        cur = [t];
+        curBytes = b;
+      } else {
+        cur.push(t);
+        curBytes = cur.length === 1 ? b : curBytes + delimBytes + b;
       }
     }
+    if (cur.length) mmChunks.push(cur);
 
-    const result: FreeTranslateWordResult = {
-      word: params.word,
-      translation: wordRes.translation,
-      sentenceTranslation,
-      alternatives: wordRes.alternatives,
-      partOfSpeech: wordRes.partOfSpeech,
-      detectedLang: wordRes.detectedLang,
-      translationUnavailable: wordRes.unavailable,
-      errorProvider: wordRes.errorProvider
-    };
-
-    // Never cache a failed translation: the original text would then be shown
-    // as if it were a translation for the rest of the session ("en -> en").
-    if (!wordRes.unavailable && wordRes.translation) {
-      wordMemoryCache.set(cacheKey, result);
-      void persistWordCacheToStorage();
+    for (let i = 0; i < mmChunks.length; i++) {
+      if (signal?.aborted || isPaused(mmPausedUntil)) break;
+      if (i > 0) await delay(250, signal);
+      Object.assign(
+        map,
+        await translateChunk(
+          mmChunks[i],
+          async (q) => {
+            const parts = splitToMaxBytes(q, MM_MAX_BYTES);
+            const res: string[] = [];
+            for (let k = 0; k < parts.length; k++) {
+              if (k > 0) await delay(250, signal);
+              res.push(await fetchMyMemory(parts[k], sl, tl, config.myMemoryEmail, signal));
+            }
+            return res.join(' ').trim();
+          },
+          () => isPaused(mmPausedUntil),
+          250,
+          signal
+        )
+      );
     }
+  }
 
-    return result;
-  })();
+  return { map, failed: Object.keys(map).length === 0 };
+}
 
-  inFlightWordRequests.set(cacheKey, task);
-  try {
-    return await task;
-  } finally {
-    inFlightWordRequests.delete(cacheKey);
+function providerPauseUntil(provider: TranslationProvider): number {
+  if (provider === 'google') return gtxPausedUntil;
+  if (provider === 'googleDict') return dictPausedUntil;
+  if (provider === 'deepl') return deepLPausedUntil;
+  return mmPausedUntil;
+}
+
+interface JobState {
+  version: number;
+  cache: Record<string, string>;
+  controller: AbortController;
+  onProgress?: ProgressFn;
+}
+
+const jobs = new Map<string, JobState>();
+
+function takeBatchTexts(cues: CueItem[], cache: Record<string, string>, maxCues: number): string[] {
+  const out: string[] = [];
+  for (const cue of cues) {
+    const norm = sanitize(cue.text);
+    if (!norm || cache[norm] || out.includes(norm)) continue;
+    const candidate = [...out, norm].join(DELIM);
+    if (out.length > 0 && (out.length >= maxCues || candidate.length > GTX_MAX_CHARS || encodeURIComponent(candidate).length > 3600)) break;
+    out.push(norm);
+  }
+  return out;
+}
+
+function mapCues(cues: CueItem[], map: Record<string, string>): Array<{ id: string; text: string }> {
+  return cues.flatMap((c) => {
+    const tr = map[sanitize(c.text)];
+    return isValidTranslationText(tr) ? [{ id: c.id, text: tr }] : [];
+  });
+}
+
+function cooldownStatus(provider: TranslationProvider): TranslationRuntimeStatus {
+  const now = Date.now();
+  const retryAt = providerPauseUntil(provider);
+  return { state: 'cooldown', retryAt: retryAt > now ? retryAt : now + 15_000 };
+}
+
+export function cancelCueTranslation(videoId?: string): void {
+  for (const [key, job] of jobs.entries()) {
+    if (videoId && !key.startsWith(`${videoId}:`)) continue;
+    job.version++;
+    job.controller.abort();
+    jobs.delete(key);
   }
 }
 
@@ -518,321 +478,110 @@ export async function translateCueBatch(params: {
   cues: CueItem[];
   sourceLang?: string;
   targetLang: string;
-  priorityTime?: number;
-  onBatchProgress?: (batch: TranslatedCueItem[]) => void;
-  provider?: 'mymemory' | 'deepl' | 'google' | 'googleDict';
+  provider: TranslationProvider;
   myMemoryEmail?: string;
   deeplApiKey?: string;
-}): Promise<TranslatedCueItem[]> {
-  const { videoId, cues, priorityTime } = params;
-  if (!cues || cues.length === 0) return [];
+  priorityTime?: number;
+  forceRetry?: boolean;
+  onBatchProgress?: ProgressFn;
+}): Promise<{ translations: Array<{ id: string; text: string }>; status: TranslationRuntimeStatus }> {
+  const {
+    videoId,
+    cues,
+    targetLang,
+    provider,
+    priorityTime = 0,
+    forceRetry = false,
+    onBatchProgress
+  } = params;
+  if (!cues.length) return { translations: [], status: { state: 'idle' } };
+  if (forceRetry) clearProviderCooldowns();
 
   const sl = params.sourceLang && params.sourceLang !== 'unknown' ? params.sourceLang : 'auto';
-  const tl = params.targetLang || 'ru';
-  const provider = params.provider ?? 'mymemory';
-  const cacheKey = `free_sub_tr:${provider}:${videoId}:${tl}`;
+  const tl = targetLang || 'ru';
+  const key = `${videoId}:${provider}:${sl}:${tl}`;
+  const stored = await getCachedCueTranslations(videoId, tl, provider);
+  const providerConfig: ProviderConfig = {
+    provider,
+    myMemoryEmail: params.myMemoryEmail,
+    deeplApiKey: params.deeplApiKey
+  };
 
-  let cachedTrack: CachedSubtitleTrack | undefined;
-  if (typeof chrome !== 'undefined' && chrome.storage?.local && videoId && videoId !== 'unknown') {
-    try {
-      const res = await chrome.storage.local.get(cacheKey);
-      const raw = res[cacheKey] as CachedSubtitleTrack | undefined;
-      if (raw && raw.translations && Date.now() - raw.savedAt < SUBTITLE_CACHE_TTL_MS) {
-        cachedTrack = raw;
-      }
-    } catch (err) {
-      console.warn('[YT-Lang-AI] Error checking subtitle cache:', err);
-    }
+  let job = jobs.get(key);
+  if (job) {
+    job.controller.abort();
+    job.version++;
+    job.cache = { ...stored, ...job.cache };
+    job.controller = new AbortController();
+    job.onProgress = onBatchProgress ?? job.onProgress;
+  } else {
+    job = { version: 1, cache: { ...stored }, controller: new AbortController(), onProgress: onBatchProgress };
+    jobs.set(key, job);
   }
 
-  // If already completely cached, return directly
-  if (cachedTrack) {
-    const allFound = cues.every((c) => cachedTrack?.translations[c.id]);
-    if (allFound) {
-      const results = cues.map((c) => ({
-        id: c.id,
-        text: cachedTrack?.translations[c.id] || c.text
-      }));
-      params.onBatchProgress?.(results);
-      return results;
+  const version = job.version;
+  const signal = job.controller.signal;
+  const rawIdx = cues.findIndex((c) => (c.endTime ?? (c.startTime ?? 0) + 4) >= priorityTime);
+  const curIdx = rawIdx >= 0 ? rawIdx : Math.max(0, cues.length - 1);
+
+  const runStep = async (texts: string[], emitNewOnly: boolean): Promise<'ok' | 'cooldown' | 'aborted'> => {
+    if (isPaused(providerPauseUntil(provider))) {
+      job!.onProgress?.(
+        emitNewOnly ? [] : mapCues(cues, job!.cache),
+        cooldownStatus(provider)
+      );
+      return 'cooldown';
     }
+    const { map, failed } = await translateBatch(texts, sl, tl, providerConfig, signal);
+    if (signal.aborted || job!.version !== version) return 'aborted';
+    if (Object.keys(map).length > 0) {
+      Object.assign(job!.cache, map);
+      void saveCachedCueTranslations(videoId, tl, map, provider);
+      if (emitNewOnly) job!.onProgress?.(mapCues(cues, map), { state: 'translating' });
+      return 'ok';
+    }
+    if (failed) {
+      job!.onProgress?.(
+        emitNewOnly ? [] : mapCues(cues, job!.cache),
+        cooldownStatus(provider)
+      );
+      return 'cooldown';
+    }
+    return 'ok';
+  };
+
+  const hotTexts = takeBatchTexts(cues.slice(curIdx, curIdx + HOT_AHEAD + 1), job.cache, HOT_AHEAD + 1);
+  if (hotTexts.length > 0) {
+    const res = await runStep(hotTexts, false);
+    if (res === 'cooldown') {
+      return { translations: mapCues(cues, job.cache), status: cooldownStatus(provider) };
+    }
+    if (res === 'aborted') return { translations: mapCues(cues, job.cache), status: { state: 'translating' } };
   }
 
-  // Deduplicate in-flight requests only for an identical cue set. On Netflix a new
-  // cue is emitted while the previous batch is still being translated (MyMemory
-  // translates cues one by one, which is slow). Keying only by video/language made
-  // those later requests reuse the old promise, so the new cue never got a
-  // translation and the overlay kept showing a stale line.
-  let cueSignature = 0;
-  for (const cue of cues) {
-    for (let i = 0; i < cue.id.length; i++) {
-      cueSignature = (cueSignature * 31 + cue.id.charCodeAt(i)) | 0;
-    }
-  }
-  const inFlightKey = `${provider}:${videoId}:${sl}:${tl}:${cues.length}:${cueSignature}`;
-  const existingInFlight = inFlightCueRequests.get(inFlightKey);
-  if (existingInFlight) {
-    return existingInFlight;
+  const translated = mapCues(cues, job.cache);
+  if (!cues.some((c) => sanitize(c.text) && !job!.cache[sanitize(c.text)])) {
+    job.onProgress?.(translated, { state: 'idle' });
+    jobs.delete(key);
+    return { translations: translated, status: { state: 'idle' } };
   }
 
-  const task = (async (): Promise<TranslatedCueItem[]> => {
-    const translationMap: Record<string, string> = {
-      ...(cachedTrack?.translations || {})
-    };
-    const errorMap: Record<string, string> = {};
+  job.onProgress?.(translated, { state: 'translating' });
 
-    // If some cues are already in cache, emit initial progress immediately
-    const alreadyCachedItems = cues
-      .filter((c) => translationMap[c.id])
-      .map((c) => ({ id: c.id, text: translationMap[c.id] }));
-    if (alreadyCachedItems.length > 0) {
-      params.onBatchProgress?.(alreadyCachedItems);
-    }
-
-    // Build batches of missing cues
-    const missingCues = cues.filter((c) => !translationMap[c.id]);
-    if (missingCues.length === 0) {
-      return cues.map((c) => ({ id: c.id, text: translationMap[c.id] || c.text }));
-    }
-
-    // Chunk missing cues into batches of CUE_BATCH_SIZE (25)
-    const batches: CueItem[][] = [];
-    for (let i = 0; i < missingCues.length; i += CUE_BATCH_SIZE) {
-      batches.push(missingCues.slice(i, i + CUE_BATCH_SIZE));
-    }
-
-    let orderedBatches = batches;
-
-    // Prioritize batches around priorityTime
-    if (typeof priorityTime === 'number' && priorityTime > 0 && batches.length > 1) {
-      // Find the batch closest to priorityTime
-      let closestBatchIdx = 0;
-      let minDistance = Number.POSITIVE_INFINITY;
-
-      for (let i = 0; i < batches.length; i++) {
-        const firstCue = batches[i][0];
-        const lastCue = batches[i][batches[i].length - 1];
-        const cueStart = firstCue.startTime ?? 0;
-        const cueEnd = lastCue.endTime ?? (cueStart + 5);
-
-        if (priorityTime >= cueStart && priorityTime <= cueEnd) {
-          closestBatchIdx = i;
-          break;
-        }
-
-        const dist = Math.min(
-          Math.abs(priorityTime - cueStart),
-          Math.abs(priorityTime - cueEnd)
-        );
-        if (dist < minDistance) {
-          minDistance = dist;
-          closestBatchIdx = i;
-        }
-      }
-
-      // Reorder batches: closest first, then +1, -1, +2, -2, etc.
-      const prioritizedBatches: CueItem[][] = [];
-      const usedIndices = new Set<number>();
-
-      const addIdx = (idx: number) => {
-        if (idx >= 0 && idx < batches.length && !usedIndices.has(idx)) {
-          usedIndices.add(idx);
-          prioritizedBatches.push(batches[idx]);
-        }
-      };
-
-      addIdx(closestBatchIdx);
-      for (let offset = 1; offset < batches.length; offset++) {
-        addIdx(closestBatchIdx + offset);
-        addIdx(closestBatchIdx - offset);
-      }
-
-      orderedBatches = prioritizedBatches;
-    }
-
-    let providerFailure: string | undefined;
-    for (const batch of orderedBatches) {
-      const batchResult = await translateSingleCueBatch(batch, sl, tl, {
-        provider,
-        myMemoryEmail: params.myMemoryEmail,
-        deeplApiKey: params.deeplApiKey
-      });
-      let hasFailure = false;
-      let hasSuccessfulTranslation = false;
-      for (const item of batchResult) {
-        const translatedText = item.text.trim();
-        if (translatedText && !item.errorProvider) {
-          translationMap[item.id] = translatedText;
-          hasSuccessfulTranslation = true;
-        }
-        if (item.errorProvider) {
-          errorMap[item.id] = item.errorProvider;
-          providerFailure = item.errorProvider;
-          hasFailure = true;
-        }
-      }
-      params.onBatchProgress?.(batchResult);
-      if (hasSuccessfulTranslation) {
-        saveProgress(videoId, cacheKey, translationMap);
-      }
-      // One provider failure is enough to stop this run. Rate-limit and quota
-      // errors otherwise make every remaining batch repeat the same doomed call.
-      if (hasFailure) break;
-    }
-
-    return cues.map((c) => ({
-      id: c.id,
-      text: translationMap[c.id] ?? '',
-      ...(errorMap[c.id] || (!translationMap[c.id] && providerFailure)
-        ? { errorProvider: errorMap[c.id] ?? providerFailure }
-        : {})
-    }));
-  })();
-
-  inFlightCueRequests.set(inFlightKey, task);
-  try {
-    return await task;
-  } finally {
-    inFlightCueRequests.delete(inFlightKey);
-  }
-}
-
-function saveProgress(videoId: string, cacheKey: string, translations: Record<string, string>): void {
-  if (typeof chrome !== 'undefined' && chrome.storage?.local && videoId && videoId !== 'unknown') {
-    const successfulTranslations = Object.fromEntries(
-      Object.entries(translations).filter(([, text]) => Boolean(text.trim()))
-    );
-    if (Object.keys(successfulTranslations).length === 0) return;
-    const toSave: CachedSubtitleTrack = {
-      savedAt: Date.now(),
-      translations: successfulTranslations
-    };
-    void chrome.storage.local.set({ [cacheKey]: toSave });
-  }
-}
-
-async function translateSingleCueBatch(
-  batch: CueItem[],
-  sourceLang: string,
-  targetLang: string,
-  config: TranslationProviderConfig
-): Promise<TranslatedCueItem[]> {
-  if (batch.length === 0) return [];
-
-  if (batch.length === 1) {
-    try {
-      const res = await fetchSingleText(batch[0].text, sourceLang, targetLang, false, config);
-      return [{ id: batch[0].id, text: res.translation }];
-    } catch (err) {
-      console.warn(`[YT-Lang-AI] ${providerLabel(config.provider)} cue translation failed:`, err);
-      return [
-        {
-          id: batch[0].id,
-          text: '',
-          errorProvider: providerLabel(config.provider)
-        }
-      ];
-    }
-  }
-
-  if ((config.provider ?? 'mymemory') === 'mymemory') {
-    const translated: TranslatedCueItem[] = [];
-    for (let index = 0; index < batch.length; index++) {
-      const cue = batch[index];
-      try {
-        const result = await fetchMyMemoryText(
-          cue.text.replace(/[\r\n]+/g, ' '),
-          sourceLang,
-          targetLang,
-          config.myMemoryEmail
-        );
-        translated.push({ id: cue.id, text: result.text });
-      } catch (err) {
-        console.warn('[YT-Lang-AI] MyMemory cue translation failed:', err);
-        for (let failedIndex = index; failedIndex < batch.length; failedIndex++) {
-          translated.push({
-            id: batch[failedIndex].id,
-            text: '',
-            errorProvider: 'MyMemory'
-          });
-        }
+  void (async () => {
+    const ordered = [...cues.slice(curIdx + HOT_AHEAD + 1), ...cues.slice(0, curIdx).reverse()];
+    while (!signal.aborted && job!.version === version) {
+      const batch = takeBatchTexts(ordered, job!.cache, BG_BATCH);
+      if (!batch.length) {
+        job!.onProgress?.([], { state: 'idle' });
         break;
       }
+      await delay(BG_DELAY_MS, signal);
+      if (signal.aborted || job!.version !== version) break;
+      if ((await runStep(batch, true)) !== 'ok') break;
     }
-    return translated;
-  }
+    if (job!.version === version) jobs.delete(key);
+  })();
 
-  if (config.provider === 'deepl') {
-    try {
-      const translations = await fetchDeepLTexts(
-        batch.map((cue) => cue.text.replace(/[\r\n]+/g, ' ')),
-        sourceLang,
-        targetLang,
-        config.deeplApiKey ?? ''
-      );
-      return batch.map((cue, index) => ({ id: cue.id, text: translations[index].text }));
-    } catch (err) {
-      console.warn('[YT-Lang-AI] DeepL batch translation failed:', err);
-      return batch.map((cue) => ({ id: cue.id, text: '', errorProvider: 'DeepL' }));
-    }
-  }
-
-  if (config.provider === 'googleDict') {
-    try {
-      const results = await fetchGoogleDictTexts(
-        batch.map((cue) => cue.text.replace(/[\r\n]+/g, ' ')),
-        sourceLang,
-        targetLang
-      );
-      return batch.map((cue, index) => ({ id: cue.id, text: results[index] }));
-    } catch (err) {
-      console.warn('[YT-Lang-AI] Google Dict batch failed:', err);
-      return batch.map((cue) => ({ id: cue.id, text: '', errorProvider: 'Google Dict' }));
-    }
-  }
-
-  // Join the whole batch into one request. If it fails, stop this batch instead
-  // of multiplying one HTTP 429 into dozens of line-by-line retries.
-  const joinedText = batch.map((c) => c.text.replace(/[\r\n]+/g, ' ')).join(BATCH_DELIMITER);
-
-  try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(
-      sourceLang
-    )}&tl=${encodeURIComponent(targetLang)}&dt=t&q=${encodeURIComponent(joinedText)}`;
-
-    const response = await fetchGoogle(url);
-    if (!response.ok) {
-      throw new Error(`Batch request failed with HTTP ${response.status}`);
-    }
-
-    const raw: unknown = await response.json();
-    if (!Array.isArray(raw) || !Array.isArray(raw[0])) {
-      throw new Error('Invalid batch translation format');
-    }
-
-    const fullTranslated = (raw[0] as Array<[string | null]>)
-      .map((seg) => (Array.isArray(seg) && typeof seg[0] === 'string' ? seg[0] : ''))
-      .join('');
-
-    const parts = fullTranslated.split(/\s*\|\|\|\s*/);
-
-    if (parts.length === batch.length) {
-      return batch.map((cue, idx) => ({
-        id: cue.id,
-        text: parts[idx].trim()
-      }));
-    }
-
-    console.warn(
-      `[YT-Lang-AI] Batch delimiter mismatch: expected ${batch.length}, got ${parts.length}.`
-    );
-  } catch (err) {
-    console.warn('[YT-Lang-AI] Google GTX batch translation failed:', err);
-  }
-
-  return batch.map((cue) => ({
-    id: cue.id,
-    text: '',
-    errorProvider: 'Google Translate'
-  }));
+  return { translations: translated, status: { state: 'translating' } };
 }

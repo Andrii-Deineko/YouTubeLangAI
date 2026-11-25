@@ -14,7 +14,6 @@ body {
   --ytai-bg-rgb: 15, 17, 23;
   --ytai-bg-opacity: 0.85;
   --ytai-surface: rgba(30, 41, 59, 0.75);
-  --ytai-surface-hover: rgba(51, 65, 85, 0.85);
   --ytai-text-primary: #f8fafc;
   --ytai-text-secondary: #94a3b8;
   --ytai-accent: #818cf8;
@@ -31,7 +30,6 @@ body {
   --ytai-bg-rgb: 0, 0, 0;
   --ytai-bg-opacity: 0.45;
   --ytai-surface: rgba(20, 20, 20, 0.8);
-  --ytai-surface-hover: rgba(35, 35, 35, 0.9);
   --ytai-text-primary: #ffffff;
   --ytai-text-secondary: #fde047;
   --ytai-accent: #f59e0b;
@@ -48,7 +46,6 @@ body {
   --ytai-bg-rgb: 30, 36, 48;
   --ytai-bg-opacity: 0.85;
   --ytai-surface: rgba(46, 52, 64, 0.8);
-  --ytai-surface-hover: rgba(67, 76, 94, 0.9);
   --ytai-text-primary: #eceff4;
   --ytai-text-secondary: #88c0d0;
   --ytai-accent: #5e81ac;
@@ -65,7 +62,6 @@ body {
   --ytai-bg-rgb: 28, 25, 23;
   --ytai-bg-opacity: 0.85;
   --ytai-surface: rgba(41, 37, 36, 0.85);
-  --ytai-surface-hover: rgba(68, 64, 60, 0.9);
   --ytai-text-primary: #f5f5f4;
   --ytai-text-secondary: #d6d3d1;
   --ytai-accent: #f97316;
@@ -82,7 +78,6 @@ body {
   --ytai-bg-rgb: 10, 14, 12;
   --ytai-bg-opacity: 0.85;
   --ytai-surface: rgba(6, 78, 59, 0.4);
-  --ytai-surface-hover: rgba(6, 95, 70, 0.55);
   --ytai-text-primary: #ecfdf5;
   --ytai-text-secondary: #6ee7b7;
   --ytai-accent: #10b981;

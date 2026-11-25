@@ -16,12 +16,14 @@ import type {
   UserSettings
 } from '../types/settings';
 import { DEFAULT_KEYBINDINGS, DEFAULT_SETTINGS } from '../types/settings';
+import { isValidTranslationText } from '../types/subtitles';
 import type { SubtitleCue, TrackMetadata } from '../types/subtitles';
 import type { AIExplanation } from '../types/vocabulary';
 import type {
   FreeTranslateCuesResponse,
   QuickTranslateResponse,
-  RuntimeRequest
+  RuntimeRequest,
+  TranslationRuntimeStatus
 } from '../types/messages';
 import { mountShadowUI, type MountedShadowUI } from './mountShadowUI';
 import { WordPopup } from '../components/WordPopup';
@@ -33,7 +35,6 @@ export class ContentRunner {
   private translatedEngine = new SubtitleEngine();
   private settings: UserSettings = { ...DEFAULT_SETTINGS };
   private trackMeta: TrackMetadata | null = null;
-  private translatedVideoId = '';
   private isAdShowing = false;
   private altPressed = false;
   private activePrimaryCue: SubtitleCue | null = null;
@@ -42,9 +43,12 @@ export class ContentRunner {
   private lastAutoPausedCueId: string | null = null;
   private savedWordKeys = new Set<string>();
   private captionRateLimitedUntil = 0;
+  private hasNativeTranslatedTrack = false;
+  private translationStatus: TranslationRuntimeStatus = { state: 'idle' };
+  private lastLookaheadCheckMs = 0;
+  private seekDebounceTimer: number | null = null;
+  private retryCooldownTimer: number | null = null;
   private pendingLiveTrackData: CapturedTrackData | null = null;
-  private pendingTranslationCueIds = new Set<string>();
-  private lastTranslationWindowCenter = Number.NEGATIVE_INFINITY;
 
   private mountedUI: MountedShadowUI | null = null;
   private currentPlayerEl: HTMLElement | null = null;
@@ -76,32 +80,28 @@ export class ContentRunner {
 
     this.unsubscribeSettings = onSettingsChanged((newSettings) => {
       const prevNativeLang = this.settings.nativeLang;
-      const prevTranslationProvider = this.settings.translationProvider;
+      const prevProvider = this.settings.translationProvider;
       const prevMyMemoryEmail = this.settings.myMemoryEmail;
       const prevDeepLApiKey = this.settings.deeplApiKey;
-      const prevShowTrans =
-        this.settings.subtitleTrackMode
-          ? this.settings.subtitleTrackMode !== 'original'
-          : (this.settings.showTranslation ?? this.settings.showDualSubtitles);
+      const prevShowTrans = this.isTranslationEnabled(this.settings);
       this.settings = newSettings;
-      const nextShowTrans =
-        newSettings.subtitleTrackMode
-          ? newSettings.subtitleTrackMode !== 'original'
-          : (newSettings.showTranslation ?? newSettings.showDualSubtitles);
+      const nextShowTrans = this.isTranslationEnabled(newSettings);
 
       if (
         newSettings.nativeLang !== prevNativeLang ||
-        newSettings.translationProvider !== prevTranslationProvider ||
+        newSettings.translationProvider !== prevProvider ||
         newSettings.myMemoryEmail !== prevMyMemoryEmail ||
         newSettings.deeplApiKey !== prevDeepLApiKey
       ) {
-        this.pendingTranslationCueIds.clear();
-        this.lastTranslationWindowCenter = Number.NEGATIVE_INFINITY;
+        this.resetTranslationState(true);
+        this.hasNativeTranslatedTrack = false;
         this.primaryEngine.clearTranslations();
         this.translatedEngine.clear();
         this.triggerSubtitleTranslation();
       } else if (!prevShowTrans && nextShowTrans) {
         this.triggerSubtitleTranslation();
+      } else if (prevShowTrans && !nextShowTrans) {
+        this.resetTranslationState(true);
       }
 
       this.syncNativeCaptions();
@@ -114,30 +114,22 @@ export class ContentRunner {
         type?: string;
         payload?: {
           videoId?: string;
-          batchTranslations?: Array<{ id: string; text: string; errorProvider?: string }>;
+          targetLang?: string;
+          batchTranslations?: Array<{ id: string; text: string }>;
+          status?: TranslationRuntimeStatus;
         };
       };
       if (msg.type === 'FREE_TRANSLATE_CUES_BATCH' && msg.payload) {
         const vid = this.trackMeta?.videoId || window.location.hostname;
         const targetVid = msg.payload.videoId;
+        const activeTargetLang = this.settings.nativeLang || 'ru';
+        const isSameLang = !msg.payload.targetLang || msg.payload.targetLang === activeTargetLang;
         if (
-          targetVid === vid ||
-          (vid && targetVid && (targetVid.includes(vid) || vid.includes(targetVid)))
+          isSameLang &&
+          (targetVid === vid ||
+            (vid && targetVid && (targetVid.includes(vid) || vid.includes(targetVid))))
         ) {
-          if (
-            Array.isArray(msg.payload.batchTranslations) &&
-            msg.payload.batchTranslations.length > 0
-          ) {
-            this.primaryEngine.applyTranslations(msg.payload.batchTranslations);
-            this.translatedEngine.setTranslatedCuesFromBatch(
-              msg.payload.batchTranslations,
-              this.primaryEngine.getCues()
-            );
-            const curTime = this.videoController?.getCurrentTime() ?? 0;
-            this.activePrimaryCue = this.primaryEngine.findActiveCue(curTime);
-            this.activeTranslatedCue = this.translatedEngine.findActiveCue(curTime);
-            this.renderUI();
-          }
+          this.applyBatchAndStatus(msg.payload.batchTranslations, msg.payload.status);
         }
       }
     };
@@ -146,9 +138,7 @@ export class ContentRunner {
     }
 
     this.adapterTeardown = this.adapter.init({
-      onTracksLoaded: (data) => {
-        this.handleTracksLoaded(data);
-      },
+      onTracksLoaded: (data) => this.handleTracksLoaded(data),
       onAdStateChange: (isAd) => {
         this.isAdShowing = isAd;
         this.syncNativeCaptions();
@@ -167,12 +157,78 @@ export class ContentRunner {
     this.navFinishListener = () => {
       this.videoController?.clearPauseTimer();
       this.closePopupAndResume(false);
+      if (this.trackMeta?.videoId && !window.location.href.includes(this.trackMeta.videoId)) {
+        this.cancelBackgroundTranslation(this.trackMeta.videoId);
+        this.clearTranslationTimers();
+      }
     };
     window.addEventListener('yt-navigate-finish', this.navFinishListener);
   }
 
+  private handleTracksLoaded(data: CapturedTrackData): void {
+    if (
+      data.liveCueBoundary &&
+      this.settings.autoPauseAfterCue &&
+      this.activePrimaryCue &&
+      this.videoController &&
+      !this.videoController.isPaused() &&
+      this.lastAutoPausedCueId !== this.activePrimaryCue.id
+    ) {
+      this.lastAutoPausedCueId = this.activePrimaryCue.id;
+      this.pendingLiveTrackData = data;
+      this.videoController.pauseVideo();
+      const timerSec = this.settings.pauseTimerSeconds ?? 0;
+      if (timerSec > 0) this.videoController.schedulePauseTimer(timerSec);
+      this.renderUI();
+      return;
+    }
+    this.applyTrackData(data);
+  }
+
+  private applyTrackData(data: CapturedTrackData): void {
+    if (data.primaryCues) {
+      const prevVid = this.trackMeta?.videoId;
+      const nextVid = data.primaryMeta?.videoId;
+      if (prevVid && nextVid && prevVid !== nextVid) this.cancelBackgroundTranslation(prevVid);
+      if (!prevVid || prevVid !== nextVid) {
+        this.hasNativeTranslatedTrack = false;
+        this.translatedEngine.clear();
+        this.resetTranslationState(false);
+      }
+      const preserved = this.primaryEngine
+        .getCues()
+        .filter((cue) => isValidTranslationText(cue.translation))
+        .map((cue) => ({ id: cue.id, text: cue.translation ?? '' }));
+      this.primaryEngine.loadCues(data.primaryCues);
+      this.primaryEngine.applyTranslations(preserved);
+      this.trackMeta = data.primaryMeta ?? null;
+      this.activePrimaryCue = this.primaryEngine.findActiveCue(
+        this.videoController?.getCurrentTime() ?? 0
+      );
+    }
+    if (data.translatedCues) {
+      if (data.translatedCues.length > 0) {
+        this.hasNativeTranslatedTrack = true;
+        this.resetTranslationState(true);
+      }
+      this.translatedEngine.loadCues(data.translatedCues);
+      this.activeTranslatedCue = this.translatedEngine.findActiveCue(
+        this.videoController?.getCurrentTime() ?? 0
+      );
+    } else if (data.primaryCues) {
+      this.translatedEngine.syncGeneratedCueTimings(this.primaryEngine.getCues());
+    }
+    if (data.rateLimitedUntil !== undefined) this.captionRateLimitedUntil = data.rateLimitedUntil;
+    this.syncNativeCaptions();
+    this.attachToPlayer();
+    this.renderUI();
+    if (!data.skipTranslation) this.triggerSubtitleTranslation();
+  }
+
   destroy(): void {
     this.isDestroyed = true;
+    this.clearTranslationTimers();
+    this.cancelBackgroundTranslation();
     if (this.navFinishListener) {
       window.removeEventListener('yt-navigate-finish', this.navFinishListener);
       this.navFinishListener = null;
@@ -214,75 +270,6 @@ export class ContentRunner {
     this.domObserver.observe(rootTarget, { childList: true, subtree: true });
   }
 
-  private handleTracksLoaded(data: CapturedTrackData): void {
-    if (
-      data.liveCueBoundary &&
-      this.settings.autoPauseAfterCue &&
-      this.activePrimaryCue &&
-      this.videoController &&
-      !this.videoController.isPaused() &&
-      this.lastAutoPausedCueId !== this.activePrimaryCue.id
-    ) {
-      this.lastAutoPausedCueId = this.activePrimaryCue.id;
-      this.pendingLiveTrackData = data;
-      this.videoController.pauseVideo();
-      const timerSec = this.settings.pauseTimerSeconds ?? 0;
-      if (timerSec > 0) this.videoController.schedulePauseTimer(timerSec);
-      this.renderUI();
-      return;
-    }
-
-    this.applyTrackData(data);
-  }
-
-  private applyTrackData(data: CapturedTrackData): void {
-    if (data.primaryCues) {
-      const nextVideoId = data.primaryMeta?.videoId ?? '';
-      if (nextVideoId && nextVideoId !== this.translatedVideoId) {
-        this.translatedVideoId = nextVideoId;
-        this.pendingTranslationCueIds.clear();
-        this.lastTranslationWindowCenter = Number.NEGATIVE_INFINITY;
-        this.translatedEngine.clear();
-        this.activeTranslatedCue = null;
-      }
-
-      const preservedTranslations = this.primaryEngine
-        .getCues()
-        .filter((cue) => Boolean(cue.translation))
-        .map((cue) => ({ id: cue.id, text: cue.translation ?? '' }));
-      this.primaryEngine.loadCues(data.primaryCues);
-      this.primaryEngine.applyTranslations(preservedTranslations);
-      this.trackMeta = data.primaryMeta ?? null;
-      this.activePrimaryCue = this.primaryEngine.findActiveCue(
-        this.videoController?.getCurrentTime() ?? 0
-      );
-    }
-    if (data.translatedCues) {
-      this.translatedEngine.loadCues(data.translatedCues);
-      this.activeTranslatedCue = this.translatedEngine.findActiveCue(
-        this.videoController?.getCurrentTime() ?? 0
-      );
-    } else if (data.primaryCues) {
-      // Netflix emits an empty caption to close the current cue. The primary cue
-      // timing changes there, but no new translation batch is produced — sync the
-      // generated translations so they disappear together with the original line.
-      this.translatedEngine.syncGeneratedCueTimings(this.primaryEngine.getCues());
-      this.activeTranslatedCue = this.translatedEngine.findActiveCue(
-        this.videoController?.getCurrentTime() ?? 0
-      );
-    }
-    if (data.rateLimitedUntil !== undefined) {
-      this.captionRateLimitedUntil = data.rateLimitedUntil;
-    }
-
-    this.syncNativeCaptions();
-    this.attachToPlayer();
-    this.renderUI();
-    if (!data.skipTranslation) {
-      this.triggerSubtitleTranslation();
-    }
-  }
-
   private createVideoController(): VideoController {
     return new VideoController({
       onTimeUpdate: (timeSec: number) => {
@@ -298,9 +285,6 @@ export class ContentRunner {
           this.settings.subtitleTrackMode !== 'original' &&
           (this.settings.showTranslation ?? this.settings.showDualSubtitles ?? true);
         const nextPrimary = this.primaryEngine.findActiveCue(timeSec);
-        // Match by cue id instead of time: a time-based search can land on the
-        // previous cue (or on a native track with slightly shifted timings) and
-        // make the translation line jump or flicker when a new replica starts.
         const generatedCue = nextPrimary
           ? this.translatedEngine.getGeneratedCue(nextPrimary.id)
           : null;
@@ -341,24 +325,36 @@ export class ContentRunner {
           this.renderUI();
         }
 
+        const nowMs = Date.now();
         if (
           isTranslationVisible &&
-          this.trackMeta &&
-          !this.translatedEngine.hasNativeCues() &&
-          Math.abs(timeSec - this.lastTranslationWindowCenter) >= 60
+          !this.hasNativeTranslatedTrack &&
+          nowMs - this.lastLookaheadCheckMs > 3500 &&
+          (this.translationStatus.state !== 'cooldown' ||
+            (this.translationStatus.retryAt ?? 0) <= nowMs) &&
+          this.hasUntranslatedInWindow(timeSec)
         ) {
-          this.lastTranslationWindowCenter = timeSec;
-          this.requestBackgroundTranslation(
-            this.trackMeta?.videoId || window.location.hostname,
-            this.trackMeta?.lang ?? 'auto',
-            this.settings.nativeLang || 'ru'
-          );
+          this.lastLookaheadCheckMs = nowMs;
+          this.triggerSubtitleTranslation(timeSec);
         }
       },
       onSeeked: () => {
         this.lastAutoPausedCueId = null;
         this.pendingLiveTrackData = null;
-        this.lastTranslationWindowCenter = Number.NEGATIVE_INFINITY;
+        this.lastLookaheadCheckMs = 0;
+        if (this.seekDebounceTimer !== null) {
+          window.clearTimeout(this.seekDebounceTimer);
+        }
+        if (!this.isTranslationEnabled(this.settings) || this.hasNativeTranslatedTrack) return;
+
+        this.seekDebounceTimer = window.setTimeout(() => {
+          this.seekDebounceTimer = null;
+          if (this.isDestroyed) return;
+          const curTime = this.videoController?.getCurrentTime() ?? 0;
+          if (this.hasUntranslatedInWindow(curTime)) {
+            this.triggerSubtitleTranslation(curTime);
+          }
+        }, 120);
       },
       onRepeatCue: () => this.handleRepeatCue(),
       onPreviousCue: () => this.handlePreviousCue(),
@@ -416,6 +412,7 @@ export class ContentRunner {
           trackMeta: this.trackMeta,
           cueCount: this.primaryEngine.getCues().length,
           captionRateLimitedUntil: this.captionRateLimitedUntil,
+          translationStatus: this.translationStatus,
           supportsCueSeeking: this.adapter.supportsCueSeeking !== false,
           primaryCue: this.activePrimaryCue,
           translatedCue: this.activeTranslatedCue,
@@ -428,6 +425,7 @@ export class ContentRunner {
           onResetPosition: () => {
             void this.handleUpdateSettings({ subtitlePosition: null });
           },
+          onRetryTranslation: () => this.handleRetryTranslation(),
           onSelectTarget: (sel) => this.handleSelectTarget(sel)
         },
         hostId
@@ -523,11 +521,7 @@ export class ContentRunner {
           this.trackMeta?.lang ?? 'auto',
           this.settings.nativeLang
         );
-        if (
-          res.ok &&
-          !res.data.translationUnavailable &&
-          Boolean(res.data.translation.trim())
-        ) {
+        if (res.ok && isValidTranslationText(res.data.translation)) {
           translation = res.data.translation;
         }
       } catch {
@@ -561,19 +555,41 @@ export class ContentRunner {
   }
 
   private async handleUpdateSettings(partial: Partial<UserSettings>): Promise<void> {
+    const prevNativeLang = this.settings.nativeLang;
+    const prevProvider = this.settings.translationProvider;
+    const prevMyMemoryEmail = this.settings.myMemoryEmail;
+    const prevDeepLApiKey = this.settings.deeplApiKey;
+    const prevTransEnabled = this.isTranslationEnabled(this.settings);
+
     this.settings = await saveSettings(partial);
-    const isTransEnabled =
-      this.settings.subtitleTrackMode !== 'original' &&
-      (this.settings.showTranslation ?? this.settings.showDualSubtitles ?? true);
+
+    const nextTransEnabled = this.isTranslationEnabled(this.settings);
+    const nativeLangChanged = this.settings.nativeLang !== prevNativeLang;
+    const providerChanged =
+      this.settings.translationProvider !== prevProvider ||
+      this.settings.myMemoryEmail !== prevMyMemoryEmail ||
+      this.settings.deeplApiKey !== prevDeepLApiKey;
+    const translationJustEnabled = !prevTransEnabled && nextTransEnabled;
+
+    if (nativeLangChanged || providerChanged) {
+      this.resetTranslationState(true);
+      this.hasNativeTranslatedTrack = false;
+      this.primaryEngine.clearTranslations();
+      this.translatedEngine.clear();
+    } else if (prevTransEnabled && !nextTransEnabled) {
+      this.resetTranslationState(true);
+    }
+
     if (
-      isTransEnabled &&
+      (nativeLangChanged || translationJustEnabled || providerChanged) &&
+      nextTransEnabled &&
       this.trackMeta &&
-      this.translatedEngine.getCues().length === 0 &&
+      !this.hasNativeTranslatedTrack &&
       this.trackMeta.lang !== this.settings.nativeLang
     ) {
       this.adapter.requestTranslatedTrack?.(this.settings.nativeLang);
     }
-    if (isTransEnabled) {
+    if ((nativeLangChanged || translationJustEnabled || providerChanged) && nextTransEnabled) {
       this.triggerSubtitleTranslation();
     }
     this.syncNativeCaptions();
@@ -700,6 +716,7 @@ export class ContentRunner {
       trackMeta: this.trackMeta,
       cueCount: this.primaryEngine.getCues().length,
       captionRateLimitedUntil: this.captionRateLimitedUntil,
+      translationStatus: this.translationStatus,
       supportsCueSeeking: this.adapter.supportsCueSeeking !== false,
       primaryCue: this.activePrimaryCue,
       translatedCue: this.activeTranslatedCue,
@@ -713,117 +730,148 @@ export class ContentRunner {
       onResetPosition: () => {
         void this.handleUpdateSettings({ subtitlePosition: null });
       },
+      onRetryTranslation: () => this.handleRetryTranslation(),
       onSelectTarget: (sel) => this.handleSelectTarget(sel)
     });
   }
 
-  private triggerSubtitleTranslation(): void {
-    const isTranslationEnabled =
-      this.settings.subtitleTrackMode !== 'original' &&
-      (this.settings.showTranslation ?? this.settings.showDualSubtitles ?? true);
-    if (!isTranslationEnabled) return;
+  private isTranslationEnabled(s: UserSettings): boolean {
+    return (
+      s.enabled &&
+      s.subtitleTrackMode !== 'original' &&
+      (s.showTranslation ?? s.showDualSubtitles ?? true)
+    );
+  }
 
-    const primaryCues = this.primaryEngine.getCues();
-    if (primaryCues.length === 0) return;
+  private resetTranslationState(cancelBg: boolean): void {
+    if (cancelBg) this.cancelBackgroundTranslation();
+    this.clearTranslationTimers();
+    this.lastLookaheadCheckMs = 0;
+    this.translationStatus = { state: 'idle' };
+  }
 
-    // Only a real native translated track makes machine translation unnecessary.
-    // Generated cues use the `tr-` prefix — without this distinction Netflix stops
-    // translating after the very first batch, because translatedEngine is never
-    // empty again once those generated cues were added.
-    if (this.translatedEngine.hasNativeCues()) return;
+  private applyBatchAndStatus(
+    items?: Array<{ id: string; text: string }>,
+    status?: TranslationRuntimeStatus
+  ): void {
+    if (Array.isArray(items) && items.length > 0) {
+      const valid = items.filter((item) => isValidTranslationText(item.text));
+      if (valid.length > 0) {
+        this.primaryEngine.applyTranslations(valid);
+        this.translatedEngine.setTranslatedCuesFromBatch(valid, this.primaryEngine.getCues());
+        const t = this.videoController?.getCurrentTime() ?? 0;
+        this.activePrimaryCue = this.primaryEngine.findActiveCue(t);
+        this.activeTranslatedCue = this.translatedEngine.findActiveCue(t);
+      }
+    }
+    this.applyTranslationStatus(status);
+    this.renderUI();
+  }
 
-    // If all primary cues already have translation, nothing to do
-    const needsTranslation = primaryCues.some((c) => !c.translation);
-    if (!needsTranslation) return;
-
-    const videoId = this.trackMeta?.videoId || window.location.hostname;
-    const targetLang = this.settings.nativeLang || 'ru';
-    const sourceLang = this.trackMeta?.lang ?? 'auto';
-
-    // 1. Check local cache first: free_sub_tr:${videoId}:${targetLang}
-    const cacheKey = `free_sub_tr:${this.settings.translationProvider}:${videoId}:${targetLang}`;
-    if (typeof chrome !== 'undefined' && chrome.storage?.local && videoId && videoId !== 'unknown') {
-      chrome.storage.local.get(cacheKey, (res) => {
-        if (this.isDestroyed) return;
-        const cached = res?.[cacheKey] as
-          | { savedAt?: number; translations?: Record<string, string> }
-          | undefined;
-
-        if (cached && cached.translations) {
-          const batch = Object.entries(cached.translations).map(([id, text]) => ({ id, text }));
-          if (batch.length > 0) {
-            this.primaryEngine.applyTranslations(batch);
-            this.translatedEngine.setTranslatedCuesFromBatch(batch, this.primaryEngine.getCues());
-            const curTime = this.videoController?.getCurrentTime() ?? 0;
-            this.activePrimaryCue = this.primaryEngine.findActiveCue(curTime);
-            this.activeTranslatedCue = this.translatedEngine.findActiveCue(curTime);
-            this.renderUI();
-          }
-
-          // Netflix keeps appending cues while this async storage read is pending,
-          // so check against the current cue set instead of the captured one.
-          const currentCues = this.primaryEngine.getCues();
-          const allCovered = currentCues.every((c) => cached.translations?.[c.id]);
-          if (allCovered) return;
-        }
-
-        // 2. Request background translation for missing cues
-        this.requestBackgroundTranslation(videoId, sourceLang, targetLang);
-      });
-    } else {
-      this.requestBackgroundTranslation(videoId, sourceLang, targetLang);
+  private clearTranslationTimers(): void {
+    if (this.seekDebounceTimer !== null) {
+      window.clearTimeout(this.seekDebounceTimer);
+      this.seekDebounceTimer = null;
+    }
+    if (this.retryCooldownTimer !== null) {
+      window.clearTimeout(this.retryCooldownTimer);
+      this.retryCooldownTimer = null;
     }
   }
 
-  private requestBackgroundTranslation(
-    videoId: string,
-    sourceLang: string,
-    targetLang: string
-  ): void {
-    const primaryCues = this.primaryEngine.getCues();
-    const currentTime = this.videoController?.getCurrentTime() ?? 0;
-    const windowStart = Math.max(0, currentTime - 30);
-    const windowEnd = currentTime + 180;
-    const untranslated = primaryCues
-      .filter(
-        (cue) =>
-          !cue.translation &&
-          !this.pendingTranslationCueIds.has(cue.id) &&
-          cue.endTime >= windowStart &&
-          cue.startTime <= windowEnd
-      )
-      .slice(0, 50);
-    if (untranslated.length === 0) return;
+  private cancelBackgroundTranslation(videoIdOverride?: string): void {
+    const vid = videoIdOverride ?? this.trackMeta?.videoId ?? window.location.hostname;
+    if (!vid || typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return;
+    try {
+      chrome.runtime.sendMessage(
+        { type: 'CANCEL_FREE_TRANSLATION', payload: { videoId: vid } } satisfies RuntimeRequest,
+        () => void chrome.runtime.lastError
+      );
+    } catch {
+      // Ignore invalidated context
+    }
+  }
 
-    for (const cue of untranslated) this.pendingTranslationCueIds.add(cue.id);
+  private applyTranslationStatus(status?: TranslationRuntimeStatus): void {
+    if (!status) return;
+    if (this.retryCooldownTimer !== null) {
+      window.clearTimeout(this.retryCooldownTimer);
+      this.retryCooldownTimer = null;
+    }
+    this.translationStatus = status;
+    if (status.state === 'cooldown' && status.retryAt && status.retryAt > Date.now()) {
+      const waitMs = Math.max(1000, status.retryAt - Date.now() + 250);
+      this.retryCooldownTimer = window.setTimeout(() => {
+        this.retryCooldownTimer = null;
+        if (this.isDestroyed) return;
+        this.translationStatus = { state: 'translating' };
+        this.renderUI();
+        this.triggerSubtitleTranslation(this.videoController?.getCurrentTime() ?? 0);
+      }, waitMs);
+    }
+  }
+
+  private handleRetryTranslation(): void {
+    if (this.isDestroyed) return;
+    this.clearTranslationTimers();
+    this.translationStatus = { state: 'translating' };
+    this.renderUI();
+    this.triggerSubtitleTranslation(this.videoController?.getCurrentTime() ?? 0, true);
+  }
+
+  private hasUntranslatedInWindow(timeSec: number): boolean {
+    const cues = this.primaryEngine.getCues();
+    if (cues.length === 0) return false;
+    const anchorIdx = Math.max(0, this.primaryEngine.findCueIndexAtOrBefore(timeSec));
+    const endIdx = Math.min(cues.length, anchorIdx + 16);
+    for (let i = anchorIdx; i < endIdx; i++) {
+      if (!isValidTranslationText(cues[i].translation)) return true;
+    }
+    return false;
+  }
+
+  private triggerSubtitleTranslation(priorityTimeOverride?: number, forceRetry = false): void {
+    if (!this.isTranslationEnabled(this.settings) || this.hasNativeTranslatedTrack) return;
+    const primaryCues = this.primaryEngine.getCues();
+    if (primaryCues.length === 0) return;
+
+    if (!primaryCues.some((c) => !isValidTranslationText(c.translation))) {
+      this.applyTranslationStatus({ state: 'idle' });
+      this.renderUI();
+      return;
+    }
+
+    if (
+      !forceRetry &&
+      this.translationStatus.state === 'cooldown' &&
+      (this.translationStatus.retryAt ?? 0) > Date.now()
+    ) {
+      return;
+    }
+
     const request: RuntimeRequest = {
       type: 'FREE_TRANSLATE_CUES',
       payload: {
-        videoId,
-        // Only ask for cues that still need a translation. Re-sending every cue on
-        // each Netflix caption change produced repeated progress batches and
-        // unnecessary MyMemory requests.
-        cues: untranslated.map((c) => ({
+        videoId: this.trackMeta?.videoId || window.location.hostname,
+        cues: primaryCues.map((c) => ({
           id: c.id,
           text: c.text,
           startTime: c.startTime,
           endTime: c.endTime
         })),
-        sourceLang,
-        targetLang,
-        priorityTime: currentTime
+        sourceLang: this.trackMeta?.lang ?? 'auto',
+        targetLang: this.settings.nativeLang || 'ru',
+        priorityTime: priorityTimeOverride ?? this.videoController?.getCurrentTime() ?? 0,
+        ...(forceRetry ? { forceRetry: true } : {})
       }
     };
 
     chrome.runtime.sendMessage(request, (response: FreeTranslateCuesResponse | undefined) => {
-      for (const cue of untranslated) this.pendingTranslationCueIds.delete(cue.id);
-      if (this.isDestroyed || chrome.runtime.lastError || !response || !response.ok) return;
-      if (Array.isArray(response.data) && response.data.length > 0) {
-        this.primaryEngine.applyTranslations(response.data);
-        this.translatedEngine.setTranslatedCuesFromBatch(response.data, this.primaryEngine.getCues());
-        const t = this.videoController?.getCurrentTime() ?? 0;
-        this.activePrimaryCue = this.primaryEngine.findActiveCue(t);
-        this.activeTranslatedCue = this.translatedEngine.findActiveCue(t);
+      if (this.isDestroyed) return;
+      if (!chrome.runtime.lastError && response?.ok && response.data) {
+        this.applyBatchAndStatus(response.data.translations, response.data.status);
+      } else if (chrome.runtime.lastError) {
+        this.applyTranslationStatus({ state: 'cooldown', retryAt: Date.now() + 10_000 });
         this.renderUI();
       }
     });

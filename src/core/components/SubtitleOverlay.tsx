@@ -217,7 +217,7 @@ export function SubtitleOverlay({
     pointerX: number;
     pointerY: number;
     boxCenterX: number;
-    boxCenterY: number;
+    boxBottomY: number;
     playerWidth: number;
     playerHeight: number;
     boxWidth: number;
@@ -244,15 +244,22 @@ export function SubtitleOverlay({
   useEffect(() => {
     if (!position && containerRef.current) {
       containerRef.current.style.top = 'auto';
+      containerRef.current.style.bottom = `${bottomOffset}px`;
       containerRef.current.style.left = '50%';
       containerRef.current.style.transform = 'translateX(-50%)';
     }
-  }, [position]);
+  }, [position, bottomOffset]);
 
   useEffect(() => {
-    if (!boxFixed && containerRef.current) {
-      containerRef.current.style.width = 'auto';
-      containerRef.current.style.height = 'auto';
+    if (containerRef.current) {
+      if (!boxFixed) {
+        containerRef.current.style.width = 'auto';
+        containerRef.current.style.height = 'auto';
+        containerRef.current.style.minHeight = '';
+      } else {
+        containerRef.current.style.height = 'auto';
+        containerRef.current.style.minHeight = '56px';
+      }
     }
   }, [boxFixed, boxSize]);
 
@@ -281,42 +288,91 @@ export function SubtitleOverlay({
 
       const h = start.handle;
 
-      if (h === 'right' || h === 'top-right' || h === 'bottom-right') {
-        newWidth = Math.max(minWidth, Math.min(maxWidth, start.initialWidth + dx));
-      } else if (h === 'left' || h === 'top-left' || h === 'bottom-left') {
-        newWidth = Math.max(minWidth, Math.min(maxWidth, start.initialWidth - dx));
-        newLeft = start.initialLeft + (start.initialWidth - newWidth);
-      }
+      if (boxFixed) {
+        // In static subtitle box mode: width is strictly fixed, height is dynamic (auto)
+        if (h === 'right') {
+          if (!start.hasCustomPosition) {
+            newWidth = Math.max(minWidth, Math.min(maxWidth, start.initialWidth + dx * 2));
+          } else {
+            newWidth = Math.max(minWidth, Math.min(maxWidth, start.initialWidth + dx));
+          }
+        } else if (h === 'left') {
+          if (!start.hasCustomPosition) {
+            newWidth = Math.max(minWidth, Math.min(maxWidth, start.initialWidth - dx * 2));
+          } else {
+            newWidth = Math.max(minWidth, Math.min(maxWidth, start.initialWidth - dx));
+            newLeft = start.initialLeft + (start.initialWidth - newWidth);
+          }
+        }
 
-      if (h === 'bottom' || h === 'bottom-left' || h === 'bottom-right') {
-        newHeight = Math.max(minHeight, Math.min(maxHeight, start.initialHeight + dy));
-      } else if (h === 'top' || h === 'top-left' || h === 'top-right') {
-        newHeight = Math.max(minHeight, Math.min(maxHeight, start.initialHeight - dy));
-        newTop = start.initialTop + (start.initialHeight - newHeight);
-      }
+        currentResizedSizeRef.current = {
+          width: Math.round(newWidth),
+          height: boxSize?.height ?? DEFAULT_SUBTITLE_BOX_SIZE.height
+        };
 
-      currentResizedSizeRef.current = {
-        width: Math.round(newWidth),
-        height: Math.round(newHeight)
-      };
+        const boxEl = containerRef.current;
+        if (boxEl) {
+          boxEl.style.width = `${Math.round(newWidth)}px`;
+          boxEl.style.height = 'auto';
+          boxEl.style.minHeight = '56px';
 
-      const boxEl = containerRef.current;
-      if (boxEl) {
-        boxEl.style.width = `${Math.round(newWidth)}px`;
-        boxEl.style.height = `${Math.round(newHeight)}px`;
+          if (start.hasCustomPosition && position) {
+            const centerX = newLeft + newWidth / 2;
+            const xPercent = (centerX / start.playerRect.width) * 100;
+            currentResizedPosRef.current = {
+              xPercent,
+              yPercent: position.yPercent
+            };
+            boxEl.style.left = `${xPercent}%`;
+            boxEl.style.bottom = `${100 - position.yPercent}%`;
+            boxEl.style.top = 'auto';
+            boxEl.style.transform = 'translateX(-50%)';
+          } else {
+            currentResizedPosRef.current = null;
+            boxEl.style.left = '50%';
+            boxEl.style.bottom = `${bottomOffset}px`;
+            boxEl.style.top = 'auto';
+            boxEl.style.transform = 'translateX(-50%)';
+          }
+        }
+      } else {
+        if (h === 'right' || h === 'top-right' || h === 'bottom-right') {
+          newWidth = Math.max(minWidth, Math.min(maxWidth, start.initialWidth + dx));
+        } else if (h === 'left' || h === 'top-left' || h === 'bottom-left') {
+          newWidth = Math.max(minWidth, Math.min(maxWidth, start.initialWidth - dx));
+          newLeft = start.initialLeft + (start.initialWidth - newWidth);
+        }
 
-        if (h?.includes('left') || h?.includes('top') || start.hasCustomPosition) {
-          const centerX = newLeft + newWidth / 2;
-          const centerY = newTop + newHeight / 2;
-          const xPercent = (centerX / start.playerRect.width) * 100;
-          const yPercent = (centerY / start.playerRect.height) * 100;
-          currentResizedPosRef.current = { xPercent, yPercent };
+        if (h === 'bottom' || h === 'bottom-left' || h === 'bottom-right') {
+          newHeight = Math.max(minHeight, Math.min(maxHeight, start.initialHeight + dy));
+        } else if (h === 'top' || h === 'top-left' || h === 'top-right') {
+          newHeight = Math.max(minHeight, Math.min(maxHeight, start.initialHeight - dy));
+          newTop = start.initialTop + (start.initialHeight - newHeight);
+        }
 
-          boxEl.style.left = `${xPercent}%`;
-          boxEl.style.top = `${yPercent}%`;
-          boxEl.style.bottom = 'auto';
-          boxEl.style.right = 'auto';
-          boxEl.style.transform = 'translate3d(-50%, -50%, 0)';
+        currentResizedSizeRef.current = {
+          width: Math.round(newWidth),
+          height: Math.round(newHeight)
+        };
+
+        const boxEl = containerRef.current;
+        if (boxEl) {
+          boxEl.style.width = `${Math.round(newWidth)}px`;
+          boxEl.style.height = `${Math.round(newHeight)}px`;
+
+          if (h?.includes('left') || h?.includes('top') || start.hasCustomPosition) {
+            const centerX = newLeft + newWidth / 2;
+            const centerY = newTop + newHeight / 2;
+            const xPercent = (centerX / start.playerRect.width) * 100;
+            const yPercent = (centerY / start.playerRect.height) * 100;
+            currentResizedPosRef.current = { xPercent, yPercent };
+
+            boxEl.style.left = `${xPercent}%`;
+            boxEl.style.top = `${yPercent}%`;
+            boxEl.style.bottom = 'auto';
+            boxEl.style.right = 'auto';
+            boxEl.style.transform = 'translate3d(-50%, -50%, 0)';
+          }
         }
       }
     };
@@ -332,6 +388,12 @@ export function SubtitleOverlay({
       resizeStartRef.current = null;
       setIsResizing(false);
       setHoveredHandle(null);
+
+      const boxEl = containerRef.current;
+      if (boxEl && boxFixed) {
+        boxEl.style.height = 'auto';
+        boxEl.style.minHeight = '56px';
+      }
 
       if (finalSize) {
         if (onUpdateSettings) {
@@ -355,7 +417,7 @@ export function SubtitleOverlay({
       window.removeEventListener('pointerup', onPointerUp, { capture: true });
       window.removeEventListener('pointercancel', onPointerUp, { capture: true });
     };
-  }, [isResizing, onUpdateSettings, onUpdatePosition]);
+  }, [isResizing, boxFixed, boxSize, position, bottomOffset, onUpdateSettings, onUpdatePosition]);
 
   const handleResizeStart = useCallback(
     (handle: ResizeHandle, e: React.PointerEvent<HTMLDivElement>): void => {
@@ -499,18 +561,18 @@ export function SubtitleOverlay({
     if (playerRect.width === 0 || playerRect.height === 0 || boxRect.width === 0) return;
 
     const currentCenterX = (position.xPercent / 100) * playerRect.width;
-    const currentCenterY = (position.yPercent / 100) * playerRect.height;
+    const currentBottomY = (position.yPercent / 100) * playerRect.height;
 
     const minCenterX = boxRect.width / 2 + 8;
     const maxCenterX = Math.max(minCenterX, playerRect.width - boxRect.width / 2 - 8);
     const clampedX = Math.max(minCenterX, Math.min(currentCenterX, maxCenterX));
 
-    const minCenterY = boxRect.height / 2 + 8;
-    const maxCenterY = Math.max(minCenterY, playerRect.height - boxRect.height / 2 - 8);
-    const clampedY = Math.max(minCenterY, Math.min(currentCenterY, maxCenterY));
+    const minBottomY = boxRect.height + 8;
+    const maxBottomY = Math.max(minBottomY, playerRect.height - 8);
+    const clampedBottomY = Math.max(minBottomY, Math.min(currentBottomY, maxBottomY));
 
     const newXPercent = (clampedX / playerRect.width) * 100;
-    const newYPercent = (clampedY / playerRect.height) * 100;
+    const newYPercent = (clampedBottomY / playerRect.height) * 100;
 
     if (
       Math.abs(newXPercent - position.xPercent) > 0.5 ||
@@ -536,13 +598,13 @@ export function SubtitleOverlay({
     const boxRect = boxEl.getBoundingClientRect();
 
     const boxCenterX = boxRect.left + boxRect.width / 2 - playerRect.left;
-    const boxCenterY = boxRect.top + boxRect.height / 2 - playerRect.top;
+    const boxBottomY = boxRect.bottom - playerRect.top;
 
     dragStartRef.current = {
       pointerX: e.clientX,
       pointerY: e.clientY,
       boxCenterX,
-      boxCenterY,
+      boxBottomY,
       playerWidth: playerRect.width,
       playerHeight: playerRect.height,
       boxWidth: boxRect.width,
@@ -575,28 +637,28 @@ export function SubtitleOverlay({
       if (isDraggingRef.current) {
         e.stopPropagation();
         const newCenterX = start.boxCenterX + dx;
-        const newCenterY = start.boxCenterY + dy;
+        const newBottomY = start.boxBottomY + dy;
 
         const minCenterX = start.boxWidth / 2 + 8;
         const maxCenterX = Math.max(minCenterX, start.playerWidth - start.boxWidth / 2 - 8);
         const clampedX = Math.max(minCenterX, Math.min(newCenterX, maxCenterX));
 
-        const minCenterY = start.boxHeight / 2 + 8;
-        const maxCenterY = Math.max(minCenterY, start.playerHeight - start.boxHeight / 2 - 8);
-        const clampedY = Math.max(minCenterY, Math.min(newCenterY, maxCenterY));
+        const minBottomY = start.boxHeight + 8;
+        const maxBottomY = Math.max(minBottomY, start.playerHeight - 8);
+        const clampedBottomY = Math.max(minBottomY, Math.min(newBottomY, maxBottomY));
 
         const xPercent = (clampedX / start.playerWidth) * 100;
-        const yPercent = (clampedY / start.playerHeight) * 100;
+        const yPercent = (clampedBottomY / start.playerHeight) * 100;
 
         currentDragPosRef.current = { xPercent, yPercent };
 
         // Zero-rerender direct DOM update during drag
         if (containerRef.current) {
           containerRef.current.style.left = `${xPercent}%`;
-          containerRef.current.style.top = `${yPercent}%`;
-          containerRef.current.style.bottom = 'auto';
+          containerRef.current.style.bottom = `${100 - yPercent}%`;
+          containerRef.current.style.top = 'auto';
           containerRef.current.style.right = 'auto';
-          containerRef.current.style.transform = 'translate3d(-50%, -50%, 0)';
+          containerRef.current.style.transform = 'translateX(-50%)';
         }
       }
     },
@@ -638,10 +700,12 @@ export function SubtitleOverlay({
     e.preventDefault();
     if (containerRef.current) {
       containerRef.current.style.top = 'auto';
+      containerRef.current.style.bottom = `${bottomOffset}px`;
       containerRef.current.style.left = '50%';
       containerRef.current.style.transform = 'translateX(-50%)';
       containerRef.current.style.width = 'auto';
       containerRef.current.style.height = 'auto';
+      containerRef.current.style.minHeight = '';
     }
     if (onUpdateSettings) {
       onUpdateSettings({
@@ -768,16 +832,15 @@ export function SubtitleOverlay({
 
   const defaultFixedSize = DEFAULT_SUBTITLE_BOX_SIZE;
   const effectiveWidth = boxSize?.width ?? defaultFixedSize.width;
-  const effectiveHeight = boxSize?.height ?? defaultFixedSize.height;
 
   const positionStyle: React.CSSProperties = position
     ? {
         position: 'absolute',
         left: `${position.xPercent}%`,
-        top: `${position.yPercent}%`,
-        bottom: 'auto',
+        bottom: `${100 - position.yPercent}%`,
+        top: 'auto',
         right: 'auto',
-        transform: 'translate(-50%, -50%)'
+        transform: 'translateX(-50%)'
       }
     : {
         position: 'absolute',
@@ -823,7 +886,8 @@ export function SubtitleOverlay({
           ...(boxFixed
             ? {
                 width: `min(${effectiveWidth}px, calc(100% - 16px))`,
-                height: `min(${effectiveHeight}px, calc(100% - 16px))`,
+                height: 'auto',
+                minHeight: '56px',
                 display: 'flex',
                 flexDirection: 'column',
                 boxSizing: 'border-box'
@@ -885,8 +949,8 @@ export function SubtitleOverlay({
               onClick={handleToggleFixed}
               title={
                 boxFixed
-                  ? 'Статичное окно включено (клик — переключить на адаптивный размер)'
-                  : 'Адаптивный размер (клик — зафиксировать размер окна)'
+                  ? 'Фиксированная ширина включена (клик — переключить на адаптивный размер)'
+                  : 'Адаптивный размер (клик — зафиксировать ширину окна)'
               }
               className="flex items-center gap-1 rounded px-1 py-0.5 text-slate-400 opacity-60 transition hover:bg-white/10 hover:text-white hover:opacity-100 cursor-pointer"
               style={{ color: boxFixed ? 'var(--ytai-accent)' : 'var(--ytai-text-secondary)' }}
@@ -933,15 +997,15 @@ export function SubtitleOverlay({
           <div className="w-8" aria-hidden="true" />
         </div>
 
-        {/* Subtitle Content (Centered in fixed mode without flex top-clipping) */}
+        {/* Subtitle Content (Dynamic height, centered when min-height applies, without clipping) */}
         <div
           className={`w-full text-center ${
             boxFixed
-              ? 'flex-1 flex flex-col items-center overflow-hidden min-h-0'
+              ? 'flex-1 flex flex-col items-center justify-center my-auto min-h-0'
               : ''
           }`}
         >
-          <div className={`w-full flex flex-col items-center ${boxFixed ? 'my-auto' : ''}`}>
+          <div className="w-full flex flex-col items-center">
             {/* Primary Original Line: shown in dual mode, original mode, or when revealed by Alt/selection in translation-only mode */}
             {primaryCue && (!isTranslationOnly || isAltRevealed) && (
               <div
@@ -1064,22 +1128,26 @@ export function SubtitleOverlay({
         </div>
 
         {/* Interactive Resize Handles (Edges and Corners) */}
-        <div
-          className="absolute -top-1 left-3 right-3 h-2 cursor-ns-resize z-20"
-          onPointerDown={(e) => handleResizeStart('top', e)}
-          onMouseEnter={() => setHoveredHandle('top')}
-          onMouseLeave={() => setHoveredHandle((h) => (h === 'top' ? null : h))}
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-        />
-        <div
-          className="absolute -bottom-1 left-3 right-3 h-2 cursor-ns-resize z-20"
-          onPointerDown={(e) => handleResizeStart('bottom', e)}
-          onMouseEnter={() => setHoveredHandle('bottom')}
-          onMouseLeave={() => setHoveredHandle((h) => (h === 'bottom' ? null : h))}
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-        />
+        {!boxFixed && (
+          <div
+            className="absolute -top-1 left-3 right-3 h-2 cursor-ns-resize z-20"
+            onPointerDown={(e) => handleResizeStart('top', e)}
+            onMouseEnter={() => setHoveredHandle('top')}
+            onMouseLeave={() => setHoveredHandle((h) => (h === 'top' ? null : h))}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+          />
+        )}
+        {!boxFixed && (
+          <div
+            className="absolute -bottom-1 left-3 right-3 h-2 cursor-ns-resize z-20"
+            onPointerDown={(e) => handleResizeStart('bottom', e)}
+            onMouseEnter={() => setHoveredHandle('bottom')}
+            onMouseLeave={() => setHoveredHandle((h) => (h === 'bottom' ? null : h))}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+          />
+        )}
         <div
           className="absolute -left-1 top-3 bottom-3 w-2 cursor-ew-resize z-20"
           onPointerDown={(e) => handleResizeStart('left', e)}
@@ -1097,39 +1165,43 @@ export function SubtitleOverlay({
           onMouseDown={(e) => e.stopPropagation()}
         />
 
-        {/* 4 Corner handles */}
-        <div
-          className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 cursor-nwse-resize z-21"
-          onPointerDown={(e) => handleResizeStart('top-left', e)}
-          onMouseEnter={() => setHoveredHandle('top-left')}
-          onMouseLeave={() => setHoveredHandle((h) => (h === 'top-left' ? null : h))}
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-        />
-        <div
-          className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 cursor-nesw-resize z-21"
-          onPointerDown={(e) => handleResizeStart('top-right', e)}
-          onMouseEnter={() => setHoveredHandle('top-right')}
-          onMouseLeave={() => setHoveredHandle((h) => (h === 'top-right' ? null : h))}
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-        />
-        <div
-          className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 cursor-nesw-resize z-21"
-          onPointerDown={(e) => handleResizeStart('bottom-left', e)}
-          onMouseEnter={() => setHoveredHandle('bottom-left')}
-          onMouseLeave={() => setHoveredHandle((h) => (h === 'bottom-left' ? null : h))}
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-        />
-        <div
-          className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 cursor-nwse-resize z-21"
-          onPointerDown={(e) => handleResizeStart('bottom-right', e)}
-          onMouseEnter={() => setHoveredHandle('bottom-right')}
-          onMouseLeave={() => setHoveredHandle((h) => (h === 'bottom-right' ? null : h))}
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-        />
+        {/* 4 Corner handles (active in adaptive mode) */}
+        {!boxFixed && (
+          <>
+            <div
+              className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 cursor-nwse-resize z-21"
+              onPointerDown={(e) => handleResizeStart('top-left', e)}
+              onMouseEnter={() => setHoveredHandle('top-left')}
+              onMouseLeave={() => setHoveredHandle((h) => (h === 'top-left' ? null : h))}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            />
+            <div
+              className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 cursor-nesw-resize z-21"
+              onPointerDown={(e) => handleResizeStart('top-right', e)}
+              onMouseEnter={() => setHoveredHandle('top-right')}
+              onMouseLeave={() => setHoveredHandle((h) => (h === 'top-right' ? null : h))}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            />
+            <div
+              className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 cursor-nesw-resize z-21"
+              onPointerDown={(e) => handleResizeStart('bottom-left', e)}
+              onMouseEnter={() => setHoveredHandle('bottom-left')}
+              onMouseLeave={() => setHoveredHandle((h) => (h === 'bottom-left' ? null : h))}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            />
+            <div
+              className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 cursor-nwse-resize z-21"
+              onPointerDown={(e) => handleResizeStart('bottom-right', e)}
+              onMouseEnter={() => setHoveredHandle('bottom-right')}
+              onMouseLeave={() => setHoveredHandle((h) => (h === 'bottom-right' ? null : h))}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            />
+          </>
+        )}
       </div>
     </div>
   );

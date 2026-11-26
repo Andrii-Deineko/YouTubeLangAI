@@ -764,7 +764,7 @@ export function SubtitleOverlay({
   }, [primaryCue, selectedTarget, handleTokenClick, handleTokenEnter]);
 
   const hasCue = Boolean(primaryCue || translatedCue);
-  if (!hasCue && !boxFixed && !position && !boxSize) return null;
+  if (!hasCue && !boxFixed && !isDragging && !isResizing) return null;
 
   const defaultFixedSize = DEFAULT_SUBTITLE_BOX_SIZE;
   const effectiveWidth = boxSize?.width ?? defaultFixedSize.width;

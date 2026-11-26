@@ -22,6 +22,7 @@ export class NetflixAdapter implements PlatformAdapter {
   private cueSequence = 0;
   private timelineGeneration = 0;
   private lastObservedTime = 0;
+  private pendingTimelineReset = false;
   private currentVideoId = '';
   private nativeCaptionsSuppressed = false;
 
@@ -89,6 +90,7 @@ export class NetflixAdapter implements PlatformAdapter {
       this.cueSequence = 0;
       this.timelineGeneration += 1;
       this.lastObservedTime = observedVideo.currentTime;
+      this.pendingTimelineReset = true;
       // Force the current caption to be emitted again even if the text before and
       // after the seek happens to be identical.
       lastText = '';
@@ -112,20 +114,23 @@ export class NetflixAdapter implements PlatformAdapter {
         this.cueSequence = 0;
         this.timelineGeneration = 0;
         this.lastObservedTime = time;
+        this.pendingTimelineReset = true;
       } else if (time < this.lastObservedTime - 0.05) {
         // A backward seek starts a fresh live timeline. Keeping future cues in the
         // same sorted array creates overlaps and duplicate cue ids after rewind.
         this.cues = [];
         this.cueSequence = 0;
         this.timelineGeneration += 1;
+        this.pendingTimelineReset = true;
       }
       this.lastObservedTime = time;
 
       const previous = this.cues[this.cues.length - 1];
       const nextCueStart =
         text && previous ? Math.max(time, previous.startTime + 0.06) : time;
+      const updates: SubtitleCue[] = [];
       if (previous) {
-        this.cues[this.cues.length - 1] = this.createCue(
+        const closedPrevious = this.createCue(
           previous.text,
           previous.startTime,
           Math.max(nextCueStart - 0.01, previous.startTime + 0.05),
@@ -133,12 +138,19 @@ export class NetflixAdapter implements PlatformAdapter {
           previous.id,
           previous.translation
         );
+        this.cues[this.cues.length - 1] = closedPrevious;
+        updates.push(closedPrevious);
       }
 
       if (text) {
-        this.cues.push(
-          this.createCue(text, nextCueStart, nextCueStart + 30, this.cues.length)
+        const nextCue = this.createCue(
+          text,
+          nextCueStart,
+          nextCueStart + 30,
+          this.cues.length
         );
+        this.cues.push(nextCue);
+        updates.push(nextCue);
       }
 
       const metadata: TrackMetadata = {
@@ -151,13 +163,15 @@ export class NetflixAdapter implements PlatformAdapter {
         url: window.location.href
       };
       callbacks.onTracksLoaded({
-        primaryCues: [...this.cues],
+        primaryCueUpdates: updates,
+        resetPrimaryCues: this.pendingTimelineReset,
         primaryMeta: metadata,
         liveCueBoundary: Boolean(previous),
         // An empty caption only closes the active cue. Its translation already
         // exists, so do not restart cache reads and provider requests.
         skipTranslation: !text
       });
+      this.pendingTimelineReset = false;
       callbacks.onVideoElementChange?.(video);
     };
 

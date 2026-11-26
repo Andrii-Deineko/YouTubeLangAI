@@ -611,7 +611,11 @@ export function SettingsPanel({
           });
         });
         await onUpdateSettings({ netflixModuleEnabled: false });
-        setNetflixStatus({ enabled: false, hasPermission: false, registered: false });
+        setNetflixStatus((prev) => ({
+          enabled: false,
+          hasPermission: prev?.hasPermission ?? true,
+          registered: false
+        }));
       }
     } catch (err: unknown) {
       setNetflixError(err instanceof Error ? err.message : 'Ошибка переключения Netflix');

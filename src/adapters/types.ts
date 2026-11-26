@@ -2,6 +2,10 @@ import type { SubtitleCue, TrackMetadata } from '../core/types/subtitles';
 
 export interface CapturedTrackData {
   primaryCues?: SubtitleCue[];
+  /** Incremental live-cue additions/updates; avoids resending the full history. */
+  primaryCueUpdates?: SubtitleCue[];
+  /** Clear the accumulated live timeline before applying primaryCueUpdates. */
+  resetPrimaryCues?: boolean;
   translatedCues?: SubtitleCue[];
   primaryMeta?: TrackMetadata;
   translatedMeta?: TrackMetadata;

@@ -115,7 +115,7 @@ function fetchQuickTranslate(
     }
   })
     .then((res) => {
-      if (res.ok && !res.data.translationUnavailable && res.data.translation.trim()) {
+      if (res.ok && res.data.translation.trim()) {
         if (contentQuickTranslateCache.size > 200) {
           const firstKey = contentQuickTranslateCache.keys().next().value;
           if (firstKey) contentQuickTranslateCache.delete(firstKey);
@@ -521,10 +521,6 @@ export function WordPopup({
             </div>
           ) : quickError ? (
             <div className="text-xs text-rose-400">{quickError}</div>
-          ) : quickResult?.translationUnavailable ? (
-            <div className="text-xs text-amber-300">
-              Ошибка перевода ({quickResult.errorProvider ?? 'Неизвестный сервис'})
-            </div>
           ) : quickResult ? (
             <div>
               <div className="text-sm font-semibold" style={{ color: 'var(--ytai-accent)' }}>

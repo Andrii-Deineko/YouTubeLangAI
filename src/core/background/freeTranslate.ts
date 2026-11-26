@@ -185,7 +185,7 @@ async function fetchGoogleDict(
   sl: string,
   tl: string,
   signal?: AbortSignal
-): Promise<string[]> {
+): Promise<Array<string | null>> {
   if (isPaused(dictPausedUntil)) throw new Error('Google Dict cooldown');
   const params = new URLSearchParams({
     client: 'dict-chrome-ex',
@@ -200,20 +200,17 @@ async function fetchGoogleDict(
   }
   if (!res.ok) throw new Error(`Google Dict HTTP ${res.status}`);
   const raw: unknown = await res.json();
-  if (!Array.isArray(raw) || raw.length !== texts.length) {
-    throw new Error('Invalid Google Dict response');
-  }
-  const translated = raw.map((item) =>
-    Array.isArray(item) && typeof item[0] === 'string'
-      ? item[0].trim()
-      : typeof item === 'string'
-        ? item.trim()
-        : ''
-  );
-  if (!translated.every(isValidTranslationText)) {
-    throw new Error('Invalid Google Dict translation');
-  }
-  return translated;
+  if (!Array.isArray(raw)) throw new Error('Invalid Google Dict response');
+  return texts.map((_, index) => {
+    const item = raw[index];
+    const translated =
+      Array.isArray(item) && typeof item[0] === 'string'
+        ? item[0].trim()
+        : typeof item === 'string'
+          ? item.trim()
+          : '';
+    return isValidTranslationText(translated) ? translated : null;
+  });
 }
 
 function mapDeepLLanguage(language: string, target: boolean): string | undefined {
@@ -232,7 +229,7 @@ async function fetchDeepL(
   tl: string,
   apiKey: string,
   signal?: AbortSignal
-): Promise<string[]> {
+): Promise<Array<string | null>> {
   if (isPaused(deepLPausedUntil)) throw new Error('DeepL cooldown');
   const cleanKey = apiKey.trim();
   if (!cleanKey) throw new Error('DeepL API key is not configured');
@@ -261,11 +258,11 @@ async function fetchDeepL(
   }
   if (!res.ok) throw new Error(`DeepL HTTP ${res.status}`);
   const raw = (await res.json()) as { translations?: Array<{ text?: string }> };
-  const translated = raw.translations?.map((item) => item.text?.trim() ?? '') ?? [];
-  if (translated.length !== texts.length || !translated.every(isValidTranslationText)) {
-    throw new Error('Invalid DeepL response');
-  }
-  return translated;
+  if (!Array.isArray(raw.translations)) throw new Error('Invalid DeepL response');
+  return texts.map((_, index) => {
+    const translated = raw.translations?.[index]?.text?.trim() ?? '';
+    return isValidTranslationText(translated) ? translated : null;
+  });
 }
 
 interface ProviderConfig {
@@ -291,10 +288,12 @@ export async function translateSingleText(params: {
   }
   if (params.provider === 'googleDict') {
     const [translation] = await fetchGoogleDict([clean], sl, tl);
+    if (!translation) throw new Error('Google Dict returned no translation');
     return { translation, alternatives: [] };
   }
   if (params.provider === 'deepl') {
     const [translation] = await fetchDeepL([clean], sl, tl, params.deeplApiKey ?? '');
+    if (!translation) throw new Error('DeepL returned no translation');
     return { translation, alternatives: [] };
   }
 
@@ -358,23 +357,51 @@ async function translateBatch(
       120,
       signal
     );
-    return { map, failed: Object.keys(map).length === 0 };
+    const skipped = texts.filter((text) => !map[text]);
+    return { map, failed: isPaused(gtxPausedUntil), skipped };
   }
 
   if (config.provider === 'googleDict' || config.provider === 'deepl') {
     const map: Record<string, string> = {};
+    const skipped: string[] = [];
+    let missing = [...texts];
     try {
       const translated =
         config.provider === 'googleDict'
           ? await fetchGoogleDict(texts, sl, tl, signal)
           : await fetchDeepL(texts, sl, tl, config.deeplApiKey ?? '', signal);
       texts.forEach((text, index) => {
-        if (isValidTranslationText(translated[index])) map[text] = translated[index];
+        const result = translated[index];
+        if (isValidTranslationText(result)) map[text] = result;
       });
+      missing = texts.filter((text) => !map[text]);
     } catch (error) {
-      if ((error as Error)?.name === 'AbortError') return { map, failed: false };
+      if ((error as Error)?.name === 'AbortError') return { map, failed: false, skipped };
+      if (isPaused(providerPauseUntil(config.provider))) {
+        return { map, failed: true, skipped };
+      }
     }
-    return { map, failed: Object.keys(map).length === 0 };
+
+    // Keep valid batch results and retry only the missing entries. A single
+    // untranslatable sound marker must not discard the rest of the batch.
+    for (const text of missing) {
+      if (signal?.aborted) return { map, failed: false, skipped };
+      try {
+        const [result] =
+          config.provider === 'googleDict'
+            ? await fetchGoogleDict([text], sl, tl, signal)
+            : await fetchDeepL([text], sl, tl, config.deeplApiKey ?? '', signal);
+        if (isValidTranslationText(result)) map[text] = result;
+        else skipped.push(text);
+      } catch (error) {
+        if ((error as Error)?.name === 'AbortError') return { map, failed: false, skipped };
+        if (isPaused(providerPauseUntil(config.provider))) {
+          return { map, failed: true, skipped };
+        }
+        skipped.push(text);
+      }
+    }
+    return { map, failed: false, skipped };
   }
 
   const map: Record<string, string> = {};
@@ -420,7 +447,8 @@ async function translateBatch(
     }
   }
 
-  return { map, failed: Object.keys(map).length === 0 };
+  const skipped = texts.filter((text) => !map[text]);
+  return { map, failed: isPaused(mmPausedUntil), skipped };
 }
 
 function providerPauseUntil(provider: TranslationProvider): number {
@@ -435,15 +463,21 @@ interface JobState {
   cache: Record<string, string>;
   controller: AbortController;
   onProgress?: ProgressFn;
+  skipped: Set<string>;
 }
 
 const jobs = new Map<string, JobState>();
 
-function takeBatchTexts(cues: CueItem[], cache: Record<string, string>, maxCues: number): string[] {
+function takeBatchTexts(
+  cues: CueItem[],
+  cache: Record<string, string>,
+  skipped: Set<string>,
+  maxCues: number
+): string[] {
   const out: string[] = [];
   for (const cue of cues) {
     const norm = sanitize(cue.text);
-    if (!norm || cache[norm] || out.includes(norm)) continue;
+    if (!norm || cache[norm] || skipped.has(norm) || out.includes(norm)) continue;
     const candidate = [...out, norm].join(DELIM);
     if (out.length > 0 && (out.length >= maxCues || candidate.length > GTX_MAX_CHARS || encodeURIComponent(candidate).length > 3600)) break;
     out.push(norm);
@@ -514,8 +548,15 @@ export async function translateCueBatch(params: {
     job.cache = { ...stored, ...job.cache };
     job.controller = new AbortController();
     job.onProgress = onBatchProgress ?? job.onProgress;
+    if (forceRetry) job.skipped.clear();
   } else {
-    job = { version: 1, cache: { ...stored }, controller: new AbortController(), onProgress: onBatchProgress };
+    job = {
+      version: 1,
+      cache: { ...stored },
+      controller: new AbortController(),
+      onProgress: onBatchProgress,
+      skipped: new Set<string>()
+    };
     jobs.set(key, job);
   }
 
@@ -532,13 +573,19 @@ export async function translateCueBatch(params: {
       );
       return 'cooldown';
     }
-    const { map, failed } = await translateBatch(texts, sl, tl, providerConfig, signal);
+    const { map, failed, skipped } = await translateBatch(
+      texts,
+      sl,
+      tl,
+      providerConfig,
+      signal
+    );
     if (signal.aborted || job!.version !== version) return 'aborted';
+    for (const text of skipped) job!.skipped.add(text);
     if (Object.keys(map).length > 0) {
       Object.assign(job!.cache, map);
       void saveCachedCueTranslations(videoId, tl, map, provider);
       if (emitNewOnly) job!.onProgress?.(mapCues(cues, map), { state: 'translating' });
-      return 'ok';
     }
     if (failed) {
       job!.onProgress?.(
@@ -550,7 +597,12 @@ export async function translateCueBatch(params: {
     return 'ok';
   };
 
-  const hotTexts = takeBatchTexts(cues.slice(curIdx, curIdx + HOT_AHEAD + 1), job.cache, HOT_AHEAD + 1);
+  const hotTexts = takeBatchTexts(
+    cues.slice(curIdx, curIdx + HOT_AHEAD + 1),
+    job.cache,
+    job.skipped,
+    HOT_AHEAD + 1
+  );
   if (hotTexts.length > 0) {
     const res = await runStep(hotTexts, false);
     if (res === 'cooldown') {
@@ -560,9 +612,13 @@ export async function translateCueBatch(params: {
   }
 
   const translated = mapCues(cues, job.cache);
-  if (!cues.some((c) => sanitize(c.text) && !job!.cache[sanitize(c.text)])) {
+  if (
+    !cues.some((c) => {
+      const text = sanitize(c.text);
+      return text && !job!.cache[text] && !job!.skipped.has(text);
+    })
+  ) {
     job.onProgress?.(translated, { state: 'idle' });
-    jobs.delete(key);
     return { translations: translated, status: { state: 'idle' } };
   }
 
@@ -571,7 +627,7 @@ export async function translateCueBatch(params: {
   void (async () => {
     const ordered = [...cues.slice(curIdx + HOT_AHEAD + 1), ...cues.slice(0, curIdx).reverse()];
     while (!signal.aborted && job!.version === version) {
-      const batch = takeBatchTexts(ordered, job!.cache, BG_BATCH);
+      const batch = takeBatchTexts(ordered, job!.cache, job!.skipped, BG_BATCH);
       if (!batch.length) {
         job!.onProgress?.([], { state: 'idle' });
         break;
@@ -580,7 +636,6 @@ export async function translateCueBatch(params: {
       if (signal.aborted || job!.version !== version) break;
       if ((await runStep(batch, true)) !== 'ok') break;
     }
-    if (job!.version === version) jobs.delete(key);
   })();
 
   return { translations: translated, status: { state: 'translating' } };

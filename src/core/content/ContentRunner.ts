@@ -186,22 +186,37 @@ export class ContentRunner {
   }
 
   private applyTrackData(data: CapturedTrackData): void {
-    if (data.primaryCues) {
+    const hasPrimaryData = Boolean(data.primaryCues || data.primaryCueUpdates);
+    if (hasPrimaryData) {
       const prevVid = this.trackMeta?.videoId;
       const nextVid = data.primaryMeta?.videoId;
       if (prevVid && nextVid && prevVid !== nextVid) this.cancelBackgroundTranslation(prevVid);
       if (!prevVid || prevVid !== nextVid) {
         this.hasNativeTranslatedTrack = false;
+        this.primaryEngine.clear();
         this.translatedEngine.clear();
         this.resetTranslationState(false);
       }
-      const preserved = this.primaryEngine
-        .getCues()
-        .filter((cue) => isValidTranslationText(cue.translation))
-        .map((cue) => ({ id: cue.id, text: cue.translation ?? '' }));
-      this.primaryEngine.loadCues(data.primaryCues);
-      this.primaryEngine.applyTranslations(preserved);
-      this.trackMeta = data.primaryMeta ?? null;
+      if (data.resetPrimaryCues) {
+        this.cancelBackgroundTranslation(nextVid || prevVid);
+        this.primaryEngine.clear();
+        this.translatedEngine.clear();
+        this.resetTranslationState(false);
+      }
+      if (data.primaryCues) {
+        const preserved = this.primaryEngine
+          .getCues()
+          .filter((cue) => isValidTranslationText(cue.translation))
+          .map((cue) => ({ id: cue.id, text: cue.translation ?? '' }));
+        this.primaryEngine.loadCues(
+          data.primaryCues,
+          this.adapter.supportsCueSeeking !== false
+        );
+        this.primaryEngine.applyTranslations(preserved);
+      } else if (data.primaryCueUpdates) {
+        this.primaryEngine.upsertCues(data.primaryCueUpdates, false);
+      }
+      this.trackMeta = data.primaryMeta ?? this.trackMeta;
       this.activePrimaryCue = this.primaryEngine.findActiveCue(
         this.videoController?.getCurrentTime() ?? 0
       );
@@ -215,7 +230,7 @@ export class ContentRunner {
       this.activeTranslatedCue = this.translatedEngine.findActiveCue(
         this.videoController?.getCurrentTime() ?? 0
       );
-    } else if (data.primaryCues) {
+    } else if (hasPrimaryData) {
       this.translatedEngine.syncGeneratedCueTimings(this.primaryEngine.getCues());
     }
     if (data.rateLimitedUntil !== undefined) this.captionRateLimitedUntil = data.rateLimitedUntil;
@@ -849,11 +864,17 @@ export class ContentRunner {
       return;
     }
 
+    const requestCues =
+      this.adapter.supportsCueSeeking === false
+        ? primaryCues.filter((cue) => !isValidTranslationText(cue.translation)).slice(-4)
+        : primaryCues;
+    if (requestCues.length === 0) return;
+
     const request: RuntimeRequest = {
       type: 'FREE_TRANSLATE_CUES',
       payload: {
         videoId: this.trackMeta?.videoId || window.location.hostname,
-        cues: primaryCues.map((c) => ({
+        cues: requestCues.map((c) => ({
           id: c.id,
           text: c.text,
           startTime: c.startTime,

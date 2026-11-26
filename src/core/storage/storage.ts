@@ -299,10 +299,32 @@ export function mergeSettings(
     ankiDeckName,
     ankiConnectUrl,
     llm,
+    // Keep the user's choice as-is. Translation providers are switched only
+    // manually through the settings UI; request failures must not silently
+    // change the selected provider.
+    translationProvider:
+      raw?.translationProvider === 'mymemory' ||
+      raw?.translationProvider === 'google' ||
+      raw?.translationProvider === 'googleDict' ||
+      raw?.translationProvider === 'deepl'
+        ? raw.translationProvider
+        : DEFAULT_SETTINGS.translationProvider,
+    myMemoryEmail:
+      typeof raw?.myMemoryEmail === 'string'
+        ? raw.myMemoryEmail.trim()
+        : DEFAULT_SETTINGS.myMemoryEmail,
+    deeplApiKey:
+      typeof raw?.deeplApiKey === 'string'
+        ? raw.deeplApiKey.trim()
+        : DEFAULT_SETTINGS.deeplApiKey,
     cinemaModuleEnabled:
       typeof raw?.cinemaModuleEnabled === 'boolean'
         ? raw.cinemaModuleEnabled
         : DEFAULT_SETTINGS.cinemaModuleEnabled,
+    netflixModuleEnabled:
+      typeof raw?.netflixModuleEnabled === 'boolean'
+        ? raw.netflixModuleEnabled
+        : DEFAULT_SETTINGS.netflixModuleEnabled,
     customMirrors: Array.isArray(raw?.customMirrors) ? raw.customMirrors : [],
     blacklistedDomains: Array.isArray(raw?.blacklistedDomains)
       ? raw.blacklistedDomains

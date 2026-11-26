@@ -19,10 +19,15 @@ import {
 } from './llm';
 import {
   disableCinemaModule,
+  disableNetflixModule,
   hasCinemaPermissions,
+  hasNetflixPermissions,
   isCinemaScriptRegistered,
+  isNetflixScriptRegistered,
   registerCinemaScripts,
-  syncCinemaModuleState
+  registerNetflixScripts,
+  syncCinemaModuleState,
+  syncNetflixModuleState
 } from './moduleManager';
 import { getSettings } from '../storage/storage';
 import type { RuntimeRequest, RuntimeResponse } from '../types/messages';
@@ -64,7 +69,12 @@ async function handleQuickTranslate(
 ): Promise<QuickTranslationResult> {
   const cleanText = text.trim();
   const sl = sourceLang && sourceLang !== 'unknown' ? sourceLang : 'auto';
-  const cacheKey = buildTranslationCacheKey(sl, nativeLang, cleanText);
+  const settings = await getSettings();
+  const cacheKey = buildTranslationCacheKey(
+    `${settings.translationProvider}:${sl}`,
+    nativeLang,
+    cleanText
+  );
 
   const cached = await getCachedTranslation(cacheKey);
   if (cached && isValidTranslationText(cached.translation)) {
@@ -81,7 +91,10 @@ async function handleQuickTranslate(
       text: cleanText,
       sourceLang: sl,
       targetLang: nativeLang,
-      includeDictionary: true
+      includeDictionary: true,
+      provider: settings.translationProvider,
+      myMemoryEmail: settings.myMemoryEmail,
+      deeplApiKey: settings.deeplApiKey
     });
     if (!isValidTranslationText(parsed.translation)) {
       throw new Error('Translation unavailable');
@@ -171,11 +184,15 @@ async function processMessage(
     switch (message.type) {
       case 'FREE_TRANSLATE_CUES': {
         const tabId = sender.tab?.id;
+        const settings = await getSettings();
         const result = await translateCueBatch({
           videoId: message.payload.videoId,
           cues: message.payload.cues,
           sourceLang: message.payload.sourceLang,
           targetLang: message.payload.targetLang,
+          provider: settings.translationProvider,
+          myMemoryEmail: settings.myMemoryEmail,
+          deeplApiKey: settings.deeplApiKey,
           priorityTime: message.payload.priorityTime,
           forceRetry: message.payload.forceRetry,
           onBatchProgress: (batchTranslations, status) => {
@@ -305,6 +322,26 @@ async function processMessage(
           }
         };
       }
+      case 'ENABLE_NETFLIX_MODULE': {
+        const result = await registerNetflixScripts();
+        return result.success
+          ? { ok: true, data: result }
+          : { ok: false, error: result.error || 'Failed to register Netflix script' };
+      }
+      case 'DISABLE_NETFLIX_MODULE': {
+        return { ok: true, data: await disableNetflixModule() };
+      }
+      case 'GET_NETFLIX_MODULE_STATUS': {
+        const settings = await getSettings();
+        return {
+          ok: true,
+          data: {
+            enabled: settings.netflixModuleEnabled,
+            hasPermission: await hasNetflixPermissions(),
+            registered: await isNetflixScriptRegistered()
+          }
+        };
+      }
       default:
         return { ok: false, error: 'Unsupported message type' };
     }
@@ -318,15 +355,18 @@ async function processMessage(
 
 chrome.runtime.onInstalled.addListener(() => {
   void syncCinemaModuleState();
+  void syncNetflixModuleState();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   void syncCinemaModuleState();
+  void syncNetflixModuleState();
 });
 
 if (chrome.permissions?.onRemoved) {
   chrome.permissions.onRemoved.addListener(() => {
     void syncCinemaModuleState();
+    void syncNetflixModuleState();
   });
 }
 

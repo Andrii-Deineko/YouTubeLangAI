@@ -14,6 +14,7 @@ export interface ShadowUIState {
   cueCount: number;
   captionRateLimitedUntil?: number;
   translationStatus?: TranslationRuntimeStatus;
+  supportsCueSeeking?: boolean;
   primaryCue: SubtitleCue | null;
   translatedCue: SubtitleCue | null;
   altPressed: boolean;
@@ -49,6 +50,7 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
     cueCount,
     captionRateLimitedUntil,
     translationStatus,
+    supportsCueSeeking,
     primaryCue,
     translatedCue,
     altPressed,
@@ -77,6 +79,7 @@ function ShadowHUD({ state }: { state: ShadowUIState }): ReactNode {
         cueCount={cueCount}
         captionRateLimitedUntil={captionRateLimitedUntil}
         translationStatus={translationStatus}
+        supportsCueSeeking={supportsCueSeeking}
         altPressed={altPressed}
         hasActivePopup={Boolean(selectedTarget || popupElement)}
         onUpdateSettings={onUpdateSettings}

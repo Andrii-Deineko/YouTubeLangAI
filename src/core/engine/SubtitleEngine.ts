@@ -35,17 +35,64 @@ export class SubtitleEngine {
     return this.cues;
   }
 
-  public loadCues(cues: SubtitleCue[]): SubtitleCue[] {
+  public loadCues(cues: SubtitleCue[], splitLong = true): SubtitleCue[] {
     this.isAsrTrack = false;
     const sorted = cues
       .filter((c) => c && typeof c.startTime === 'number' && typeof c.endTime === 'number' && c.text)
       .sort((a, b) => a.startTime - b.startTime);
-    this.cues = splitLongCues(sorted).map((c, idx) => ({
+    const prepared = splitLong ? splitLongCues(sorted) : sorted;
+    this.cues = prepared.map((c, idx) => ({
       ...c,
       index: idx,
       tokens: c.tokens && c.tokens.length > 0 ? c.tokens : tokenizeCueText(c.id, c.text, c.startTime, c.endTime)
     }));
     return this.cues;
+  }
+
+  public upsertCues(cues: SubtitleCue[], splitLong = true): SubtitleCue[] {
+    if (!cues.length) return this.cues;
+    if (!splitLong) {
+      this.isAsrTrack = false;
+      for (const cue of cues) {
+        if (!cue?.text || typeof cue.startTime !== 'number' || typeof cue.endTime !== 'number') {
+          continue;
+        }
+        const lastIndex = this.cues.length - 1;
+        let index = lastIndex >= 0 && this.cues[lastIndex].id === cue.id ? lastIndex : -1;
+        if (index < 0 && lastIndex >= 0 && cue.startTime < this.cues[lastIndex].startTime) {
+          index = this.cues.findIndex((existing) => existing.id === cue.id);
+        }
+        const existing = index >= 0 ? this.cues[index] : undefined;
+        const prepared: SubtitleCue = {
+          ...cue,
+          index: index >= 0 ? index : this.cues.length,
+          ...(existing?.translation && !cue.translation
+            ? { translation: existing.translation }
+            : {}),
+          tokens:
+            cue.tokens && cue.tokens.length > 0
+              ? cue.tokens
+              : tokenizeCueText(cue.id, cue.text, cue.startTime, cue.endTime)
+        };
+        if (index >= 0) this.cues[index] = prepared;
+        else this.cues.push(prepared);
+      }
+      return this.cues;
+    }
+    const cueMap = new Map(this.cues.map((cue) => [cue.id, cue]));
+    for (const cue of cues) {
+      if (!cue?.text || typeof cue.startTime !== 'number' || typeof cue.endTime !== 'number') {
+        continue;
+      }
+      const existing = cueMap.get(cue.id);
+      cueMap.set(cue.id, {
+        ...cue,
+        ...(existing?.translation && !cue.translation
+          ? { translation: existing.translation }
+          : {})
+      });
+    }
+    return this.loadCues(Array.from(cueMap.values()), splitLong);
   }
 
   public clear(): void {
@@ -131,6 +178,29 @@ export class SubtitleEngine {
     }
 
     this.cues = Array.from(existingMap.values()).sort((a, b) => a.startTime - b.startTime);
+  }
+
+  /** Keep generated Netflix translations aligned when a live cue is closed. */
+  public syncGeneratedCueTimings(primaryCues: SubtitleCue[]): void {
+    const primaryMap = new Map(primaryCues.map((cue) => [cue.id, cue]));
+    let changed = false;
+    const updated = this.cues.map((cue) => {
+      if (!cue.id.startsWith('tr-')) return cue;
+      const primary = primaryMap.get(cue.id.slice(3));
+      if (!primary) return cue;
+      if (cue.startTime === primary.startTime && cue.endTime === primary.endTime) return cue;
+      changed = true;
+      return { ...cue, startTime: primary.startTime, endTime: primary.endTime };
+    });
+    if (changed) this.cues = updated.sort((a, b) => a.startTime - b.startTime);
+  }
+
+  public getGeneratedCue(primaryId: string): SubtitleCue | null {
+    return this.cues.find((cue) => cue.id === `tr-${primaryId}`) ?? null;
+  }
+
+  public hasNativeCues(): boolean {
+    return this.cues.some((cue) => !cue.id.startsWith('tr-'));
   }
 
   /**

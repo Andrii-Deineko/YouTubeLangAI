@@ -125,14 +125,19 @@ const WordTokenItem = memo(function WordTokenItem({
 });
 
 function getPlayerContainer(node: HTMLElement | null): HTMLElement | null {
-  if (!node) {
-    return document.querySelector('#movie_player') ?? document.querySelector('.html5-video-player');
-  }
+  const root = node?.getRootNode();
+  const host = root instanceof ShadowRoot ? root.host : null;
+  const lightParent = host instanceof HTMLElement ? host.parentElement : null;
+  if (lightParent) return lightParent;
   return (
-    node.closest('#movie_player') ??
+    node?.closest('#movie_player') ??
     document.querySelector('#movie_player') ??
-    node.closest('.html5-video-player') ??
-    document.querySelector('.html5-video-player')
+    node?.closest('.html5-video-player') ??
+    document.querySelector('.html5-video-player') ??
+    node?.closest('.watch-video--player-view') ??
+    document.querySelector('.watch-video--player-view') ??
+    node?.closest('[data-uia="video-canvas"]') ??
+    document.querySelector('[data-uia="video-canvas"]')
   );
 }
 
@@ -759,7 +764,7 @@ export function SubtitleOverlay({
   }, [primaryCue, selectedTarget, handleTokenClick, handleTokenEnter]);
 
   const hasCue = Boolean(primaryCue || translatedCue);
-  if (!hasCue && !boxFixed) return null;
+  if (!hasCue && !boxFixed && !isDragging && !isResizing) return null;
 
   const defaultFixedSize = DEFAULT_SUBTITLE_BOX_SIZE;
   const effectiveWidth = boxSize?.width ?? defaultFixedSize.width;

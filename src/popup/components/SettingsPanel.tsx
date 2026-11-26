@@ -31,6 +31,8 @@ import type {
   CinemaModuleStatusResponse,
   FetchModelsResponse,
   LLMTestResponse,
+  NetflixModuleStatus,
+  NetflixModuleStatusResponse,
   RuntimeRequest
 } from '../../core/types/messages';
 import {
@@ -177,6 +179,9 @@ export function SettingsPanel({
   onUpdateSettings
 }: SettingsPanelProps): ReactElement {
   const [showKey, setShowKey] = useState(false);
+  const [showDeepLKey, setShowDeepLKey] = useState(false);
+  const [deepLKeyDraft, setDeepLKeyDraft] = useState(settings.deeplApiKey);
+  const [myMemoryEmailDraft, setMyMemoryEmailDraft] = useState(settings.myMemoryEmail);
   const [testingAnki, setTestingAnki] = useState(false);
   const [ankiStatus, setAnkiStatus] = useState<{
     ok: boolean;
@@ -195,6 +200,7 @@ export function SettingsPanel({
   const [cacheCleared, setCacheCleared] = useState(false);
 
   const [cinemaStatus, setCinemaStatus] = useState<CinemaModuleStatus | null>(null);
+  const [netflixStatus, setNetflixStatus] = useState<NetflixModuleStatus | null>(null);
   const [currentSiteHostname, setCurrentSiteHostname] = useState<string>('');
   const [isCurrentSiteCinema, setIsCurrentSiteCinema] = useState(false);
   const [hasCurrentSitePermission, setHasCurrentSitePermission] = useState(false);
@@ -202,6 +208,14 @@ export function SettingsPanel({
   const [recordingAction, setRecordingAction] = useState<KeybindAction | null>(null);
   const pendingModifierRef = useRef<string | null>(null);
   const currentKeybindings = settings.keybindings ?? DEFAULT_KEYBINDINGS;
+
+  useEffect(() => {
+    setDeepLKeyDraft(settings.deeplApiKey);
+  }, [settings.deeplApiKey]);
+
+  useEffect(() => {
+    setMyMemoryEmailDraft(settings.myMemoryEmail);
+  }, [settings.myMemoryEmail]);
 
   useEffect(() => {
     if (!recordingAction) return;
@@ -276,6 +290,8 @@ export function SettingsPanel({
   }, [recordingAction, currentKeybindings, onUpdateSettings]);
   const [enablingCinema, setEnablingCinema] = useState(false);
   const [cinemaError, setCinemaError] = useState<string | null>(null);
+  const [enablingNetflix, setEnablingNetflix] = useState(false);
+  const [netflixError, setNetflixError] = useState<string | null>(null);
 
   const lastFetchedSignatureRef = useRef<string>('');
   const latestFetchRequestIdRef = useRef(0);
@@ -450,6 +466,13 @@ export function SettingsPanel({
           }
         }
       );
+      chrome.runtime.sendMessage(
+        { type: 'GET_NETFLIX_MODULE_STATUS' },
+        (res: NetflixModuleStatusResponse | undefined) => {
+          if (!active) return;
+          if (res && res.ok) setNetflixStatus(res.data);
+        }
+      );
     }
 
     if (chrome.tabs?.query) {
@@ -461,7 +484,8 @@ export function SettingsPanel({
             const host = urlObj.hostname;
             setCurrentSiteHostname(host);
             const isYt = host.includes('youtube.com');
-            if (!isYt) {
+            const isNetflix = host === 'netflix.com' || host.endsWith('.netflix.com');
+            if (!isYt && !isNetflix) {
               setIsCurrentSiteCinema(true);
               if (chrome.permissions?.contains) {
                 const cleanHost = host.replace(/^www\./, '');
@@ -535,6 +559,68 @@ export function SettingsPanel({
       setCinemaError(err instanceof Error ? err.message : 'Ошибка переключения модуля кинотеатров');
     } finally {
       setEnablingCinema(false);
+    }
+  };
+
+  const handleToggleNetflix = async (checked: boolean): Promise<void> => {
+    setEnablingNetflix(true);
+    setNetflixError(null);
+    try {
+      if (checked) {
+        const origins = ['https://*.netflix.com/*', 'https://netflix.com/*'];
+        const granted = chrome.permissions?.request
+          ? await chrome.permissions.request({ origins })
+          : true;
+        if (!granted) {
+          setNetflixError('Для работы Netflix требуется разрешение на netflix.com');
+          return;
+        }
+
+        await new Promise<void>((resolve, reject) => {
+          chrome.runtime.sendMessage({ type: 'ENABLE_NETFLIX_MODULE' }, (res) => {
+            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+            else if (res && !res.ok) reject(new Error(res.error || 'Не удалось включить Netflix'));
+            else resolve();
+          });
+        });
+        await onUpdateSettings({ netflixModuleEnabled: true });
+        setNetflixStatus({ enabled: true, hasPermission: true, registered: true });
+
+        if (chrome.tabs?.query && chrome.scripting?.executeScript) {
+          const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (tab?.id && tab.url) {
+            const hostname = new URL(tab.url).hostname;
+            if (hostname === 'netflix.com' || hostname.endsWith('.netflix.com')) {
+              try {
+                await chrome.scripting.executeScript({
+                  target: { tabId: tab.id },
+                  world: 'ISOLATED',
+                  files: ['assets/content-netflix.js']
+                });
+              } catch (injectErr) {
+                console.warn('[Popup] Netflix direct injection notice:', injectErr);
+              }
+            }
+          }
+        }
+      } else {
+        await new Promise<void>((resolve, reject) => {
+          chrome.runtime.sendMessage({ type: 'DISABLE_NETFLIX_MODULE' }, () => {
+            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+            else resolve();
+          });
+        });
+        await onUpdateSettings({ netflixModuleEnabled: false });
+        setNetflixStatus((prev) => ({
+          enabled: false,
+          hasPermission: prev?.hasPermission ?? true,
+          registered: false
+        }));
+      }
+    } catch (err: unknown) {
+      setNetflixError(err instanceof Error ? err.message : 'Ошибка переключения Netflix');
+    } finally {
+      setEnablingNetflix(false);
     }
   };
 
@@ -641,6 +727,54 @@ export function SettingsPanel({
               </p>
             </div>
           </div>
+        </div>
+
+        {/* Netflix Module Card */}
+        <div className="space-y-2 rounded-xl border border-red-500/15 bg-slate-900/60 p-2.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-red-500/30 bg-red-600/20 text-lg font-black text-red-500">
+                N
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-white">Netflix</span>
+                  {settings.netflixModuleEnabled ? (
+                    <span
+                      title={netflixStatus?.registered ? 'Netflix-скрипт зарегистрирован' : undefined}
+                      className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400"
+                    >
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+                      Активен
+                    </span>
+                  ) : (
+                    <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400">
+                      Выключен
+                    </span>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  Субтитры и перевод на netflix.com
+                </p>
+              </div>
+            </div>
+            <label className="relative inline-flex cursor-pointer items-center">
+              <input
+                type="checkbox"
+                checked={settings.netflixModuleEnabled ?? false}
+                disabled={enablingNetflix}
+                onChange={(event) => void handleToggleNetflix(event.target.checked)}
+                className="peer sr-only"
+              />
+              <div className="peer h-5 w-9 rounded-full bg-slate-700 after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:bg-white after:transition-all after:content-[''] peer-checked:bg-red-600 peer-checked:after:translate-x-full peer-focus:outline-none" />
+            </label>
+          </div>
+          {netflixError && (
+            <div className="flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-[10px] text-rose-300">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              <span>{netflixError}</span>
+            </div>
+          )}
         </div>
 
         {/* Cinema Module Card */}
@@ -1214,6 +1348,93 @@ export function SettingsPanel({
             );
           })}
         </div>
+      </section>
+
+      {/* Subtitle translation provider */}
+      <section
+        className="space-y-3 rounded-2xl border p-3.5 transition-colors"
+        style={{
+          backgroundColor: 'var(--ytai-surface)',
+          borderColor: 'var(--ytai-border)'
+        }}
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-white">Перевод субтитров</h3>
+            <p className="text-[10px] text-slate-400">Общий провайдер для YouTube и Netflix</p>
+          </div>
+          <div className="flex rounded-lg border border-white/10 bg-slate-950/60 p-0.5">
+            {(['mymemory', 'googleDict', 'deepl', 'google'] as const).map((provider) => (
+              <button
+                key={provider}
+                type="button"
+                onClick={() => void onUpdateSettings({ translationProvider: provider })}
+                className={`rounded-md px-2.5 py-1 text-[10px] font-semibold transition ${
+                  settings.translationProvider === provider
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {provider === 'mymemory'
+                  ? 'MyMemory'
+                  : provider === 'googleDict'
+                    ? 'Google Dict'
+                    : provider === 'deepl'
+                      ? 'DeepL'
+                      : 'Google'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {settings.translationProvider === 'mymemory' && (
+          <div>
+            <label className="mb-1 block text-[11px] text-slate-400">
+              Контактный email — необязательно
+            </label>
+            <input
+              type="email"
+              value={myMemoryEmailDraft}
+              onChange={(event) => setMyMemoryEmailDraft(event.target.value)}
+              onBlur={() => {
+                if (myMemoryEmailDraft.trim() !== settings.myMemoryEmail) {
+                  void onUpdateSettings({ myMemoryEmail: myMemoryEmailDraft.trim() });
+                }
+              }}
+              placeholder="email для лимита 50 000 символов/день"
+              className="w-full rounded-xl border border-white/10 bg-slate-950/80 px-3 py-2 text-xs text-white outline-none transition focus:border-indigo-500"
+            />
+          </div>
+        )}
+
+        {settings.translationProvider === 'deepl' && (
+          <div>
+            <label className="mb-1 block text-[11px] text-slate-400">DeepL API Key</label>
+            <div className="relative">
+              <input
+                type={showDeepLKey ? 'text' : 'password'}
+                value={deepLKeyDraft}
+                onChange={(event) => setDeepLKeyDraft(event.target.value)}
+                onBlur={() => {
+                  if (deepLKeyDraft.trim() !== settings.deeplApiKey) {
+                    void onUpdateSettings({ deeplApiKey: deepLKeyDraft.trim() });
+                  }
+                }}
+                placeholder="Введите ключ DeepL API Free"
+                className="w-full rounded-xl border border-white/10 bg-slate-950/80 px-3 py-2 pr-9 text-xs text-white outline-none transition focus:border-indigo-500"
+              />
+              <button
+                type="button"
+                onClick={() => setShowDeepLKey((value) => !value)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:text-white"
+                title={showDeepLKey ? 'Скрыть ключ' : 'Показать ключ'}
+              >
+                {showDeepLKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+          </div>
+        )}
+
       </section>
 
       {/* LLM BYOK Configuration */}

@@ -140,6 +140,15 @@ export type RuntimeRequest =
     }
   | {
       type: 'GET_CINEMA_MODULE_STATUS';
+    }
+  | {
+      type: 'ENABLE_NETFLIX_MODULE';
+    }
+  | {
+      type: 'DISABLE_NETFLIX_MODULE';
+    }
+  | {
+      type: 'GET_NETFLIX_MODULE_STATUS';
     };
 
 export interface CinemaModuleStatus {
@@ -174,3 +183,5 @@ export type FreeTranslateCuesResponse = RuntimeResponse<{
   status: TranslationRuntimeStatus;
 }>;
 export type CinemaModuleStatusResponse = RuntimeResponse<CinemaModuleStatus>;
+export type NetflixModuleStatus = CinemaModuleStatus;
+export type NetflixModuleStatusResponse = RuntimeResponse<NetflixModuleStatus>;

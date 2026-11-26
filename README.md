@@ -54,7 +54,7 @@ flowchart LR
   C -->|chrome.runtime.sendMessage| B["Background Service Worker (IndexedDB Cache)"]
   B -->|POST /chat/completions & GET /models| L["LLM API (BYOK)"]
   B -->|POST 127.0.0.1:8765| A["AnkiConnect"]
-  B -->|GET translate_a/single| T["Google Translate"]
+  B -->|GET /get?langpair=...| T["MyMemory (бесплатный, без ключа)"]
 ```
 
 ---
@@ -92,6 +92,18 @@ Open the extension popup → **Settings → AI Provider (BYOK)**, enter your API
 | **Ollama (Local)** | `http://127.0.0.1:11434/v1` |
 
 Use the **Проверить подключение LLM** button in Settings to verify endpoint resolution and API connectivity before watching.
+
+### Translation Provider
+
+Переводчик выбирается вручную в настройках расширения. Расширение не отправляет текст другим сервисам при ошибке выбранного провайдера:
+
+- Провайдер по умолчанию: **Google Dict** (`https://clients5.google.com/translate_a/t`) — бесплатный endpoint без ключа, который поддерживает пакетный перевод реплик.
+- Лимит MyMemory: 5 000 символов/сутки без email, до 50 000 с указанием контактного email.
+- Google GTX (`translate.googleapis.com`) допускает примерно 1 запрос/сек — запросы идут через очередь с интервалом 1,2 с, а после HTTP 429 временно останавливаются.
+- Провайдер выбирается в `Настройки → Перевод субтитров`: **MyMemory / Google Dict / DeepL / Google**.
+- Если выбранный провайдер не отвечает или его квота исчерпана, показывается `Ошибка перевода (...)`. Переключить сервис можно только вручную.
+- Неудачные и пустые результаты не сохраняются в кэш.
+- host_permissions для всех endpoint'ов уже прописаны в манифесте.
 
 ### AnkiConnect
 

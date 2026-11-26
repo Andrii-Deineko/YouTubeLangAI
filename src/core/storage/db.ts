@@ -141,12 +141,16 @@ export async function setCachedTranslation(
 
 export async function getCachedCueTranslations(
   videoId: string,
-  targetLang: string
+  targetLang: string,
+  provider = 'google'
 ): Promise<Record<string, string>> {
   if (!videoId || videoId === 'unknown' || !targetLang) return {};
   try {
     const db = await getDB();
-    const entry = await db.get('subtitles', `tr:${videoId}:${targetLang.toLowerCase()}`);
+    const entry = await db.get(
+      'subtitles',
+      `tr:${provider}:${videoId}:${targetLang.toLowerCase()}`
+    );
     if (!entry?.translations || Date.now() - entry.updatedAt > 30 * 24 * 60 * 60 * 1000) return {};
     return Object.fromEntries(
       Object.entries(entry.translations).filter(([, tr]) => isValidTranslationText(tr))
@@ -159,7 +163,8 @@ export async function getCachedCueTranslations(
 export async function saveCachedCueTranslations(
   videoId: string,
   targetLang: string,
-  updates: Record<string, string>
+  updates: Record<string, string>,
+  provider = 'google'
 ): Promise<void> {
   if (!videoId || videoId === 'unknown' || !targetLang) return;
   const clean = Object.fromEntries(
@@ -171,7 +176,7 @@ export async function saveCachedCueTranslations(
 
   try {
     const db = await getDB();
-    const key = `tr:${videoId}:${targetLang.toLowerCase()}`;
+    const key = `tr:${provider}:${videoId}:${targetLang.toLowerCase()}`;
     const existing = await db.get('subtitles', key);
     const merged: Record<string, string> = {};
     if (existing?.translations) {

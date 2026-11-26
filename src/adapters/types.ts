@@ -2,10 +2,17 @@ import type { SubtitleCue, TrackMetadata } from '../core/types/subtitles';
 
 export interface CapturedTrackData {
   primaryCues?: SubtitleCue[];
+  /** Incremental live-cue additions/updates; avoids resending the full history. */
+  primaryCueUpdates?: SubtitleCue[];
+  /** Clear the accumulated live timeline before applying primaryCueUpdates. */
+  resetPrimaryCues?: boolean;
   translatedCues?: SubtitleCue[];
   primaryMeta?: TrackMetadata;
   translatedMeta?: TrackMetadata;
   rateLimitedUntil?: number;
+  liveCueBoundary?: boolean;
+  /** Update cue timing/UI without starting another translation request. */
+  skipTranslation?: boolean;
 }
 
 export interface PlatformSessionCallbacks {
@@ -15,8 +22,9 @@ export interface PlatformSessionCallbacks {
 }
 
 export interface PlatformAdapter {
-  readonly id: 'youtube' | 'cinema';
+  readonly id: 'youtube' | 'cinema' | 'netflix';
   readonly name: string;
+  readonly supportsCueSeeking?: boolean;
 
   /**
    * Check if this adapter can run on the current page / frame.

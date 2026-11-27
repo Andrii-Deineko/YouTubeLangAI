@@ -1,0 +1,38 @@
+{
+  "name": "@langai/core",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./main-world": {
+      "types": "./src/content/mainWorldRunner.ts",
+      "default": "./src/content/mainWorldRunner.ts"
+    },
+    "./background": {
+      "types": "./src/background/service-worker.ts",
+      "default": "./src/background/service-worker.ts"
+    },
+    "./content": {
+      "types": "./src/content/ContentRunner.ts",
+      "default": "./src/content/ContentRunner.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@langai/contracts": "workspace:*",
+    "@langai/subtitle-kit": "workspace:*",
+    "@langai/translators": "workspace:*",
+    "@langai/storage": "workspace:*",
+    "@langai/ui": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

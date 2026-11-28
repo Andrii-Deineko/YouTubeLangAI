@@ -182,8 +182,12 @@ export function GeneralTab({
 
     try {
       if (checked) {
+        const serviceOrigins = [
+          ...svc.hostMatches,
+          ...(svc.playerIframeMatches ?? [])
+        ];
         const origins =
-          svc.hostMatches.length > 0 ? [...svc.hostMatches] : ['https://*/*', 'http://*/*'];
+          serviceOrigins.length > 0 ? Array.from(new Set(serviceOrigins)) : ['*://*/*'];
         const granted =
           typeof chrome !== 'undefined' && typeof chrome.permissions?.request === 'function'
             ? await chrome.permissions.request({ origins })

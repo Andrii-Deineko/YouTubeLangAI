@@ -101,7 +101,7 @@ function createExtensionManifest(): Record<string, unknown> {
       'https://api-free.deepl.com/*',
       'https://api.deepl.com/*'
     ],
-    optional_host_permissions: ['https://*/*', 'http://*/*']
+    optional_host_permissions: ['*://*/*']
   };
 }
 

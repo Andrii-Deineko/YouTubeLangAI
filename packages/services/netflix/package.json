@@ -1,0 +1,22 @@
+{
+  "name": "@langai/service-netflix",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@langai/contracts": "workspace:*",
+    "@langai/subtitle-kit": "workspace:*",
+    "@langai/players": "workspace:*"
+  }
+}

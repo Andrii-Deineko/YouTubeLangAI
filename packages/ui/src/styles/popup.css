@@ -1,0 +1,75 @@
+@import './themes.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  font-size: 16px;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  color-scheme: dark;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.ytai-input {
+  background-color: rgba(var(--ytai-bg-rgb), 0.85);
+}
+
+/* Hover-Marquee safety net for clipped button/tab/header labels */
+.ytai-marquee-wrap {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+.ytai-marquee-wrap.is-clipped {
+  -webkit-mask-image: linear-gradient(90deg, #000 0%, #000 84%, transparent 100%);
+  mask-image: linear-gradient(90deg, #000 0%, #000 84%, transparent 100%);
+}
+
+.ytai-marquee-btn:hover .ytai-marquee-wrap.is-clipped,
+.ytai-marquee-btn:focus-visible .ytai-marquee-wrap.is-clipped,
+.ytai-marquee-wrap.is-clipped:hover {
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 8%, #000 92%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, #000 8%, #000 92%, transparent 100%);
+}
+
+.ytai-marquee-track {
+  display: inline-block;
+  white-space: nowrap;
+  will-change: transform;
+  transition: transform 0.25s ease;
+}
+
+.ytai-marquee-btn:hover .ytai-marquee-wrap.is-clipped .ytai-marquee-track,
+.ytai-marquee-btn:focus-visible .ytai-marquee-wrap.is-clipped .ytai-marquee-track,
+.ytai-marquee-wrap.is-clipped:hover .ytai-marquee-track {
+  animation: ytai-hover-marquee var(--ytai-marquee-dur, 2.8s) ease-in-out infinite alternate;
+}
+
+@keyframes ytai-hover-marquee {
+  0%,
+  15% {
+    transform: translateX(0);
+  }
+  85%,
+  100% {
+    transform: translateX(var(--ytai-marquee-shift, -24px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ytai-marquee-btn:hover .ytai-marquee-wrap.is-clipped .ytai-marquee-track,
+  .ytai-marquee-btn:focus-visible .ytai-marquee-wrap.is-clipped .ytai-marquee-track,
+  .ytai-marquee-wrap.is-clipped:hover .ytai-marquee-track {
+    animation: none;
+  }
+}

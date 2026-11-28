@@ -1,0 +1,217 @@
+/* Single source of truth for all 6 theme CSS custom property blocks */
+
+/* Default / Midnight Glass Theme */
+:host,
+:root,
+[data-theme='midnight-glass'] {
+  --ytai-bg-rgb: 15, 17, 23;
+  --ytai-surface: rgba(30, 41, 59, 0.78);
+  --ytai-control-bg: rgba(255, 255, 255, 0.07);
+  --ytai-control-track: rgba(148, 163, 184, 0.3);
+  --ytai-text-primary: #f8fafc;
+  --ytai-text-secondary: #94a3b8;
+  --ytai-text-muted: #94a3b8;
+  --ytai-accent: #818cf8;
+  --ytai-accent-fg: #ffffff;
+  --ytai-accent-rgb: 129, 140, 248;
+  --ytai-border: rgba(255, 255, 255, 0.14);
+  --ytai-text-shadow: 0 0 2px #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 2px 4px rgba(0, 0, 0, 0.95);
+  --ytai-text-stroke: 1.5px #000000;
+  --ytai-backdrop-blur: 12px;
+}
+
+/* Cinema Minimal Theme */
+:host([data-theme='cinema-transparent']),
+[data-theme='cinema-transparent'] {
+  --ytai-bg-rgb: 10, 10, 10;
+  --ytai-surface: rgba(26, 23, 20, 0.9);
+  --ytai-control-bg: rgba(255, 255, 255, 0.08);
+  --ytai-control-track: rgba(255, 255, 255, 0.2);
+  --ytai-text-primary: #ffffff;
+  --ytai-text-secondary: #fde047;
+  --ytai-text-muted: #b8b2a6;
+  --ytai-accent: #f59e0b;
+  --ytai-accent-fg: #111827;
+  --ytai-accent-rgb: 245, 158, 11;
+  --ytai-border: rgba(245, 158, 11, 0.28);
+  --ytai-text-shadow: 0 0 3px #000, -1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000, 1.5px 1.5px 0 #000, 0 2px 6px #000;
+  --ytai-text-stroke: 1.8px #000000;
+  --ytai-backdrop-blur: 6px;
+}
+
+/* Nordic Frost Theme */
+:host([data-theme='nordic-frost']),
+[data-theme='nordic-frost'] {
+  --ytai-bg-rgb: 30, 36, 48;
+  --ytai-surface: rgba(46, 52, 64, 0.86);
+  --ytai-control-bg: rgba(136, 192, 208, 0.1);
+  --ytai-control-track: rgba(136, 192, 208, 0.28);
+  --ytai-text-primary: #eceff4;
+  --ytai-text-secondary: #88c0d0;
+  --ytai-text-muted: #93b4c5;
+  --ytai-accent: #5e81ac;
+  --ytai-accent-fg: #ffffff;
+  --ytai-accent-rgb: 94, 129, 172;
+  --ytai-border: rgba(136, 192, 208, 0.24);
+  --ytai-text-shadow: 0 0 2px #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 2px 4px rgba(0, 0, 0, 0.95);
+  --ytai-text-stroke: 1.5px #000000;
+  --ytai-backdrop-blur: 10px;
+}
+
+/* Warm Espresso Theme */
+:host([data-theme='warm-espresso']),
+[data-theme='warm-espresso'] {
+  --ytai-bg-rgb: 28, 25, 23;
+  --ytai-surface: rgba(44, 39, 36, 0.9);
+  --ytai-control-bg: rgba(245, 245, 244, 0.08);
+  --ytai-control-track: rgba(214, 211, 209, 0.24);
+  --ytai-text-primary: #f5f5f4;
+  --ytai-text-secondary: #d6d3d1;
+  --ytai-text-muted: #a8a29e;
+  --ytai-accent: #f97316;
+  --ytai-accent-fg: #1c1917;
+  --ytai-accent-rgb: 249, 115, 22;
+  --ytai-border: rgba(249, 115, 22, 0.24);
+  --ytai-text-shadow: 0 0 2px #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 2px 4px rgba(0, 0, 0, 0.95);
+  --ytai-text-stroke: 1.5px #000000;
+  --ytai-backdrop-blur: 10px;
+}
+
+/* Emerald Noir Theme */
+:host([data-theme='emerald-noir']),
+[data-theme='emerald-noir'] {
+  --ytai-bg-rgb: 8, 12, 10;
+  --ytai-surface: rgba(13, 38, 30, 0.72);
+  --ytai-control-bg: rgba(45, 138, 107, 0.1);
+  --ytai-control-track: rgba(122, 184, 159, 0.22);
+  --ytai-text-primary: #e6f4ee;
+  --ytai-text-secondary: #7ab89f;
+  --ytai-text-muted: #659b85;
+  --ytai-accent: #2d8a6b;
+  --ytai-accent-fg: #f0fdf4;
+  --ytai-accent-rgb: 45, 138, 107;
+  --ytai-border: rgba(62, 138, 112, 0.26);
+  --ytai-text-shadow: 0 0 2px #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 2px 4px rgba(0, 0, 0, 0.95);
+  --ytai-text-stroke: 1.6px #000000;
+  --ytai-backdrop-blur: 10px;
+}
+
+/* OLED Black Theme */
+:host([data-theme='oled-pure']),
+[data-theme='oled-pure'] {
+  --ytai-bg-rgb: 0, 0, 0;
+  --ytai-surface: rgba(18, 18, 20, 0.94);
+  --ytai-control-bg: rgba(214, 211, 203, 0.06);
+  --ytai-control-track: rgba(214, 211, 203, 0.16);
+  --ytai-text-primary: #f4f4f5;
+  --ytai-text-secondary: #a1a1aa;
+  --ytai-text-muted: #71717a;
+  --ytai-accent: #d6d3cb;
+  --ytai-accent-fg: #09090b;
+  --ytai-accent-rgb: 214, 211, 203;
+  --ytai-border: rgba(214, 211, 203, 0.14);
+  --ytai-text-shadow: 0 0 2px #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 2px 4px rgba(0, 0, 0, 0.95);
+  --ytai-text-stroke: 1.4px #000000;
+  --ytai-backdrop-blur: 8px;
+}
+
+/* Theme-aware range slider styling */
+input[type='range'].ytai-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--ytai-control-track);
+  accent-color: var(--ytai-accent);
+  height: 6px;
+  border-radius: 9999px;
+}
+
+input[type='range'].ytai-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: var(--ytai-accent);
+  border: 2px solid rgb(var(--ytai-bg-rgb));
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+
+input[type='range'].ytai-range::-webkit-slider-thumb:hover {
+  transform: scale(1.12);
+}
+
+input[type='range'].ytai-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: var(--ytai-accent);
+  border: 2px solid rgb(var(--ytai-bg-rgb));
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+
+/* Theme-aware interactive hover & focus utilities */
+.ytai-control-btn {
+  background-color: var(--ytai-control-bg);
+  color: var(--ytai-text-primary);
+}
+
+.ytai-control-btn:hover:not(:disabled) {
+  background-color: rgba(var(--ytai-accent-rgb), 0.18);
+}
+
+.ytai-ghost-btn {
+  color: var(--ytai-text-muted);
+}
+
+.ytai-ghost-btn:hover {
+  background-color: rgba(var(--ytai-accent-rgb), 0.15);
+  color: var(--ytai-text-primary);
+}
+
+.ytai-input {
+  background-color: var(--ytai-surface);
+  border-color: var(--ytai-border);
+  color: var(--ytai-text-primary);
+}
+
+.ytai-input::placeholder {
+  color: var(--ytai-text-muted);
+  opacity: 0.7;
+}
+
+.ytai-input:focus {
+  border-color: var(--ytai-accent);
+  outline: none;
+}
+
+/* Custom Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ytai-border) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--ytai-border);
+  border-radius: 9999px;
+  transition: background-color 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--ytai-text-secondary);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}

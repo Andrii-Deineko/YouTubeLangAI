@@ -1,0 +1,1 @@
+export { REGISTERED_SERVICES, SERVICE_DESCRIPTORS } from './registry';

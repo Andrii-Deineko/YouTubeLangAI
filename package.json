@@ -1,32 +1,33 @@
 {
-  "name": "yt-lang-ai",
+  "name": "yt-lang-ai-workspace",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
-  "description": "YouTube Language Learning Chrome Extension (MV3) with AI Context Analysis, Active Listening, FSRS & Anki Export",
+  "packageManager": "pnpm@10.34.9",
+  "description": "YouTube Lang AI — Modular Chrome Extension (MV3) with ServicePlugin × PlayerPlugin architecture",
   "scripts": {
-    "dev": "vite",
-    "build": "npm run clean && tsc --noEmit && vite build",
-    "clean": "node -e \"const fs = require('node:fs'); ['dist'].forEach(d => fs.rmSync(d, { recursive: true, force: true }));\"",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "idb": "^8.0.0",
-    "lucide-react": "^0.511.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "ts-fsrs": "^5.0.0"
+    "dev": "pnpm --filter @langai/extension dev",
+    "build": "pnpm --filter @langai/extension build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "lint": "eslint packages",
+    "clean": "node -e \"const fs = require('node:fs'); ['dist', 'packages/extension/dist'].forEach(d => fs.rmSync(d, { recursive: true, force: true }));\""
   },
   "devDependencies": {
-    "@crxjs/vite-plugin": "beta",
+    "@eslint/js": "^9.22.0",
     "@types/chrome": "^0.1.0",
+    "@types/node": "^22.13.10",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.22.0",
     "postcss": "^8.5.1",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
-    "vite": "^6.1.0"
+    "typescript-eslint": "^8.26.1",
+    "vite": "^6.1.0",
+    "vitest": "^3.0.8"
   }
 }
